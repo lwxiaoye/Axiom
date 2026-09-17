@@ -10,7 +10,7 @@ from app.services.agent_harness.model_usage_audit import ExternalAttribution
 from app.services.workflows.workflow_engine import NodeRun, RunContext, WorkflowEngine
 
 
-PRINCIPAL = AgentApiPrincipal("key-a", "app-a", "publisher-a", "qza_test")
+PRINCIPAL = AgentApiPrincipal("key-a", "app-a", "publisher-a", "axa_test")
 VERSION = SimpleNamespace(
     id="version-a",
     app_id="app-a",

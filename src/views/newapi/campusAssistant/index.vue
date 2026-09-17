@@ -45,7 +45,7 @@
             ref="skinFileInput"
             class="skin-file-input"
             type="file"
-            accept=".qzskin,.zip,application/zip"
+            accept=".axiomskin,.zip,application/zip"
             @change="onSkinFileChange"
           />
         </div>
@@ -383,8 +383,8 @@ async function onSkinFileChange(event: Event) {
   const file = input.files?.[0];
   input.value = '';
   if (!file) return;
-  if (!/\.(qzskin|zip)$/i.test(file.name)) {
-    skinErrorText.value = '请选择 .qzskin 皮肤包';
+  if (!/\.(axiomskin|zip)$/i.test(file.name)) {
+    skinErrorText.value = '请选择 .axiomskin 皮肤包';
     return;
   }
   importingSkin.value = true;

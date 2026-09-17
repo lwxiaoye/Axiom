@@ -107,7 +107,7 @@ export async function exportSubAgentSkin(record: PresentationPresetRecord): Prom
   link.href = url;
   link.download = downloadFilename(
     response.headers.get('content-disposition'),
-    `${skin.key}-${skin.version}.qzskin`,
+    `${skin.key}-${skin.version}.axiomskin`,
   );
   document.body.appendChild(link);
   link.click();

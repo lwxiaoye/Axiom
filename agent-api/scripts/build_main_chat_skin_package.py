@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and validate a portable `.qzskin` file from a skin source directory."""
+"""Build and validate a portable `.axiomskin` file from a skin source directory."""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ def main() -> int:
         description="把 manifest.json + assets/ 构建成可跨系统导入的主对话皮肤包",
     )
     parser.add_argument("source", type=Path, help="皮肤源码目录")
-    parser.add_argument("output", type=Path, help="输出 .qzskin 文件")
+    parser.add_argument("output", type=Path, help="输出 .axiomskin 文件")
     args = parser.parse_args()
 
     source = args.source.resolve()
     output = args.output.resolve()
-    if output.suffix.lower() != ".qzskin":
-        parser.error("输出文件必须使用 .qzskin 扩展名")
+    if output.suffix.lower() != ".axiomskin":
+        parser.error("输出文件必须使用 .axiomskin 扩展名")
     try:
         package = build_main_chat_skin_package_from_directory(source)
         parsed = parse_main_chat_skin_package(package)

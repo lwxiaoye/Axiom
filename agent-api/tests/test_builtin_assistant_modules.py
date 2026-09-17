@@ -244,7 +244,7 @@ async def test_real_acceptance_uses_module_policy_and_preserves_shared_job_path(
     ("PATCH", "/campus-assistant/admin/skins/mcs_1", {"json": {"name": "name"}}),
     ("DELETE", "/campus-assistant/admin/skins/mcs_1", {}),
     ("POST", "/campus-assistant/admin/skins/import", {
-        "files": {"file": ("skin.qzskin", b"invalid", "application/zip")},
+        "files": {"file": ("skin.axiomskin", b"invalid", "application/zip")},
     }),
 ])
 @pytest.mark.asyncio

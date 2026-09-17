@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a deterministic portable `.qzskin` for `/agent/run/:appId`."""
+"""Build a deterministic portable `.axiomskin` for `/agent/run/:appId`."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def main() -> int:
         description="Build a safe portable sub-agent run-page skin package",
     )
     parser.add_argument("source", type=Path, help="Directory containing manifest.json and assets/")
-    parser.add_argument("output", type=Path, help="Output .qzskin path")
+    parser.add_argument("output", type=Path, help="Output .axiomskin path")
     args = parser.parse_args()
 
     package = build_sub_agent_skin_package_from_directory(args.source.resolve())

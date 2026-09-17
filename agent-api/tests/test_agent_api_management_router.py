@@ -32,25 +32,25 @@ async def test_owner_key_create_and_list_return_recoverable_secret_without_leaki
     monkeypatch.setattr(
         management, "create_key",
         AsyncMock(return_value=SimpleNamespace(
-            id="key-a", name="prod", prefix="qza_example", secret="qza_secret_once", expires_at=None,
+            id="key-a", name="prod", prefix="axa_example", secret="axa_secret_once", expires_at=None,
         )),
     )
     monkeypatch.setattr(
         management, "list_keys",
         AsyncMock(return_value=[SimpleNamespace(
-            id="key-a", name="prod", key_prefix="qza_example", status="active", expires_at=None,
+            id="key-a", name="prod", key_prefix="axa_example", status="active", expires_at=None,
             last_used_at=None, revoked_at=None, created_at=datetime.now(timezone.utc),
             secret_hash="must-not-leak", secret_ciphertext="ciphertext-must-not-leak",
         )]),
     )
-    monkeypatch.setattr(management, "recover_key_secret", lambda _row: "qza_recovered_secret")
+    monkeypatch.setattr(management, "recover_key_secret", lambda _row: "axa_recovered_secret")
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post("/workflow/apps/app-a/api-keys", json={"name": "prod"})
         listed = await client.get("/workflow/apps/app-a/api-keys")
 
     assert created.status_code == 201
-    assert created.json()["secret"].startswith("qza_")
-    assert listed.json()["items"][0]["secret"] == "qza_recovered_secret"
+    assert created.json()["secret"].startswith("axa_")
+    assert listed.json()["items"][0]["secret"] == "axa_recovered_secret"
     assert "secret_hash" not in listed.text
     assert "secret_ciphertext" not in listed.text
 
@@ -89,7 +89,7 @@ async def test_owner_can_create_an_origin_bound_embed_key(app, monkeypatch):
     from app.routers import agent_api_management as management
 
     monkeypatch.setattr(management, "create_embed_key", AsyncMock(return_value=SimpleNamespace(
-        id="embed-a", name="portal", prefix="qze_example", secret="qze_secret_once", expires_at=None,
+        id="embed-a", name="portal", prefix="axe_example", secret="axe_secret_once", expires_at=None,
     )))
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
@@ -98,7 +98,7 @@ async def test_owner_can_create_an_origin_bound_embed_key(app, monkeypatch):
         )
 
     assert response.status_code == 201
-    assert response.json()["secret"].startswith("qze_")
+    assert response.json()["secret"].startswith("axe_")
 
 @pytest.mark.asyncio
 async def test_owner_can_read_and_update_public_api_configuration(app, monkeypatch):

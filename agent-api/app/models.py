@@ -264,7 +264,7 @@ class AgentApiAccessKey(Base):
     # 仅供已登录的发布者在管理页重新复制；不得出现在调用/公开接口或日志中。
     secret_ciphertext = Column(Text, nullable=True)
     key_kind = Column(String(16), nullable=False, default="api")  # api / embed
-    embed_origin = Column(String(255), nullable=True)              # exact origin for qze keys
+    embed_origin = Column(String(255), nullable=True)              # exact origin for embed keys
     status = Column(String(16), nullable=False, default="active", index=True)
     expires_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)

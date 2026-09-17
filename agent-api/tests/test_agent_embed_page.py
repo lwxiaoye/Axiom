@@ -17,7 +17,7 @@ def app(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_static_frame_has_origin_specific_csp_and_does_not_expose_qze_secret(app, monkeypatch):
+async def test_static_frame_has_origin_specific_csp_and_does_not_expose_axe_secret(app, monkeypatch):
     from app.routers import embed
 
     monkeypatch.setattr(
@@ -26,13 +26,13 @@ async def test_static_frame_has_origin_specific_csp_and_does_not_expose_qze_secr
         AsyncMock(return_value=SimpleNamespace(origin="https://portal.example.com")),
     )
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/embed/v1/frame/app-a?embedKeyId=ek_public#embedKey=qze_secret")
+        response = await client.get("/embed/v1/frame/app-a?embedKeyId=ek_public#embedKey=axe_secret")
 
     assert response.status_code == 200
     assert "frame-ancestors https://portal.example.com" in response.headers["content-security-policy"]
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
-    assert "qze_secret" not in response.text
+    assert "axe_secret" not in response.text
     assert "history.replaceState" in response.text
 
 
@@ -62,7 +62,7 @@ async def test_frame_hides_invalid_static_key_state(app, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_direct_embed_key_id_can_render_a_whitelisted_frame(app, monkeypatch):
-    """A static embed URL uses a public key id; its qze secret stays in the fragment."""
+    """A static embed URL uses a public key id; its embed secret stays in the fragment."""
     from app.routers import embed
     monkeypatch.setattr(
         embed,

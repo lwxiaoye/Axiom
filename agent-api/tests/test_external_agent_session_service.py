@@ -47,8 +47,8 @@ def service():
     return ExternalAgentSessionService(store=_MemoryStore(), storage=_MemoryStorage())
 
 
-PRINCIPAL_A = AgentApiPrincipal("key-a", "app-a", "publisher-a", "qza_a")
-PRINCIPAL_B = AgentApiPrincipal("key-b", "app-a", "publisher-a", "qza_b")
+PRINCIPAL_A = AgentApiPrincipal("key-a", "app-a", "publisher-a", "axa_a")
+PRINCIPAL_B = AgentApiPrincipal("key-b", "app-a", "publisher-a", "axa_b")
 
 
 @pytest.mark.asyncio

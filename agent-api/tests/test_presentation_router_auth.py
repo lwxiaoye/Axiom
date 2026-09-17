@@ -34,7 +34,7 @@ def test_non_platform_admin_cannot_import_sub_agent_skin_package():
     client = TestClient(app)
     response = client.post(
         "/workflow/presentation/admin/skins/import",
-        files={"file": ("skin.qzskin", b"not-a-package", "application/zip")},
+        files={"file": ("skin.axiomskin", b"not-a-package", "application/zip")},
     )
 
     assert response.status_code == 403

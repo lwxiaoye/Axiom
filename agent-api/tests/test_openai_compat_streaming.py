@@ -15,7 +15,7 @@ def app(monkeypatch):
     from app.services.agent_api.access_service import AgentApiPrincipal
     from app.services.agent_api.external_session_service import ExternalSessionHandle
 
-    principal = AgentApiPrincipal("key-a", "app-a", "publisher-a", "qza_example")
+    principal = AgentApiPrincipal("key-a", "app-a", "publisher-a", "axa_example")
     monkeypatch.setattr(openai_compat, "authenticate_openai_bearer", AsyncMock(return_value=principal))
     monkeypatch.setattr(openai_compat, "get_or_create_external_session", AsyncMock(return_value=ExternalSessionHandle(
         id="exts_a", app_id="app-a", api_key_id="key-a", owner_user_id="publisher-a",
@@ -44,7 +44,7 @@ async def test_stream_emits_openai_chunks_trusted_usage_and_done(app, monkeypatc
     monkeypatch.setattr(openai_compat, "begin_openai_invocation", AsyncMock(return_value=None))
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer qza_example"}, json={
+        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer axa_example"}, json={
             "model": "agent_app-a", "stream": True,
             "stream_options": {"include_usage": True},
             "messages": [{"role": "user", "content": "你好"}],
@@ -79,7 +79,7 @@ async def test_stream_omits_usage_chunk_when_provider_usage_is_not_trusted(app, 
     monkeypatch.setattr(openai_compat, "begin_openai_invocation", AsyncMock(return_value=None))
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer qza_example"}, json={
+        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer axa_example"}, json={
             "model": "agent_app-a", "stream": True,
             "stream_options": {"include_usage": True},
             "messages": [{"role": "user", "content": "你好"}],

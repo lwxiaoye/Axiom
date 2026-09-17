@@ -78,7 +78,7 @@ export async function exportMainChatSkin(skin: MainChatSkinRecord): Promise<void
   link.href = url;
   link.download = filenameFromDisposition(
     response.headers.get('content-disposition'),
-    `${skin.key}-${skin.version}.qzskin`,
+    `${skin.key}-${skin.version}.axiomskin`,
   );
   document.body.appendChild(link);
   link.click();

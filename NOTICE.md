@@ -1,8 +1,8 @@
 # Attribution and scope
 
 AXIOM is a derivative campus-agent project maintained by the AXIOM team.
-The supplied upstream package identified itself as qzboot-vue3 / QingZhu AI platform web client,
-with author 重庆市青竹数智科技有限公司. It includes JeecgBoot-derived components and other third-party libraries.
+The supplied upstream package was a third-party Vue3 AI platform web client.
+It includes JeecgBoot-derived components and other third-party libraries.
 
 The original root LICENSE and nested LICENSE files are retained byte-for-byte.
 The root LICENSE contains additional wording beyond the standard MIT text; this derivative does not replace or reinterpret it.

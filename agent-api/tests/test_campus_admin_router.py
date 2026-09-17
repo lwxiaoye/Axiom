@@ -33,7 +33,7 @@ def test_non_admin_cannot_import_or_list_main_chat_skins():
     assert client.get("/campus-assistant/admin/skins").status_code == 403
     response = client.post(
         "/campus-assistant/admin/skins/import",
-        files={"file": ("skin.qzskin", b"not-a-package", "application/zip")},
+        files={"file": ("skin.axiomskin", b"not-a-package", "application/zip")},
     )
     assert response.status_code == 403
     assert client.get("/campus-assistant/admin/skins/mcs_1").status_code == 403

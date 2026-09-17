@@ -1,4 +1,4 @@
-# Original local archives: never publish
+# Original local archives: never publish. The directory name is the on-disk backup path.
 /base-platform-web-qingzhu/
 /__MACOSX/
 

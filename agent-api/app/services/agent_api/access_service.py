@@ -147,7 +147,7 @@ async def create_key(app_id: str, owner_user_id: str, name: str, expires_at: dat
         raise ApiAuthError("invalid_api_key")
     if _is_expired(expires_at):
         raise ApiKeyLimitError("invalid_expiry")
-    secret = f"qza_{secrets.token_urlsafe(32)}"
+    secret = f"axa_{secrets.token_urlsafe(32)}"
     prefix = secret[:16]
     row = AgentApiAccessKey(
         id=f"ak_{uuid.uuid4().hex}", app_id=app_id, owner_user_id=owner_user_id,
@@ -160,7 +160,7 @@ async def create_key(app_id: str, owner_user_id: str, name: str, expires_at: dat
 
 
 async def create_embed_key(app_id: str, owner_user_id: str, name: str, origin: object) -> CreatedAgentApiKey:
-    """Create a qze key that can only create an iframe session for one origin."""
+    """Create an embed key that can only create an iframe session for one origin."""
     app_id, owner_user_id = str(app_id or "")[:64], str(owner_user_id or "")[:64]
     try:
         normalized = normalize_embed_origins([origin])
@@ -168,7 +168,7 @@ async def create_embed_key(app_id: str, owner_user_id: str, name: str, origin: o
         raise ApiKeyLimitError("embed_origin_invalid") from exc
     if not app_id or not owner_user_id or len(normalized) != 1:
         raise ApiKeyLimitError("embed_origin_invalid")
-    secret = f"qze_{secrets.token_urlsafe(32)}"
+    secret = f"axe_{secrets.token_urlsafe(32)}"
     prefix = secret[:16]
     row = AgentApiAccessKey(
         id=f"ek_{uuid.uuid4().hex}", app_id=app_id, owner_user_id=owner_user_id,
@@ -213,7 +213,7 @@ async def _enforce_fixed_window_limit(key_id: str) -> None:
 
 
 async def enforce_key_rate_limit(key_id: str) -> None:
-    """Apply the same per-key limit to qza and browser-derived Embed sessions."""
+    """Apply the same per-key limit to API and browser-derived Embed sessions."""
     await _enforce_fixed_window_limit(str(key_id or "")[:64])
 
 
@@ -238,7 +238,7 @@ async def execution_slot(key_id: str):
 
 async def authenticate_bearer(raw_token: str) -> AgentApiPrincipal:
     token = str(raw_token or "")
-    if not token.startswith("qza_") or len(token) < 40:
+    if not token.startswith("axa_") or len(token) < 40:
         raise ApiAuthError("invalid_api_key")
     try:
         digest = _hash_secret(token)
@@ -282,7 +282,7 @@ async def _active_embed_key(key: AgentApiAccessKey, app_id: str | None = None) -
 
 async def authenticate_embed_key(raw_token: str, app_id: str) -> EmbedKeyPrincipal:
     token = str(raw_token or "")
-    if not token.startswith("qze_") or len(token) < 40:
+    if not token.startswith("axe_") or len(token) < 40:
         raise ApiAuthError("invalid_embed_key")
     key = await _load_key_by_hash(_hash_secret(token))
     if key is None or not hmac.compare_digest(str(getattr(key, "secret_hash", "")), _hash_secret(token)):

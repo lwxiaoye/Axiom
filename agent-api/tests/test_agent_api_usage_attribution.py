@@ -14,7 +14,7 @@ async def test_begin_and_finish_invocation_preserve_unknown_charge(monkeypatch):
     """Replacing unknown provider charge with a zero amount must fail this test."""
     persisted = []
     finished = []
-    principal = AgentApiPrincipal("key-a", "app-a", "publisher-a", "qza_test")
+    principal = AgentApiPrincipal("key-a", "app-a", "publisher-a", "axa_test")
 
     async def _start(row):
         persisted.append(row)
@@ -58,7 +58,7 @@ async def test_begin_and_finish_invocation_preserve_unknown_charge(monkeypatch):
 async def test_finish_invocation_aggregates_trusted_runtime_usage(monkeypatch):
     """Publisher usage must be projected from the Runtime audit rather than invented as zero."""
     values = []
-    principal = AgentApiPrincipal("key-a", "app-a", "publisher-a", "qza_test")
+    principal = AgentApiPrincipal("key-a", "app-a", "publisher-a", "axa_test")
 
     async def _start(_row):
         return None

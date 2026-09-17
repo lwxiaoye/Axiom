@@ -28,7 +28,7 @@ async def test_created_secret_is_encrypted_at_rest_and_not_exposed_by_authentica
 
     created = await access_service.create_key("app-a", "publisher-a", "production", None)
 
-    assert created.secret.startswith("qza_")
+    assert created.secret.startswith("axa_")
     assert len(created.secret) >= 40
     assert len(inserted) == 1
     assert inserted[0].secret_hash != created.secret
@@ -65,7 +65,7 @@ async def test_created_secret_is_encrypted_at_rest_and_not_exposed_by_authentica
     assert principal.app_id == "app-a"
     assert not hasattr(principal, "secret")
     with pytest.raises(access_service.ApiAuthError, match="invalid_api_key"):
-        await access_service.authenticate_bearer("qza_not-the-created-secret")
+        await access_service.authenticate_bearer("axa_not-the-created-secret")
 
 
 @pytest.mark.asyncio
@@ -91,8 +91,8 @@ async def test_expired_or_inactive_release_key_is_rejected_before_rate_limit(mon
         id="key-a",
         app_id="app-a",
         owner_user_id="publisher-a",
-        key_prefix="qza_test",
-        secret_hash=access_service._hash_secret("qza_expired"),
+        key_prefix="axa_test",
+        secret_hash=access_service._hash_secret("axa_expired"),
         status="active",
         expires_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1),
     )
@@ -109,16 +109,16 @@ async def test_expired_or_inactive_release_key_is_rejected_before_rate_limit(mon
     monkeypatch.setattr(access_service, "_enforce_fixed_window_limit", _limit)
 
     with pytest.raises(access_service.ApiAuthError, match="invalid_api_key"):
-        await access_service.authenticate_bearer("qza_expired")
+        await access_service.authenticate_bearer("axa_expired")
     assert rate_limit_called is False
 
 
 @pytest.mark.asyncio
 async def test_valid_key_for_an_inactive_release_is_distinguished_from_an_invalid_key(monkeypatch):
     """A publisher can remediate a disabled release only when clients receive a 403-compatible error."""
-    secret = "qza_inactive_release_key_012345678901234567890123456789"
+    secret = "axa_inactive_release_key_012345678901234567890123456789"
     key = SimpleNamespace(
-        id="key-a", app_id="app-a", owner_user_id="publisher-a", key_prefix="qza_inactive",
+        id="key-a", app_id="app-a", owner_user_id="publisher-a", key_prefix="axa_inactive",
         secret_hash=access_service._hash_secret(secret), status="active", expires_at=None,
     )
     rate_limit_called = False

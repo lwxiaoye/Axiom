@@ -1,4 +1,4 @@
-"""Short-lived, in-memory sessions derived from static qze iframe keys."""
+"""Short-lived, in-memory sessions derived from static embed iframe keys."""
 from __future__ import annotations
 
 import asyncio
@@ -75,7 +75,7 @@ class EmbedTicketService:
         return session_id
 
     async def create_direct_session(self, principal: EmbedKeyPrincipal) -> EmbedSession:
-        """Turn a browser-scoped qze key into the same short Embed session as tickets."""
+        """Turn a browser-scoped embed key into the same short Embed session as tickets."""
         version = await load_active_api_version(principal.app_id, principal.owner_user_id)
         now = self._now()
         session_id = secrets.token_urlsafe(32)

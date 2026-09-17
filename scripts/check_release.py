@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LEGAL_NAMES = {'LICENSE', 'NOTICE.md', 'NOTICE', 'COPYING', 'COPYRIGHT'}
 PUBLIC_ENVS = {'.env', '.env.development', '.env.production'}
-OLD_BRAND = re.compile('qing' + 'zhu|qz' + 'boot|cq' + 'jzc|青' + '竹', re.I)
+OLD_BRAND = re.compile('qing' + 'zhu|qz' + 'boot|cq' + 'jzc|青' + '竹|qzskin|\\bqza_|\\bqze_|\\bqze\\b|\\bqza\\b', re.I)
 OLD_IP = re.compile(r'\b(?:10\.255\.57\.13|10\.8\.50\.35|192\.168\.5\.134|172\.16\.249\.181|172\.24\.137\.76)\b')
 TOKEN = re.compile(r'(?<![\w-])(?:sk-[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{24,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)')
 PRIVATE_KEY = re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')

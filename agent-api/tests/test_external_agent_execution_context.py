@@ -8,7 +8,7 @@ from app.services.agent_api.access_service import AgentApiPrincipal
 from app.services.agent_api.external_session_service import ExternalSessionHandle
 
 
-PRINCIPAL = AgentApiPrincipal("key-a", "app-a", "publisher-a", "qza_test")
+PRINCIPAL = AgentApiPrincipal("key-a", "app-a", "publisher-a", "axa_test")
 SESSION = ExternalSessionHandle(
     id="exts_a",
     app_id="app-a",

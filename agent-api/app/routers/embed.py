@@ -107,7 +107,7 @@ def _embed_session_token(authorization: str) -> str:
 async def render_embed_frame(
     app_id: str, embedKeyId: str = Query(default=""),
 ) -> HTMLResponse:
-    """Serve the isolated frame with a CSP bound to its static qze key origin."""
+    """Serve the isolated frame with a CSP bound to its static embed key origin."""
     try:
         parent_origin = (await resolve_embed_key_frame(embedKeyId, app_id)).origin
     except (EmbedTicketError, ApiAuthError, ApiReleaseInactiveError):
@@ -167,7 +167,7 @@ async def run_embed_agent(
         return _error(400, "invalid_request")
     try:
         # The platform-hosted iframe document cannot prove its parent through
-        # HTTP Origin; the qze key's exact origin and frame CSP do that.
+        # HTTP Origin; the embed key's exact origin and frame CSP do that.
         session = await embed_ticket_service.authenticate_session(token)
     except EmbedTicketError as error:
         return _embed_ticket_error(error)

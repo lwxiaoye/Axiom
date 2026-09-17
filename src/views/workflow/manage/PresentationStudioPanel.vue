@@ -13,7 +13,7 @@
           ref="importInput"
           class="package-file-input"
           type="file"
-          accept=".qzskin,.zip"
+          accept=".axiomskin,.zip"
           @change="handleImport"
         />
         <label class="catalog-search">

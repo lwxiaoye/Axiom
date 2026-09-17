@@ -12,7 +12,7 @@ from fastapi import FastAPI
 def principal():
     from app.services.agent_api.access_service import AgentApiPrincipal
 
-    return AgentApiPrincipal("key-a", "app-a", "publisher-a", "qza_example")
+    return AgentApiPrincipal("key-a", "app-a", "publisher-a", "axa_example")
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def app(monkeypatch, principal):
 async def test_models_exposes_only_the_authenticated_agents_virtual_model(app):
     """A regression that listed provider models would expose owner configuration."""
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/openai/v1/models", headers={"Authorization": "Bearer qza_example"})
+        response = await client.get("/openai/v1/models", headers={"Authorization": "Bearer axa_example"})
 
     assert response.status_code == 200
     assert response.json()["object"] == "list"
@@ -53,7 +53,7 @@ async def test_chat_completion_maps_text_history_and_returns_virtual_model(app, 
     monkeypatch.setattr(openai_compat, "begin_openai_invocation", AsyncMock(return_value=None))
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer qza_example"}, json={
+        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer axa_example"}, json={
             "model": "agent_app-a", "n": 1, "user": "request-42",
             "messages": [
                 {"role": "assistant", "content": "上一轮"},
@@ -76,7 +76,7 @@ async def test_chat_completion_maps_text_history_and_returns_virtual_model(app, 
 async def test_unsupported_tools_returns_an_openai_parameter_error(app):
     """Silently accepting tool controls could give callers a false security expectation."""
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer qza_example"}, json={
+        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer axa_example"}, json={
             "model": "agent_app-a", "messages": [{"role": "user", "content": "x"}], "tools": [],
         })
 
@@ -91,7 +91,7 @@ async def test_unsupported_tools_returns_an_openai_parameter_error(app):
 async def test_final_message_must_be_a_text_user_message(app):
     """Treating an assistant turn as input would invert the caller's conversation semantics."""
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer qza_example"}, json={
+        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer axa_example"}, json={
             "model": "agent_app-a", "messages": [{"role": "assistant", "content": "x"}],
         })
 
@@ -110,7 +110,7 @@ async def test_final_message_must_be_a_text_user_message(app):
 async def test_message_tool_and_function_fields_are_explicitly_rejected(app, message, param):
     """Ignoring per-message controls could let an OpenAI client assume tools are available."""
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer qza_example"}, json={
+        response = await client.post("/openai/v1/chat/completions", headers={"Authorization": "Bearer axa_example"}, json={
             "model": "agent_app-a", "messages": [message],
         })
 

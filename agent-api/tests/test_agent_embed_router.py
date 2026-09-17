@@ -19,7 +19,7 @@ def app():
 
 
 def test_ticket_endpoints_are_not_exposed():
-    """Only the static qze iframe flow is public; ticket issuance was removed."""
+    """Only the static embed iframe flow is public; ticket issuance was removed."""
     from app.routers import embed
 
     paths = {route.path for route in embed.router.routes}
@@ -49,7 +49,7 @@ async def test_embed_run_only_accepts_short_embed_token_and_marks_embed_source(a
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         denied = await client.post(
-            "/embed/v1/runs", headers={"Authorization": "Bearer qza_example"}, json={"input": "hello"},
+            "/embed/v1/runs", headers={"Authorization": "Bearer axa_example"}, json={"input": "hello"},
         )
         accepted = await client.post(
             "/embed/v1/runs", headers={"Authorization": "Embed emb_short_token"}, json={"input": "hello", "sessionId": "chat-1"},
@@ -90,7 +90,7 @@ async def test_embed_run_rejects_model_controls_and_revoked_embed_token(app, mon
 
 
 @pytest.mark.asyncio
-async def test_direct_embed_session_accepts_only_a_scoped_qze_key(app, monkeypatch):
+async def test_direct_embed_session_accepts_only_a_scoped_axe_key(app, monkeypatch):
     from app.routers import embed
 
     principal = SimpleNamespace(
@@ -103,8 +103,8 @@ async def test_direct_embed_session_accepts_only_a_scoped_qze_key(app, monkeypat
         AsyncMock(return_value=SimpleNamespace(token="emb_short", expires_at=datetime.now(timezone.utc))),
     )
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        denied = await client.post("/embed/v1/agents/app-a/direct-sessions", headers={"Authorization": "Bearer qza_example"})
-        accepted = await client.post("/embed/v1/agents/app-a/direct-sessions", headers={"Authorization": "Embed-Key qze_example"})
+        denied = await client.post("/embed/v1/agents/app-a/direct-sessions", headers={"Authorization": "Bearer axa_example"})
+        accepted = await client.post("/embed/v1/agents/app-a/direct-sessions", headers={"Authorization": "Embed-Key axe_example"})
 
     assert denied.status_code == 401
     assert accepted.status_code == 200

@@ -85,7 +85,7 @@
 
     <section v-if="publicConfig.iframeEnabled" class="api-section">
       <h3>静态嵌入 Key</h3>
-      <p>为一个精确 HTTPS 来源创建 <code>qze_</code> Key。它不能调用 OpenAI API；Key 只放在 iframe 的 URL fragment，不会发送到服务器。</p>
+      <p>为一个精确 HTTPS 来源创建 <code>axe_</code> Key。它不能调用 OpenAI API；Key 只放在 iframe 的 URL fragment，不会发送到服务器。</p>
       <div class="embed-create">
         <a-input v-model:value="embedKeyName" :maxlength="128" placeholder="名称，例如门户首页" />
         <a-input v-model:value="embedOrigin" placeholder="https://portal.example.com" />
@@ -189,7 +189,7 @@ const configSaving = ref(false);
 
 const openaiBaseUrl = computed(() => `${window.location.origin}/agent-api/openai/v1`);
 const openaiExample = computed(() => `curl ${openaiBaseUrl.value}/chat/completions \\
-  -H "Authorization: Bearer qza_..." \\
+  -H "Authorization: Bearer axa_..." \\
   -H "Content-Type: application/json" \\
   -d '{"model":"agent_${app.value?.id || 'APP_ID'}","messages":[{"role":"user","content":"你好"}]}'`);
 const directEmbedExample = computed(() => {

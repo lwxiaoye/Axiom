@@ -1290,8 +1290,8 @@ async def import_sub_agent_skin(
     """Install a safe, portable run-page skin into the global sub-agent catalog."""
     _require_platform_admin(user)
     filename = str(file.filename or "").strip()
-    if filename and not filename.lower().endswith((".qzskin", ".zip")):
-        raise HTTPException(status_code=415, detail="请选择 .qzskin 皮肤包")
+    if filename and not filename.lower().endswith((".axiomskin", ".zip")):
+        raise HTTPException(status_code=415, detail="请选择 .axiomskin 皮肤包")
     content = await file.read(MAX_PACKAGE_BYTES + 1)
     if len(content) > MAX_PACKAGE_BYTES:
         raise HTTPException(status_code=413, detail="皮肤包超过 12 MiB 限制")
@@ -1376,7 +1376,7 @@ async def export_sub_agent_skin(
         content=package,
         media_type="application/vnd.axiom.skin+zip",
         headers={
-            "Content-Disposition": f'attachment; filename="{safe_key}-{safe_version}.qzskin"',
+            "Content-Disposition": f'attachment; filename="{safe_key}-{safe_version}.axiomskin"',
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
         },

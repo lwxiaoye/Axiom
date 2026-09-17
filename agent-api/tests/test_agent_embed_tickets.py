@@ -8,8 +8,8 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_static_embed_session_rechecks_its_qze_key_and_public_switches(monkeypatch):
-    """A session from a static iframe stops when its qze key or iframe switch is disabled."""
+async def test_static_embed_session_rechecks_its_axe_key_and_public_switches(monkeypatch):
+    """A session from a static iframe stops when its embed key or iframe switch is disabled."""
     from app.services.agent_api import embed_ticket_service as service_module
 
     service = service_module.EmbedTicketService(secret=b"test-secret", now=lambda: 1_000)

@@ -10,7 +10,7 @@ from app.services.agent_api.access_service import AgentApiPrincipal
 from app.services.agent_api.external_session_service import ExternalFileHandle, ExternalSessionHandle
 
 
-PRINCIPAL = AgentApiPrincipal("key-a", "app-a", "publisher-a", "qza_test")
+PRINCIPAL = AgentApiPrincipal("key-a", "app-a", "publisher-a", "axa_test")
 SESSION = ExternalSessionHandle(
     id="exts_a", app_id="app-a", api_key_id="key-a", owner_user_id="publisher-a",
     session_id="s1", workspace_ref="external/exts_a",
@@ -38,10 +38,10 @@ async def test_openai_file_is_bound_to_key_and_can_be_referenced_in_chat(monkeyp
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         uploaded = await client.post(
             "/openai/v1/files?session_id=s1",
-            headers={"Authorization": "Bearer qza_test"},
+            headers={"Authorization": "Bearer axa_test"},
             files={"file": ("a.txt", b"hello", "text/plain")},
         )
-        completion = await client.post("/openai/v1/chat/completions?session_id=s1", headers={"Authorization": "Bearer qza_test"}, json={
+        completion = await client.post("/openai/v1/chat/completions?session_id=s1", headers={"Authorization": "Bearer axa_test"}, json={
             "model": "agent_app-a",
             "messages": [{"role": "user", "content": [
                 {"type": "input_text", "text": "summarize"},

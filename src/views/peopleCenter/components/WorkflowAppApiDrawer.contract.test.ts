@@ -21,8 +21,8 @@ describe('WorkflowAppApiDrawer credential boundary', () => {
     expect(drawer).toContain('OpenAI 兼容');
   });
 
-  it('offers an origin-bound qze key for a static iframe URL without using qza', () => {
-    expect(drawer).toContain('qze_');
+  it('offers an origin-bound embed key for a static iframe URL without using an API key', () => {
+    expect(drawer).toContain('axe_');
     expect(drawer).toContain('embedKeyId');
     expect(drawer).toContain('嵌入 Key');
   });

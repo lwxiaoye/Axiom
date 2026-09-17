@@ -7,6 +7,7 @@
 | 项 | 处理 |
 |---|---|
 | 产品名 / 包名 | 前端 `axiom-campus-agent`，作者 AXIOM Team，远程 `https://github.com/lwxiaoye/Axiom.git` |
+| 皮肤包与开放 API 前缀 | 导出扩展名为 `.axiomskin`；开放 API Key 以 `axa_` 开头，嵌入 Key 以 `axe_` 开头 |
 | 上游品牌与学校名称 | 源码与配置中的旧产品名、学校名、旧域名改为 AXIOM / 示例大学 / `example.edu.cn` |
 | 登录页与公开文案 | 校园智能体品牌，不再使用上游登录装饰文案 |
 | 部署地址 | 旧内网地址改为 `127.0.0.1` 或占位符 |
