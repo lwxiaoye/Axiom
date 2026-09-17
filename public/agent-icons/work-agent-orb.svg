@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="57" height="44" viewBox="0 0 57 44" role="img" aria-labelledby="work-agent-orb-title">
+  <title id="work-agent-orb-title">AXIOM Agent</title>
+  <defs>
+    <radialGradient id="orb-fill" cx="32%" cy="18%" r="88%" fx="32%" fy="18%">
+      <stop offset="0" stop-color="#1a79ff" />
+      <stop offset="0.48" stop-color="#0b64f8" />
+      <stop offset="0.78" stop-color="#0758ee" />
+      <stop offset="1" stop-color="#0349d9" />
+    </radialGradient>
+    <linearGradient id="eye-fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" />
+      <stop offset="1" stop-color="#f7f9ff" />
+    </linearGradient>
+    <filter id="orb-shadow" x="-30%" y="-250%" width="160%" height="600%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.8" />
+    </filter>
+  </defs>
+
+  <ellipse cx="27" cy="40.2" rx="17.5" ry="1.85" fill="#75a9ff" opacity="0.24" filter="url(#orb-shadow)" />
+  <path
+    d="M26.8 1.2C38.1 1.2 46.5 10.1 46.5 21.1C46.5 32 38.1 40.7 26.8 40.7C15.5 40.7 7.2 32 7.2 21.1C7.2 10.1 15.6 1.2 26.8 1.2Z"
+    fill="url(#orb-fill)"
+  />
+  <ellipse cx="26.2" cy="19.5" rx="2.55" ry="4.65" fill="url(#eye-fill)" />
+  <ellipse cx="35.55" cy="19.05" rx="2.2" ry="4.55" fill="url(#eye-fill)" />
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="20" height="20" viewBox="0 0 20 20" fill="none">
+<rect x="3" y="5" width="14" height="12" stroke="rgba(51, 51, 51, 1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" >
+</rect>
+<path    stroke="rgba(51, 51, 51, 1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"  d="M6 3L6 5">
+</path>
+<path    stroke="rgba(51, 51, 51, 1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"  d="M14 3L14 5">
+</path>
+<path    stroke="rgba(51, 51, 51, 1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"  d="M10 9L10 11">
+</path>
+<path    stroke="rgba(51, 51, 51, 1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"  d="M12 13L10 11">
+</path>
+</svg>

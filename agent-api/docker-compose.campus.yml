@@ -1,0 +1,91 @@
+# Production stack. Run from agent-api/:
+#   docker compose up -d --build --force-recreate
+# OpenSandbox is a separate Compose project; see deploy/opensandbox/README.md.
+
+x-agent-healthcheck: &agent-healthcheck
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5)"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 180s
+
+services:
+  agent-api:
+    build: .
+    container_name: agent-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.campus
+    volumes:
+      - ./data/user_files:/app/data/user_files
+    healthcheck: *agent-healthcheck
+    depends_on:
+      checkpoint-postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - agent-network
+
+  agent-worker:
+    build: .
+    container_name: agent-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - .env.campus
+    volumes:
+      - ./data/user_files:/app/data/user_files
+    depends_on:
+      checkpoint-postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - agent-network
+
+  checkpoint-postgres:
+    image: postgres:15-alpine
+    container_name: agent-checkpoint-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CHECKPOINT_PG_USER:-langgraph}
+      POSTGRES_PASSWORD: ${CHECKPOINT_PG_PASSWORD:?Set CHECKPOINT_PG_PASSWORD}
+      POSTGRES_DB: ${CHECKPOINT_PG_DB:-langgraph_checkpoints}
+    ports:
+      - "5432:5432"
+    volumes:
+      - checkpoint_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langgraph -d langgraph_checkpoints"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - agent-network
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.7
+    container_name: agent-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - agent-network
+
+volumes:
+  qdrant_data:
+  checkpoint_pg_data:
+
+networks:
+  agent-network:
+    name: agent-api_agent-network
+    driver: bridge

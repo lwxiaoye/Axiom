@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "source_commit": "0618c7c3633205114e789185528258c88fa293f6",
+  "service_readiness": {
+    "endpoint": "/health/ready",
+    "status": "ready",
+    "runtime_db": "ok"
+  },
+  "focused_offline_suite": {
+    "passed": 154,
+    "failed": 0,
+    "warnings": 8,
+    "elapsed_seconds": 4.44,
+    "notes": [
+      "One warning is Pydantic class-config deprecation.",
+      "Seven warnings report aiomysql connections reclaimed without explicit check-in."
+    ]
+  },
+  "live_contract_matrix": {
+    "passed": 0,
+    "total": 7,
+    "failure_class": "provider_account_has_no_balance",
+    "comparable_product_baseline": false,
+    "note": "The account cannot currently fund model calls. These failures are environmental and must not be counted as Harness regressions. Re-run after funding before release acceptance."
+  },
+  "performance_baseline": {
+    "first_event_ms": null,
+    "model_rounds": null,
+    "input_tokens": null,
+    "total_elapsed_ms": null,
+    "failure_rate": null,
+    "reason_unavailable": "provider_account_has_no_balance"
+  },
+  "structural_debt": {
+    "main_agent_lines": 7372,
+    "main_tool_turn_lines": 1603,
+    "chat_service_lines": 2979,
+    "use_center_chat_lines": 5312,
+    "retired_name_occurrences": {
+      "HARNESS_V2_MODE": 4,
+      "TASK_DAG_MODE": 4,
+      "runtime_v2_service": 0,
+      "task_graph": 45,
+      "run_code": 124
+    }
+  }
+}

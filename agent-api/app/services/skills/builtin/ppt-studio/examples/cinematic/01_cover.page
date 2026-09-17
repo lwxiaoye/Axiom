@@ -1,0 +1,61 @@
+pageType: cover
+background: {type: solid, color: "#07080A"}
+elements:
+  - elementId: hero
+    elementType: image
+    bounds: [0, 0, 960, 540]
+    src: media/cover.jpg
+    fit: {mode: cover}
+  - elementId: veil
+    elementType: shape
+    bounds: [0, 0, 960, 540]
+    shapeName: rect
+    fill: "#07080A"
+    opacity: 0.42
+  - elementId: kicker
+    elementType: text
+    bounds: [56, 318, 620, 28]
+    content:
+      align: [left, middle]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 12
+      letterSpacing: 4
+      color: "#C9A227"
+      text: |
+        <p>KEYNOTE  ·  2026</p>
+  - elementId: title
+    elementType: text
+    bounds: [52, 348, 760, 88]
+    content:
+      align: [left, top]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 56
+      bold: true
+      color: "#F4F1EA"
+      text: |
+        <p>把标题叠在满幅照片上</p>
+  - elementId: sub
+    elementType: text
+    bounds: [54, 444, 640, 36]
+    content:
+      align: [left, top]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 16
+      color: "#9A968C"
+      text: |
+        <p>一句定位，不要三条 bullet</p>
+animations:
+  - elementId: kicker
+    effect: fade-in
+    trigger: afterPrevious
+    durationMs: 400
+  - elementId: title
+    effect: fade-in
+    trigger: withPrevious
+    delayMs: 80
+    durationMs: 550
+  - elementId: sub
+    effect: float-in
+    direction: up
+    trigger: afterPrevious
+    durationMs: 450

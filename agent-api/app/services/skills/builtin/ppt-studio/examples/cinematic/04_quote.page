@@ -1,0 +1,45 @@
+pageType: content
+background: {type: solid, color: "#07080A"}
+elements:
+  - elementId: hero
+    elementType: image
+    bounds: [0, 0, 960, 540]
+    src: media/quote.jpg
+    fit: {mode: cover}
+  - elementId: veil
+    elementType: shape
+    bounds: [0, 0, 960, 540]
+    shapeName: rect
+    fill: "#07080A"
+    opacity: 0.55
+  - elementId: quote
+    elementType: text
+    bounds: [80, 180, 800, 140]
+    content:
+      align: [center, middle]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 32
+      bold: true
+      color: "#F4F1EA"
+      text: |
+        <p>真正的领先，不是更大的模型，而是更快的进化。</p>
+  - elementId: credit
+    elementType: text
+    bounds: [80, 340, 800, 32]
+    content:
+      align: [center, middle]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 13
+      letterSpacing: 2
+      color: "#9A968C"
+      text: |
+        <p>—  来源或署名</p>
+animations:
+  - elementId: quote
+    effect: fade-in
+    trigger: afterPrevious
+    durationMs: 600
+  - elementId: credit
+    effect: fade-in
+    trigger: afterPrevious
+    durationMs: 400

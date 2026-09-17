@@ -1,0 +1,13 @@
+allowBuilds:
+  '@carbon/icons': true
+  '@logicflow/core': set this to true or false
+  '@scarf/scarf': true
+  # vue-office 的 postinstall 只做 v2/v3 入口切换；项目直接深路径引 lib/v3 构建，无需执行
+  '@vue-office/docx': false
+  '@vue-office/excel': false
+  '@vue-office/pptx': false
+  core-js: true
+  core-js-pure: true
+  esbuild: true
+  less: true
+  vue-demi: true

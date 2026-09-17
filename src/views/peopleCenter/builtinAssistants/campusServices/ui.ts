@@ -1,0 +1,25 @@
+import type { BuiltinUiFlags } from '../types';
+
+export const CAMPUS_UI_FLAGS: BuiltinUiFlags = {
+  welcomeTitle: '你好，有什么校园事务想了解？',
+  welcomeSubtitle: '我会优先查询学校已审核知识库，并在需要时检索学校官方网站。',
+  welcomeHint: '回答仅供办事参考，最终以责任部门最新通知为准。',
+  composerPlaceholder: '请输入校园政策、办事流程或常见问题…',
+  showAvatar: false,
+  hideComposerMascot: false,
+  hideMention: true,
+  hideSkillSelector: true,
+  hideSubagent: true,
+  hideRecommendGrid: true,
+  hidePlusMenu: true,
+  hideModelSelector: true,
+  hideKnowledge: true,
+  hideFiles: true,
+  hideThreads: true,
+  hidePlanMode: true,
+  hideResearch: true,
+  hideWebSearchToggle: true,
+  imageOnlyUpload: true,
+  allowPasteUpload: true,
+  emptyStateClass: '',
+};

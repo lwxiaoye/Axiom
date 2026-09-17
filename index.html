@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh_CN" id="htmlRoot">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta name="renderer" content="webkit" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1.0,viewport-fit=cover"
+    />
+    <link rel="icon" type="image/svg+xml" href="/axiom-mark.svg" />
+
+    <title><%= title %></title>
+    <!-- 全局配置 -->
+    <script>
+      window._CONFIG = {};
+    </script>
+  </head>
+  <body>
+    <script>
+      (() => {
+        var htmlRoot = document.getElementById('htmlRoot');
+        var theme = window.localStorage.getItem('__APP__DARK__MODE__');
+        if (htmlRoot && theme) {
+          htmlRoot.setAttribute('data-theme', theme);
+          theme = htmlRoot = null;
+        }
+      })();
+    </script>
+    <div id="app">
+      <style>
+        html[data-theme='dark'] .app-loading {
+          background-color: #f7f8fa;
+        }
+
+        html[data-theme='dark'] .app-loading .app-loading-title {
+          color: #111827;
+        }
+
+        .app-loading {
+          display: flex;
+          width: 100%;
+          height: 100%;
+          justify-content: center;
+          align-items: center;
+          flex-direction: column;
+          background-color: #f7f8fa;
+        }
+
+        .app-loading .app-loading-wrap {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          display: flex;
+          -webkit-transform: translate3d(-50%, -50%, 0);
+          transform: translate3d(-50%, -50%, 0);
+          justify-content: center;
+          align-items: center;
+          flex-direction: column;
+        }
+
+        .app-loading .dots {
+          display: flex;
+          padding: 98px;
+          justify-content: center;
+          align-items: center;
+        }
+
+        .app-loading .app-loading-title {
+          display: flex;
+          margin-top: 30px;
+          font-size: 28px;
+          font-weight: 800;
+          color: #111827;
+          justify-content: center;
+          align-items: center;
+        }
+
+        .app-loading .app-loading-logo {
+          display: block;
+          width: 90px;
+          margin: 0 auto;
+          margin-bottom: 20px;
+        }
+
+        .dot {
+          position: relative;
+          display: inline-block;
+          width: 48px;
+          height: 48px;
+          margin-top: 30px;
+          border-radius: 50%;
+          background: conic-gradient(from 0deg, #111827 0deg, #374151 120deg, #d1d5db 240deg, #111827 360deg);
+          box-sizing: border-box;
+          animation: appLoadingRotate 0.86s infinite linear;
+          -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+        }
+
+        .dot i {
+          display: none;
+        }
+
+        .dot i:nth-child(1) {
+          top: 0;
+          left: 0;
+        }
+
+        .dot i:nth-child(2) {
+          top: 0;
+          right: 0;
+          -webkit-animation-delay: 0.4s;
+          animation-delay: 0.4s;
+        }
+
+        .dot i:nth-child(3) {
+          right: 0;
+          bottom: 0;
+          -webkit-animation-delay: 0.8s;
+          animation-delay: 0.8s;
+        }
+
+        .dot i:nth-child(4) {
+          bottom: 0;
+          left: 0;
+          -webkit-animation-delay: 1.2s;
+          animation-delay: 1.2s;
+        }
+        @keyframes antRotate {
+          to {
+            -webkit-transform: rotate(405deg);
+            transform: rotate(405deg);
+          }
+        }
+        @-webkit-keyframes antRotate {
+          to {
+            -webkit-transform: rotate(405deg);
+            transform: rotate(405deg);
+          }
+        }
+        @keyframes antSpinMove {
+          to {
+            opacity: 1;
+          }
+        }
+        @-webkit-keyframes antSpinMove {
+          to {
+            opacity: 1;
+          }
+        }
+        @keyframes appLoadingRotate {
+          to {
+            -webkit-transform: rotate(360deg);
+            transform: rotate(360deg);
+          }
+        }
+        @-webkit-keyframes appLoadingRotate {
+          to {
+            -webkit-transform: rotate(360deg);
+            transform: rotate(360deg);
+          }
+        }
+      </style>
+      <div class="app-loading">
+        <div class="app-loading-wrap">
+          <div class="app-loading-dots">
+            <span class="dot dot-spin"><i></i><i></i><i></i><i></i></span>
+          </div>
+          <div class="app-loading-title"><%= title %></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+# AXIOM 校园智能体 · 自托管 OCR 服务（官方 PaddleOCR 2.x / PP-OCRv4）
+# 一条 `docker compose up -d --build` 起服务；平台后台「系统设置 → OCR」选
+# 「自建 OCR 端点」，地址填 http://<本机IP>:8088/ocr 即可（纯 CPU，无需 GPU）。
+name: ai-zhongtai-ocr
+
+services:
+  ocr:
+    build: .
+    container_name: ai-ocr
+    ports:
+      - "8088:8000"          # 对外 8088；容器内 8000
+    environment:
+      # 可选：设了则调用方须带 Authorization: Bearer <token>。内网使用可留空。
+      OCR_TOKEN: ${OCR_TOKEN:-}
+    # PaddlePaddle 空闲 ~0.3G，单张识别（尤其大图）峰值可到 1~2G，给 3G 稳
+    mem_limit: 3g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 40s

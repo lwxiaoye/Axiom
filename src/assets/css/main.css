@@ -1,0 +1,999 @@
+/* @import "./base.css"; */
+:root { 
+   --color_index: #0062cf;
+  /* --color_hover: #7ad3ae; */
+/*  --bg_hover: #4bb086;
+  --ba-bg-color:#fff;
+  --el-menu-hover-text-color:'#7ad3ae';
+  --el-menu-hover-bg-color:'#7ad3ae';
+  --el-menu-border-color:'#001529';
+  --van-checkbox-label-color:#fff !important;
+  --color-pro:#409EFF;
+  --el-button-text-color:#fff; */
+ }
+/* 重大事件变化--黑白 */
+/* #app {
+  filter: grayscale(100%);
+} */
+*{
+  margin:0;
+  padding: 0;
+}
+
+/* 通用样式 */
+/* 禁止选择 */
+.user_none{
+  user-select: none;
+}
+
+.border-box{
+  box-sizing: border-box;
+}
+/* 文字换行 */
+.textwrap{
+  white-space: pre-wrap;
+}
+/* flex 换行 */
+.flex-wrap{
+  flex-wrap: wrap;
+}
+/* 自动占满 */
+.flex-1 {
+  flex: 1 1 0%;
+}
+/* flex 不变形 */
+.flex-0{
+  flex-shrink: 0;
+}
+.flex-grow-1{
+  flex-grow: 1;
+}
+.flex-none {
+  flex: 1 1 auto;
+}
+.flex {
+  display: flex;
+}
+.relative{
+  position: relative;
+}
+.flex-center {
+  justify-content: center;
+}
+.flex-around {
+  justify-content: space-around;
+}
+.flex-between {
+  justify-content: space-between;
+}
+.flex-start{
+  justify-content: flex-start;
+}
+.flex-end{
+  justify-content: flex-end;
+}
+.items-center {
+  align-items: center;
+}
+.items-start {
+  align-items: flex-start !important;
+}
+.items-end{
+  align-items: flex-end;
+}
+/* 文字对齐 */
+.text-center{
+  text-align: center;
+}
+.text-right{
+  text-align: right;
+}
+.text-left{
+  text-align: left !important;
+}
+/* 按钮手指 */
+.btn {
+  cursor: pointer !important;
+  user-select: none;
+}
+
+/* 主题色 */
+.color_index,.color_hover:hover {
+  color: #0062cf !important;
+  transition: 0.3s;
+}
+
+/* 鼠标 */
+.cursor{
+  cursor: pointer !important;
+  user-select: none;
+}
+
+/* 字体 */
+.fw-b {
+  font-weight: bold;
+}
+
+.fs-10 {
+  font-size: 0.675rem;
+}
+
+.fs-12 {
+  font-size: 0.75rem !important;
+}
+
+.fs-14 {
+  font-size: 0.875rem;
+}
+
+.fs-16 {
+  font-size: 1rem;
+}
+
+.fs-18 {
+  font-size: 1.125rem;
+}
+
+.fs-20 {
+  font-size: 1.25rem !important;
+}
+
+.fs-22 {
+  font-size: 1.375rem !important;
+}
+
+.fs-24 {
+  font-size: 1.5rem;
+}
+
+.fs-26 {
+  font-size: 1.625rem;
+}
+
+.fs-28 {
+  font-size: 1.75rem;
+}
+
+.fs-30 {
+  font-size: 1.875rem;
+}
+
+.fs-32 {
+  font-size: 2rem;
+}
+
+.fs-40 {
+  font-size: 2.5rem;
+}
+
+.fs-50 {
+  font-size: 3.175rem;
+}
+/* 边距css */
+/* 左 */
+.ml-4 {
+  margin-left: 0.25rem;
+}
+.ml-8{
+  margin-left: 0.5rem;
+}
+.ml-10{
+  margin-left: 0.625rem;
+}
+.ml-12{
+  margin-left: 0.75rem;
+}
+.ml-16{
+  margin-left: 1rem;
+}
+.ml-20{
+  margin-left: 1.25rem;
+}
+.ml-24{
+  margin-left: 1.5rem;
+}
+.ml-40{
+  margin-left: 2.5rem;
+}
+.ml-80{
+  margin-left: 5rem;
+}
+/* 右边 */
+.mr-4{
+  margin-right: 0.25rem;
+}
+.mr-8{
+  margin-right: 0.5rem;
+}
+.mr-10 {
+  margin-right: 0.625rem;
+}
+.mr-12 {
+  margin-right: 0.75rem;
+}
+.mr-16{
+  margin-right: 1rem;
+}
+.mr-20 {
+  margin-right: 1.25rem;
+}
+.mr-22{
+  margin-right: 1.38rem;
+}
+.mr-24{
+  margin-right: 1.5rem;
+}
+.mr-30{
+  margin-right: 1.875rem  ;
+}
+.mr-32{
+  margin-right: 2rem;
+}
+.mr-40{
+  margin-right: 2.5rem;
+}
+.mr-44{
+  margin-right: 2.725rem;
+}
+.mr-48{
+  margin-right: 3rem;
+}
+.mr-50{
+  margin-right: 3.125rem;
+}
+.mr-56{
+  margin-right: 3.5rem;
+}
+
+.mr-60{
+  margin-right: 3.75rem;
+}
+.mr-64{
+  margin-right: 4rem;
+}
+.mr-80{
+  margin-right: 5rem;
+}
+.mr-96{
+  margin-right: 6rem;
+}
+/* 下边 */
+.mb-2 {
+  margin-bottom: 0.125rem;
+}
+.mb-4 {
+  margin-bottom: 0.25rem;
+}
+.mb-5 {
+  margin-bottom: 0.3125rem;
+}
+.mb-6{
+  margin-bottom: 0.375rem;  
+}
+.mb-8 {
+  margin-bottom: 0.5rem;
+}
+.mb-10 {
+  margin-bottom: 0.625rem;
+}
+.mb-12{
+  margin-bottom: 0.75rem;
+}
+.mb-14 {
+  margin-bottom: 0.875rem;
+}
+.mb-15{
+  margin-bottom: 0.9375rem;
+}
+.mb-16 {
+  margin-bottom: 1rem;
+}
+.mb-18 {
+  margin-bottom: 1.125rem;
+}
+.mb-20 {
+  margin-bottom: 1.25rem;
+}
+.mb-24 {
+  margin-bottom: 1.5rem;
+}
+.mb-30{
+  margin-bottom: 1.75rem;
+}
+.mb-32{
+  margin-bottom: 2rem;
+}
+.mb-35{
+  margin-bottom: 2.125rem;
+}
+.mb-40{
+  margin-bottom: 2.5rem;
+}
+.mb-48{
+  margin-bottom: 3rem;
+}
+.mb-52{
+  margin-bottom: 3.25rem;
+}
+.mb-50{
+  margin-bottom: 3.125rem;
+}
+.mb-56{
+  margin-bottom: 3.5rem;
+}
+.mb-60{
+  margin-bottom: 3.75rem;
+}
+.mb-64{
+  margin-bottom: 4rem;
+}
+.mb-70{
+  margin-bottom: 4.375rem;
+}
+.mb-72{
+  margin-bottom: 4.5rem;
+}
+.mb-80{
+  margin-bottom: 5rem;
+}
+.mb-130{
+  margin-bottom: 8.125rem;
+}
+/* 上 */
+.mt-2{
+  margin-top: 0.125rem
+}
+.mt-4{
+  margin-top: 0.25rem;
+}
+.mt-6{
+  margin-top: 0.375rem;
+}
+.mt-8{
+  margin-top: 0.5rem;
+}
+.mt-10{
+  margin-top: 0.625rem;
+}
+.mt-12{
+  margin-top: 0.75rem;
+}
+.mt-16{
+  margin-top: 1rem;
+}
+.mt-20{
+  margin-top: 1.25rem;
+}
+.mt-24{
+  margin-top: 1.5rem;
+}
+.mt-32{
+  margin-top: 2rem;
+}
+.mt-40{
+  margin-top: 2.5rem;
+}
+.mt-48{
+  margin-top: 3rem;
+}
+.mt-50{
+  margin-top: 3.125rem;
+}
+.mx-24{
+  margin: 0 1.5rem !important;
+}
+.my-24{
+  margin: 1.5rem 0;
+}
+/* 内边 */
+.p-0{
+  padding:0 !important;
+}
+.p-4{
+  padding: 0.25rem;
+}
+.pb-6{
+  padding: 0.375rem;
+}
+.p-10{
+  padding: 0.625rem;
+}
+.p-12{
+  padding: 0.75rem;
+}
+
+.p-16{
+  padding: 1rem;
+}
+.p-20{
+  padding: 1.25rem;
+}
+.p-24{
+  padding: 1.5rem;
+}
+.p-32{
+  padding: 2rem;
+}
+
+/* 内边距 - x轴 */
+.px-6{
+  padding:0 0.375rem;
+}
+.px-8{
+  padding:0 0.5rem;
+}
+.px-10{
+  padding:0 0.625rem;
+}
+.px-12{
+  padding:0 0.75rem;
+}
+.px-16{
+  padding:0 1rem;
+}
+.px-16-16{
+  padding-left:1rem;
+  padding-right: 1rem;
+}
+.px-20{
+  padding-left:1.25rem;
+  padding-right: 1.25rem;
+}
+.px-24{
+  padding-left:1.5rem !important;
+  padding-right: 1.5rem !important;
+}
+
+.px-64{
+  padding-left:4rem;  
+  padding-right: 4rem;
+}
+/* 内边距 -y轴 */
+.py-10{
+  padding: 0.625rem 0;
+}
+.py-10{
+  padding: 0.625rem 0 ;
+}
+.py-20{
+  padding:1.25rem 0;
+}
+/* 右内边距 */
+.pr-8{
+  padding-right: 0.5rem;
+}
+.pr-10{
+  padding-right: 0.625rem;
+}
+.pr-12{
+  padding-right: 0.75rem;
+}
+.pr-16{
+  padding-right: 1rem;
+}
+.pr-24{
+  padding-right: 1.5rem;
+}
+.pr-28{
+  padding-right: 1.75rem;
+}
+.pr-30{
+  padding-right: 1.875rem;
+}
+.pr-40{
+  padding-right: 2.5rem;
+}
+/* 上内边距 */
+.pt-0{
+  padding-top: 0rem;
+}
+.pt-4{
+  padding-top: 0.25rem;
+}
+.pt-6{
+  padding-top: 0.375rem;
+}
+.pt-8{
+  padding-top: 0.5rem;
+}
+.pt-10{
+  padding-top: 0.625rem;
+}
+.pt-16{
+  padding-top: 1rem;
+}
+.pt-20{
+  padding-top: 1.25rem;
+}
+.pt-24{
+  padding-top: 1.5rem;
+}
+.pt-30{
+  padding-top: 1.875rem;
+}
+.pt-40{
+  padding-top: 2.5rem;
+}
+.pt-44{
+  padding-top: 2.75rem;
+}
+.pt-48{
+  padding-top: 3rem;
+}
+.pt-52{
+  padding-top: 3.25rem;
+}
+.pt-80{
+  padding-top: 5rem;
+}
+/* 左内边距 */
+.pl-4{
+  padding-left: 0.25rem;
+}
+.pl-8{
+  padding-left: 0.5rem;
+}
+.pl-10{
+  padding-left: 0.625rem;
+}
+.pl-12{
+  padding-left: 0.75rem;
+}
+.pl-16{
+  padding-left: 1rem;
+}
+.pl-20{
+  padding-left: 1.25rem;
+}
+.pl-24{
+  padding-left: 1.5rem;
+}
+.pl-28{
+  padding-left: 1.75rem;
+}
+.pl-30{
+  padding-left: 1.875rem;
+}
+
+.pl-40{
+  padding-left: 2.5rem;
+}
+
+.pl-50{
+  padding-left: 3.125rem;
+}
+
+.pl-60{
+  padding-left: 3.75rem;
+}
+
+.pl-70{
+  padding-left: 4.375rem;
+}
+.pl-80{
+  padding-left: 5rem;
+}
+/* 下内边距 */
+.pb-2{
+  padding-bottom: 0.125rem;  
+}
+.pb-4{
+  padding-bottom: 0.25rem;  
+}
+.pb-6{
+  padding-bottom: 0.375rem;  
+}
+.pb-8{
+  padding-bottom: 0.5rem;  
+}
+.pb-10{
+  padding-bottom: 0.625rem;
+}
+.pb-12{
+  padding-bottom: 0.75rem;
+}
+.pb-15{
+  padding-bottom: 0.9375rem;
+}
+.pb-16{
+  padding-bottom: 1rem;
+}
+.pb-20{
+  padding-bottom: 1.25rem;
+}
+.pb-24{
+  padding-bottom: 1.5rem;
+}
+.pb-30{
+  padding-bottom: 1.875rem;
+}
+.pb-32{
+  padding-bottom: 2rem;
+}
+.pb-48{
+  padding-bottom: 3rem;
+}
+.pb-50{
+  padding-bottom: 3.125rem !important; 
+}
+
+/* 宽度 */
+.w_0{
+  width: 0 !important;
+}
+.w_5{
+  width: 5% !important;
+}
+.w_10 {
+  width: 10% !important;
+}
+
+.w_15 {
+  width: 15% !important;
+}
+.w_17{
+  width: 17% !important;
+}
+.w_19 {
+  width: 19% !important;
+}
+.w_20 {
+  width: 20% !important;
+}
+.w_24{
+  width: 24%;
+}
+.w_25 {
+  width: 25% !important;
+}
+
+.w_30 {
+  width: 30% !important;
+}
+.mw_30{
+  max-width: 30% !important;
+}
+.w_33 {
+  width: 33% !important;
+}
+.w_35 {
+  width: 35% !important;
+}
+
+.w_40 {
+  width: 40% !important;
+}
+
+.w_45 {
+  width: 45% !important;
+}
+.w_46 {
+  width: 46% !important;
+}
+.w_47 {
+  width: 47% !important;
+}
+.w_50 {
+  width: 50% !important;
+}
+.w_55 {
+  width: 55% !important;
+}
+.w_57 {
+  width: 57% !important;
+}
+.w_60 {
+  width: 60% !important;
+}
+.m_w_60{
+  max-width: 60% !important;
+}
+.w_65 {
+  width: 65% !important;
+}
+
+.w_70 {
+  width: 70% !important;
+}
+
+.w_75 {
+  width: 75% !important;
+}
+
+.w_80 {
+  width: 80% !important;
+}
+.m_w_80{
+  max-width: 80% !important;
+}
+.w_85 {
+  width: 85% !important;
+}
+.w_90 {
+  width: 90% !important;
+}
+.m_w_90{
+  max-width: 90%;
+}
+.w_95{
+  width: 95% !important;
+}
+.w_99{
+  width: 99.8% !important;
+}
+.w_100 {
+  width: 100% !important;
+}
+.h_100{
+  height: 100% !important;
+}
+
+/* 图标icon */
+.icon_8{
+  width: 0.5rem;
+  height: 0.5rem;
+}
+.icon_12{
+  width: 0.75rem;
+  height: 0.75rem;
+}
+.icon_16{
+  width: 1rem;
+  height: 1rem;
+}
+.icon_20{
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.icon_24{
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.icon_26{
+  width: 1.625rem;
+  height: 1.625rem;
+}
+.icon_32{
+  width: 2rem;
+  height:2rem;
+}
+.icon_40{
+  width: 2.5rem;
+  height:2.5rem;
+}
+.icon_48{
+  width: 3rem;
+  height:3rem;
+}
+.icon_60{
+  width: 3.75rem;
+  height: 3.75rem;
+}
+.icon_64{
+  width: 4rem;
+  height: 4rem;
+}
+.icon_80{
+  width: 5rem;
+  height: 5rem;
+}
+.icon_96{
+  width: 6rem;
+  height: 6rem;
+}
+.icon_100{
+  width: 6.25rem;
+  height: 6.25rem;
+}
+.icon_128{
+  width: 8rem;
+  height: 8rem;
+}
+
+/* 动画css */
+/* animate__headShake */
+/* animate__bounce */
+.longTime .showTitle{
+  animation: colorChange 3s;
+}
+
+.showTitle{
+  animation: colorChange 1s;
+}
+/* 溢出影藏 */
+.less {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.less2 {
+  text-overflow: -o-ellipsis-lastline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.less3 {
+  text-overflow: -o-ellipsis-lastline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.less4 {
+  text-overflow: -o-ellipsis-lastline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+
+
+.show_0{
+  opacity: 0;
+}
+
+.show{
+  opacity: 1;
+}
+
+.topMove{
+  transition: 0.6s;
+}
+
+.topMove:hover{
+  transform: translateY(-10px);
+}
+
+.toRight{
+  transition: 0.6s;
+}
+
+.toRight:hover{
+  transform: translateX(5px);
+}
+
+
+/* 定义动画 */
+@keyframes colorChange{
+    0% {
+      -webkit-transform: translateX(0);
+      transform: translateX(0);
+      color: red;
+    }
+  
+    6.5% {
+      -webkit-transform: translateX(-0.375rem) rotateY(-9deg);
+      transform: translateX(-0.375rem) rotateY(-9deg);
+      color: red;
+    }
+  
+    18.5% {
+      -webkit-transform: translateX(0.25rem) rotateY(7deg);
+      transform: translateX(0.25rem) rotateY(7deg);
+      color: red;
+    }
+  
+    31.5% {
+      -webkit-transform: translateX(-0.125rem) rotateY(-5deg);
+      transform: translateX(-0.125rem) rotateY(-5deg);
+      color: red;
+    }
+  
+    43.5% {
+      -webkit-transform: translateX(0.125rem) rotateY(3deg);
+      transform: translateX(0.125rem) rotateY(3deg);
+      color: red;
+    }
+  
+    50% {
+      -webkit-transform: translateX(0);
+      transform: translateX(0);
+      color: red;
+    }
+}
+@keyframes scale{
+  0% {
+    transform: translateX(-50%) scale(2);
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+}
+@keyframes topMove2{
+  0% {
+    transform: translateY(-0.75rem);
+  }
+  50% {
+    transform: translateY(-0.125rem);
+  }
+  100% {
+    transform: translateY(-0.75rem);
+  }
+}
+@keyframes topMove{
+  0% {
+    transform: translate(-50%, -2.15rem);
+  }
+  50% {
+    transform: translate(-50%, -1rem);
+  }
+  100% {
+    transform: translate(-50%, -2.15rem);
+  }
+}
+@keyframes circle{
+  0% {
+      opacity: 0.4;
+  }
+  50% {
+      opacity: 0.7;
+      box-shadow: 0 0 0 0.125rem rgba(255,255,255,0.3), 0 0 0.75rem 0.75rem black, 0 0 0 0.75rem rgba(255,255,255,0.8);
+  }
+  100% {
+      box-shadow: 0 0 0 0.125rem rgba(255,255,255,0.3), 0 0 0.75rem 0.75rem black, 0 0 0 0.75rem rgba(255,255,255,0.8);
+      transform: translateX(-50%) scale(1);
+      opacity: 0;
+  }
+}
+@keyframes bigCircle{
+  0% {
+      opacity: 0.4;
+  }
+  50% {
+      opacity: 0.7;
+      box-shadow: 0 0 0 0.125rem rgba(255,255,255,0.3), 0 0 0.75rem 0.75rem black, 0 0 0 0.75rem rgba(255,255,255,0.8);
+  }
+  100% {
+      box-shadow: 0 0 0 0.125rem rgba(255,255,255,0.3), 0 0 0.75rem 0.75rem black, 0 0 0 0.75rem rgba(255,255,255,0.8);
+      transform: translateX(-50%) scale(3);
+      opacity: 0;
+  }
+}
+@keyframes toTop{
+  0%{
+    transform: translateY(0);
+  }
+  100%{
+    transform: translateY(-10px);
+  }
+}
+@keyframes grows {
+  0% {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1);
+    /* width: 50%;
+    left: 25%; */
+  }
+  50% {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.2);
+    /* width: 60%;
+    left: 20%; */
+  }
+  100% {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1);
+    /* width: 50%;
+    left: 25%; */
+  }
+}
+@keyframes show {
+  0% {
+    width: 0;
+  }
+  100% {
+    width: 100%;
+    
+  }
+}
+
+
+
+

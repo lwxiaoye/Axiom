@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+input_file="${1:-}"
+output_dir="${2:-/workspace/files}"
+if [ -z "$input_file" ]; then
+  echo "usage: to-pdf <input-file> [output-dir]" >&2
+  exit 2
+fi
+if [ ! -f "$input_file" ]; then
+  echo "input file does not exist: $input_file" >&2
+  exit 3
+fi
+
+mkdir -p "$output_dir"
+profile_dir="/tmp/lo_profile_$$"
+soffice --headless --norestore --nolockcheck \
+  -env:UserInstallation="file://${profile_dir}" \
+  --convert-to pdf --outdir "$output_dir" "$input_file" >&2
+
+base_name="$(basename "$input_file")"
+stem="${base_name%.*}"
+echo "${output_dir}/${stem}.pdf"

@@ -1,0 +1,127 @@
+# Local AXIOM stack. From the repository root:
+#   Copy-Item deploy/local/.env.example deploy/local/.env
+#   # replace CHANGE_ME
+#   docker compose --env-file deploy/local/.env -f docker-compose.local.yml up -d --build
+#
+# This starts MySQL, PostgreSQL, Qdrant, Agent API and Worker.
+# Login, knowledge ACL and campus publishing still need a compatible Java backend on :9090.
+
+name: axiom-local
+
+x-agent-environment: &agent-environment
+  PROJECT_NAME: AXIOM Agent API
+  DATABASE_URL: mysql+aiomysql://axiom:${AXIOM_DB_PASSWORD}@mysql:3306/ai_boot?charset=utf8mb4
+  CHECKPOINT_DATABASE_URL: postgresql://axiom:${AXIOM_DB_PASSWORD}@postgres:5432/langgraph_checkpoints
+  RUNTIME_DATABASE_URL: postgresql+psycopg://axiom:${AXIOM_DB_PASSWORD}@postgres:5432/agent_runtime
+  QDRANT_URL: http://qdrant:6333
+  JAVA_INTERNAL_BASE: http://host.docker.internal:9090
+  NEWAPI_BASE_URL: http://host.docker.internal:3001/v1
+  RUNTIME_REQUIRED: "true"
+  MIGRATE_ON_STARTUP: "true"
+  FILE_STORAGE_PROVIDER: local
+  CONNECTOR_SECRET_KEY: ${AXIOM_CONNECTOR_SECRET}
+  GATEWAY_IDENTITY_SIGNATURE_REQUIRED: "false"
+
+x-agent-healthcheck: &agent-healthcheck
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5)"]
+  interval: 15s
+  timeout: 10s
+  retries: 12
+  start_period: 180s
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: axiom-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${AXIOM_DB_PASSWORD:?Set AXIOM_DB_PASSWORD in deploy/local/.env}
+      MYSQL_DATABASE: ai_boot
+      MYSQL_USER: axiom
+      MYSQL_PASSWORD: ${AXIOM_DB_PASSWORD}
+    ports:
+      - "3306:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - axiom_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${AXIOM_DB_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: axiom-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: axiom
+      POSTGRES_PASSWORD: ${AXIOM_DB_PASSWORD:?Set AXIOM_DB_PASSWORD in deploy/local/.env}
+      POSTGRES_DB: langgraph_checkpoints
+    ports:
+      - "5432:5432"
+    volumes:
+      - axiom_pg_data:/var/lib/postgresql/data
+      - ./deploy/local/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U axiom -d langgraph_checkpoints"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.7
+    container_name: axiom-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - axiom_qdrant_data:/qdrant/storage
+
+  agent-api:
+    build: ./agent-api
+    container_name: axiom-agent-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment: *agent-environment
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./agent-api/data/user_files:/app/data/user_files
+    healthcheck: *agent-healthcheck
+    depends_on:
+      mysql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  agent-worker:
+    build: ./agent-api
+    container_name: axiom-agent-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    environment: *agent-environment
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./agent-api/data/user_files:/app/data/user_files
+    depends_on:
+      mysql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+volumes:
+  axiom_mysql_data:
+  axiom_pg_data:
+  axiom_qdrant_data:

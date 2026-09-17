@@ -1,0 +1,72 @@
+
+# Default server configuration
+#
+server {
+	listen 80 default_server;
+	listen [::]:80 default_server;
+	
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Content-Type-Options "nosniff";
+    send_timeout 60000s;
+    client_max_body_size 200m;
+
+  
+	
+    location ~* \.mjs$ {
+            root /var/www/html;
+            types {
+                    application/javascript js mjs;
+            }
+            default_type application/javascript;
+            try_files $uri =404;
+     }
+
+    location /assets/ {
+            root /var/www/html;
+            try_files $uri =404;
+     }
+
+    location /js/ {
+            root /var/www/html;
+            try_files $uri =404;
+     }
+
+    location / {
+            root   /var/www/html;
+        	  index  index.html index.htm;
+        	  try_files $uri $uri/ /index.html;
+     }
+     location /api/ {
+		proxy_redirect http://127.0.0.1:9090/ /;
+                proxy_pass http://127.0.0.1:9090/;
+	        proxy_set_header Connection "upgrade";
+	        proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_read_timeout 60000;
+	}	
+	
+	location /agent-api/ {
+		proxy_pass http://127.0.0.1:9080/agent-api/agent-api/;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_read_timeout 60000;
+	}
+
+	# The dynamic iframe page sets its own origin-specific frame-ancestors CSP.
+	# A child add_header block prevents the server-level SAMEORIGIN header from
+	# being inherited for this exact location; no other endpoint can be framed.
+	location ^~ /agent-api/embed/v1/frame/ {
+		proxy_pass http://127.0.0.1:9080/agent-api/agent-api/embed/v1/frame/;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_read_timeout 60000;
+		proxy_hide_header X-Frame-Options;
+		add_header X-Frame-Options "" always;
+	}
+
+}

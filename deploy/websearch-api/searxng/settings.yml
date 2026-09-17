@@ -1,0 +1,45 @@
+# SearXNG 配置（联网搜索"搜索段"）。
+# 关键：开启 JSON API（默认只有 html）+ 关闭 limiter（否则 agent-api 调用会被反爬拦）。
+# 仅在内网 / 防火墙后使用；不要暴露公网。
+use_default_settings: true
+
+general:
+  instance_name: "AXIOM 校园智能体内部搜索"
+  donation_url: false
+  contact_url: false
+
+server:
+  # 生产请改成随机字符串：openssl rand -hex 32
+  secret_key: "CHANGE_ME"
+  limiter: false
+  image_proxy: false
+  method: "GET"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "zh"
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true
+
+# ⚠️ 境内服务器必读：SearXNG 默认引擎（google/duckduckgo/brave/startpage/wikipedia）在国内被墙，
+# 会全部 timeout → 搜索出 0 结果，而且每次搜索都要白等它们超时。
+# 下面：关掉被墙的境外引擎，启用国内可达的 bing 作主力。
+# 上线后务必实测：curl "http://<服务器IP>:8085/search?q=测试&format=json"，按实际返回增删引擎。
+engines:
+  # —— 关掉被墙的境外引擎 ——
+  - { name: google, disabled: true }
+  - { name: duckduckgo, disabled: true }
+  - { name: brave, disabled: true }
+  - { name: startpage, disabled: true }
+  - { name: wikipedia, disabled: true }
+  - { name: qwant, disabled: true }
+  # —— 启用国内可达引擎 ——
+  - { name: bing, engine: bing, base_url: "https://cn.bing.com/", disabled: false }      # bing.com 国内可访问，作主力搜索引擎
+  # 想加百度：取消下面这行注释。若加了 SearXNG 起不来 / 报 unknown engine 'baidu'，
+  # 说明该 SearXNG 版本没内置百度引擎，删掉这行即可（bing 已够用）。
+  # - { name: baidu, engine: baidu, shortcut: bd, disabled: false }

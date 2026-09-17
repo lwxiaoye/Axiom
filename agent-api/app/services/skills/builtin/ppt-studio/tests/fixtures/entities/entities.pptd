@@ -1,0 +1,5 @@
+version: v2
+title: Rich-text normalization integration
+size: [960, 540]
+pages:
+  - pages/01.page

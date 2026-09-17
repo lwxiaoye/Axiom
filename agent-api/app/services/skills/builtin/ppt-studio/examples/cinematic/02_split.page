@@ -1,0 +1,51 @@
+pageType: content
+background: {type: solid, color: "#0B0B0D"}
+elements:
+  - elementId: photo
+    elementType: image
+    bounds: [0, 0, 528, 540]
+    src: media/split.jpg
+    fit: {mode: cover}
+  - elementId: kicker
+    elementType: text
+    bounds: [568, 148, 340, 24]
+    content:
+      align: [left, middle]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 11
+      letterSpacing: 3
+      color: "#C9A227"
+      text: |
+        <p>CHAPTER  02</p>
+  - elementId: title
+    elementType: text
+    bounds: [564, 180, 352, 96]
+    content:
+      align: [left, top]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 32
+      bold: true
+      color: "#F4F1EA"
+      text: |
+        <p>左图齐边裁切<br/>右暗底只放短句</p>
+  - elementId: body
+    elementType: text
+    bounds: [564, 292, 348, 88]
+    content:
+      align: [left, top]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 15
+      lineHeight: 1.45
+      color: "#9A968C"
+      text: |
+        <p>正文不超过三行。不要信息卡片，不要顶栏。</p>
+animations:
+  - elementId: title
+    effect: fade-in
+    trigger: afterPrevious
+    durationMs: 500
+  - elementId: body
+    effect: float-in
+    direction: up
+    trigger: afterPrevious
+    durationMs: 450

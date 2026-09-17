@@ -1,0 +1,32 @@
+[server]
+host = "0.0.0.0"
+port = 8080
+max_sandbox_timeout_seconds = 7200
+limit_concurrency = 128
+
+[log]
+level = "INFO"
+
+[runtime]
+type = "docker"
+execd_image = "opensandbox/execd:v1.0.21"
+
+[store]
+type = "sqlite"
+path = "/root/.opensandbox/opensandbox.db"
+
+[docker]
+network_mode = "agent-api_opensandbox_sandbox_network"
+drop_capabilities = ["ALL"]
+no_new_privileges = true
+pids_limit = 128
+port_range_min = 40000
+port_range_max = 41000
+
+[ingress]
+mode = "direct"
+
+[egress]
+image = "opensandbox/egress:v1.1.5"
+mode = "dns"
+disable_ipv6 = true

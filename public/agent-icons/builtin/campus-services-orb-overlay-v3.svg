@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="campus-orb-fill" cx="32%" cy="18%" r="88%" fx="32%" fy="18%">
+      <stop offset="0" stop-color="#1a79ff" />
+      <stop offset="0.48" stop-color="#0b64f8" />
+      <stop offset="0.78" stop-color="#0758ee" />
+      <stop offset="1" stop-color="#0349d9" />
+    </radialGradient>
+  </defs>
+
+  <circle cx="231" cy="276" r="130" fill="url(#campus-orb-fill)" />
+</svg>

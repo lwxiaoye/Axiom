@@ -1,0 +1,19 @@
+# 测试专用依赖（2026-07-27 补）。
+#
+# 为什么单独一个文件、而不是塞进 requirements.txt：这些不该进生产镜像。
+#
+# 为什么必须落成文件：此前它们只被手工 pip install 进**运行中的容器**，不在任何清单里 ——
+# 任何一次 `docker compose up -d --build` 都会连同镜像一起清掉，表现为「昨天还能跑的 859
+# 个测试今天全红」（2026-07-27 部署时实测踩到：先是 pytest 整个没了，装回最新版后又因
+# pytest-asyncio 大版本变化 19 failed/47 errors，最后定位到真凶是缺 aiosqlite）。
+# 版本按当时容器内实际可用的组合钉住，别随手升。
+#
+# 用法：
+#   建镜像时（推荐，重建容器后依然在）：docker build --build-arg INSTALL_DEV_DEPS=1 ...
+#     或在 docker-compose.local.yml 的 agent-api 下加 build: {args: {INSTALL_DEV_DEPS: "1"}}
+#   临时补进正在跑的容器：docker exec agent-api pip install -r requirements-dev.txt
+#     ——注意这种装法**下一次 up -d 就没了**（容器会被 recreate）。
+pytest==7.4.4
+pytest-asyncio==0.23.8
+pytest-subtests==0.12.1
+aiosqlite            # 测试用 sqlite+aiosqlite 内存库替代 MySQL（tool_gateway 等 fixture 依赖）

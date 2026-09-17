@@ -1,0 +1,11 @@
+{
+  "name": "ppt-studio",
+  "description": "创建、编辑、复刻和导出演示文稿。在沙箱内用 PPTD 逐页创作，用 run_export.py 导出 PPTX，再通过平台发布到「我的文件」。不要探测 Node/npm，不要等 Chromium 审图，不要交付源工程 ZIP。",
+  "category": ["other"],
+  "version": "3.0.7",
+  "upstream": {
+    "repository": "https://github.com/jinwyp/open-ppt-skill",
+    "skill": "open-kimi-ppt",
+    "commit": "07eeaadcb04c32c9adb107eb5c8608e6be4e1008"
+  }
+}

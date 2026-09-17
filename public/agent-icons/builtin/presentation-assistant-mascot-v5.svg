@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <radialGradient id="presentation-orb-fill" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(142 236) rotate(51) scale(338)">
+      <stop stop-color="#1A79FF" />
+      <stop offset="0.48" stop-color="#0B64F8" />
+      <stop offset="0.78" stop-color="#0758EE" />
+      <stop offset="1" stop-color="#0349D9" />
+    </radialGradient>
+    <linearGradient id="presentation-page-fill" x1="286" y1="28" x2="286" y2="474" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EDF5FF" />
+      <stop offset="1" stop-color="#C4DAFF" />
+    </linearGradient>
+    <linearGradient id="presentation-slide-fill" x1="280" y1="174" x2="280" y2="458" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#72ACF8" />
+      <stop offset="1" stop-color="#A9CAFF" />
+    </linearGradient>
+  </defs>
+
+  <rect x="143" y="40" width="328" height="430" rx="32" fill="#AFCBFA" opacity="0.56" />
+  <rect x="122" y="28" width="336" height="446" rx="32" fill="url(#presentation-page-fill)" stroke="#AFCBFA" stroke-width="6" />
+  <path d="M138 174H306L428 270V458H138V174Z" fill="url(#presentation-slide-fill)" />
+  <path d="M306 174L428 270H345C323.461 270 306 252.539 306 231V174Z" fill="#8EBBFA" opacity="0.82" />
+  <path d="M138 174H306L428 270" stroke="#8AB8F7" stroke-width="5" stroke-linejoin="round" />
+
+  <circle cx="190" cy="350" r="158" fill="url(#presentation-orb-fill)" />
+</svg>

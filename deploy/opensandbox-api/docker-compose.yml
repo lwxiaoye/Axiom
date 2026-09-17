@@ -1,0 +1,58 @@
+services:
+  sandbox-runtime-image:
+    build:
+      context: .
+      dockerfile: sandbox/Dockerfile
+    image: agent-sandbox-py:local
+    container_name: opensandbox-sandbox-image-builder
+    entrypoint: ["/bin/true"]
+    restart: "no"
+    network_mode: "none"
+
+  opensandbox-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+        OPENSANDBOX_SERVER_VERSION: "0.2.2"
+    image: axiom/opensandbox-server:local
+    container_name: opensandbox-server
+    restart: unless-stopped
+    ports:
+      # 开发机通过 127.0.0.1:8091 访问；宿主机防火墙必须限制来源。
+      - "0.0.0.0:8091:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/sandbox.toml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - opensandbox_state:/root/.opensandbox
+      - ./sandbox.toml:/etc/opensandbox/sandbox.toml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      sandbox-runtime-image:
+        condition: service_completed_successfully
+    networks:
+      - agent-network
+      - sandbox-network
+
+volumes:
+  opensandbox_state:
+    name: opensandbox_state
+
+networks:
+  agent-network:
+    name: agent-api_agent-network
+    external: true
+  sandbox-network:
+    name: agent-api_opensandbox_sandbox_network
+    driver: bridge
+    internal: true

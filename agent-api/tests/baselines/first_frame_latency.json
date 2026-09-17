@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-17T09:08:16.132729+00:00",
+  "path": "accept_harness_run + subscribe_run(harness/1)",
+  "scene": "simple",
+  "model": "deepseek-v4-flash",
+  "origin_wsr_compare": {
+    "ran": false,
+    "reason": "脏工作区禁止 checkout/reset 覆盖；本机不能并行起 origin/wsr 老容器对照。对照需在独立工作树执行 git show origin/wsr 时代码。"
+  },
+  "status": "skip",
+  "reason": "当前账号未分配模型 API Key，请联系管理员"
+}

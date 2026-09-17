@@ -1,0 +1,48 @@
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-dotenv==1.0.1
+pydantic==2.7.4
+pydantic-settings>=2.6.0,<3.0.0
+packaging>=23.2
+httpx>=0.28.0,<0.30.0
+# Workflow function-call arguments use JSON Schema validation (including local $ref).
+jsonschema>=4.26.0,<5.0.0
+# LangGraph Runtime（架构文档 §10.5.10 执行内核，2026-07-02）：
+# 旧 langchain==0.1.9 / langchain-community / langgraph==0.0.26 为死依赖已移除；
+# 代码实际只用 langchain_core（消息类型）与 langchain_openai（ChatOpenAI）。
+langchain-core==1.4.8
+langchain-openai==1.3.3
+langgraph==1.2.7
+# Checkpointer：PG sidecar（与架构 §16 目标库一致）；3.x 才兼容 langgraph 1.2 的 checkpoint 4.x
+langgraph-checkpoint-postgres==3.1.0
+psycopg[binary]==3.3.4
+sqlalchemy[asyncio]==2.0.27
+aiomysql==0.2.0
+cryptography==42.0.5
+sse-starlette==2.0.0
+python-multipart==0.0.9
+minio>=7.2.0
+qdrant-client==1.9.1
+mcp==1.9.4
+pypdf>=4.0.0
+python-docx>=1.1.0
+# 扫描版 PDF（无文字层）→ 逐页渲染成 PNG → 自建 OCR 端点识别（ADR-040 补充）
+pypdfium2>=4.30.0
+# PPT 解析（python-pptx）与位图处理（Pillow）：document_parse / visual_review / output_review /
+# subagent_turn 均依赖；Pillow 还供 pypdfium2 .to_pil() 与 visual_review 模块级 import。此前漏登记，
+# 靠运行容器里手动 pip 装维持，全新镜像/服务端部署会 ModuleNotFoundError → PPT 报「文件解析失败」
+# （2026-07-22 补登）。python-pptx 本身依赖 Pillow，这里显式声明避免依赖隐式传递。
+python-pptx>=1.0.0
+Pillow>=10.0.0
+# Excel 解析（.xlsx/.xlsm → 表格文本）：document_parse 主对话附件全类型支持（2026-07-23）；
+# .xls 旧二进制不装 xlrd，走「另存为 .xlsx」引导（与 .ppt/.doc 同一模式）
+openpyxl>=3.1.0
+# Phase 0 硬前置：迁移框架，替代启动期 create_all + 裸 ALTER（ADR-018）
+alembic>=1.13.0
+# P1 双目标迁移（migrations/）：MySQL 目标的同步驱动——env.py 把 aiomysql URL 转 pymysql
+# 跑迁移；应用运行时仍用 aiomysql，互不影响
+pymysql>=1.1.0
+# ADR-047 §6.5：本地沙箱 provider 的 sdk 后端（容器内无 docker CLI，经 socket 走 docker-py）
+docker>=7.0.0
+# OpenSandbox provider（与 opensandbox_adapter.py 的 current SDK contract 对齐）
+opensandbox==0.1.15

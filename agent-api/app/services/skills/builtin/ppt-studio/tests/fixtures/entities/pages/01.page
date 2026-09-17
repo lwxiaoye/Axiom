@@ -1,0 +1,17 @@
+pageType: content
+background: {type: solid, color: "#FFFFFF"}
+elements:
+  - elementId: raw-comparison
+    elementType: text
+    bounds: [80, 120, 800, 80]
+    content: {fontSize: 28, text: 'raw 600 → <100'}
+  - elementId: encoded-comparison
+    elementType: text
+    bounds: [80, 240, 800, 80]
+    content: {fontSize: 28, text: 'encoded 600 → &lt;100'}
+  - elementId: rich-comparison
+    elementType: text
+    bounds: [80, 360, 800, 80]
+    content:
+      fontSize: 28
+      text: '<p>rich 600 → &lt;100</p>'

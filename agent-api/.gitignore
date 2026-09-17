@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+.env.han
+*.egg-info/
+dist/
+build/
+
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite3
+
+# Local environment and runtime credentials are never versioned.
+.env
+.env.*
+!*.example
+
+# 「我的文件」用户文件存储（ADR-047 §6.6，经 ./:/app bind mount 持久，不进 git）
+data/user_files/
+
+# 连接器凭据的 Fernet 主密钥（connectors/crypto.py）。**绝不能进 git**：
+# 它是 GitHub token / Gmail OAuth / 邮箱授权码的解密钥匙，进了共享仓库等于
+# 凭据全部泄露。文件缺失时 crypto.py 会自动重新生成（权限 0600），所以不落库
+# 唯一的代价是换机器后已存的凭据需要重新授权——远比泄露便宜。
+data/.connector_key

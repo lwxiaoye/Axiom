@@ -1,0 +1,152 @@
+<template>
+  <a-input ref="input" :value="innerValue" v-bind="cellProps" @blur="handleBlur" @change="handleChange" />
+</template>
+
+<script lang="ts">
+  import { computed, defineComponent } from 'vue';
+  import { isString } from '/@/utils/is';
+  import { JVxeComponent, JVxeTypes } from '/@/components/jeecg/JVxeTable/types';
+  import { useJVxeComponent, useJVxeCompProps } from '/@/components/jeecg/JVxeTable/hooks';
+
+  const NumberRegExp = /^-?\d+\.?\d*$/;
+  export default defineComponent({
+    name: 'JVxeInputCell',
+    props: useJVxeCompProps(),
+    setup(props: JVxeComponent.Props) {
+      const { innerValue, cellProps, handleChangeCommon, handleBlurCommon } = useJVxeComponent(props);
+
+      // 是否是数字类型输入框
+      const isNumberType = props.type === JVxeTypes.inputNumber;
+
+      /**
+       * 计算数字类型的限制属性
+       * 包含最大值、最小值和精度配置，供输入组件和格式化逻辑使用
+       */
+      const numberProps = computed<{
+        max?: number,
+        min?: number,
+        precision?: number,
+      }>(() => {
+        const {max, min, precision} = cellProps.value as Recordable;
+        const nProps: Recordable = {};
+        // 最大值
+        if (typeof max === 'number') {
+          nProps.max = max;
+        }
+        // 最小值
+        if (typeof min === 'number') {
+          nProps.min = min;
+        }
+        // 数值精度，保留小数位数
+        if (typeof precision === 'number') {
+          nProps.precision = precision;
+        }
+        return nProps;
+      });
+
+      /** 处理change事件 */
+      function handleChange(event) {
+        let { target } = event;
+        let { value, selectionStart } = target;
+        let change = true;
+        if (isNumberType) {
+          // 判断输入的值是否匹配数字正则表达式，不匹配就还原
+          if (!NumberRegExp.test(value) && value !== '' && value !== '-') {
+            change = false;
+            value = innerValue.value;
+            target.value = value || '';
+            if (typeof selectionStart === 'number') {
+              target.selectionStart = selectionStart - 1;
+              target.selectionEnd = selectionStart - 1;
+            }
+          } else {
+            // 例如：41.1 -> 41.10, 100.1 -> 100.10 不执行handleChangeCommon 函数。
+            if (value.indexOf('.') != -1) {
+              const result = value.split('.').pop();
+              if (result && result.length >= 2 && result.substr(-1) === '0') {
+                change = false;
+                innerValue.value = value;
+              }
+            }
+          }
+        }
+        // 触发事件，存储输入的值
+        if (change) {
+          handleChangeCommon(value);
+        }
+      }
+
+      /** 处理blur失去焦点事件 */
+      function handleBlur(event) {
+        let { target } = event;
+        // 判断输入的值是否匹配数字正则表达式，不匹配就置空
+        if (isNumberType) {
+          if (!NumberRegExp.test(target.value)) {
+            target.value = '';
+          } else {
+            const parsedValue = Number.parseFloat(target.value);
+            const clampedValue = clampNumber(parsedValue);
+            target.value = applyPrecision(clampedValue);
+          }
+        }
+        handleChangeCommon(target.value, true);
+        handleBlurCommon(target.value);
+      }
+
+      /**
+       * 依据最小值和最大值限制数值
+       * @param value 需要裁剪的数值
+       */
+      function clampNumber(value: number): number {
+        let result = value;
+        const { max, min } = numberProps.value;
+        // 应用最小值限制
+        if (typeof min === 'number') {
+          result = Math.max(min, result);
+        }
+        // 应用最大值限制
+        if (typeof max === 'number') {
+          result = Math.min(max, result);
+        }
+        return result;
+      }
+
+      /**
+       * 按配置精度格式化数值
+       * @param value 待格式化的数值
+       */
+      function applyPrecision(value: number): number {
+        const { precision } = numberProps.value;
+        if (typeof precision === 'number') {
+          return Number(value.toFixed(precision));
+        }
+        return value;
+      }
+
+      return {
+        innerValue,
+        cellProps,
+        isNumberType,
+        handleChange,
+        handleBlur,
+      };
+    },
+    enhanced: {
+      installOptions: {
+        autofocus: '.ant-input',
+      },
+      getValue(value, ctx) {
+        if (ctx?.props?.type === JVxeTypes.inputNumber && isString(value)) {
+          if (NumberRegExp.test(value)) {
+            // 【issues/I5IHN7】修复无法输入小数点的bug
+            if (/\.0*$/.test(value)) {
+              return value;
+            }
+            return Number.parseFloat(value);
+          }
+        }
+        return value;
+      },
+    } as JVxeComponent.EnhancedPartial,
+  });
+</script>

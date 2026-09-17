@@ -1,0 +1,164 @@
+# AXIOM 校园智能体 · 联网搜索自托管栈（部署在大内存服务器上，一条 `docker compose up -d` 起全部）
+# 三段：SearXNG（搜索）+ Firecrawl 自托管全栈（抓取）+ TEI reranker（重排）
+#
+# 对外暴露端口（agent-api 按 http://<本服务器IP>:<端口> 访问）：
+#   - SearXNG      :8085
+#   - Firecrawl API:8086
+#   - Reranker(TEI):8087
+#
+# Firecrawl 部分改编自官方 self-host compose（github.com/firecrawl/firecrawl/docker-compose.yaml），
+# 用预构建 ghcr 镜像替代 build，免克隆源码。若上游架构升级导致启动异常，对照官方 SELF_HOST 文档校准。
+name: ai-zhongtai-websearch
+
+networks:
+  websearch:
+    driver: bridge
+
+volumes:
+  firecrawl-pg-data:
+  reranker-cache:
+  reranker-models:   # 预下载的 reranker 模型（init 容器写入、TEI 只读加载）
+
+services:
+  # ============ 搜索段：SearXNG ============
+  searxng:
+    image: searxng/searxng:latest
+    container_name: ws-searxng
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8085/
+    restart: unless-stopped
+    networks: [websearch]
+
+  # ============ 抓取段：Firecrawl 自托管全栈 ============
+  firecrawl-redis:
+    image: redis:alpine
+    container_name: ws-firecrawl-redis
+    command: redis-server --bind 0.0.0.0
+    restart: unless-stopped
+    networks: [websearch]
+
+  firecrawl-rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ws-firecrawl-rabbitmq
+    command: rabbitmq-server
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks: [websearch]
+
+  firecrawl-postgres:
+    # nuq 队列后端（Firecrawl 定制 Postgres 镜像）
+    image: ghcr.io/firecrawl/nuq-postgres:latest
+    container_name: ws-firecrawl-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${FIRECRAWL_PG_PASSWORD:-CHANGE_ME}
+      POSTGRES_DB: postgres
+    volumes:
+      - firecrawl-pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks: [websearch]
+
+  firecrawl-playwright:
+    # 无头 Chromium，负责渲染 JS 站点后抽取正文
+    image: ghcr.io/firecrawl/playwright-service:latest
+    container_name: ws-firecrawl-playwright
+    environment:
+      PORT: 3000
+      MAX_CONCURRENT_PAGES: ${CRAWL_CONCURRENT_REQUESTS:-10}
+      BLOCK_MEDIA: "true"
+    # 256G 服务器可放开；小机器按需下调
+    mem_limit: 4g
+    restart: unless-stopped
+    networks: [websearch]
+
+  firecrawl-api:
+    # api 容器内含 harness，自管 worker（官方 self-host 现行架构）
+    image: ghcr.io/firecrawl/firecrawl:latest
+    container_name: ws-firecrawl-api
+    depends_on:
+      firecrawl-redis:
+        condition: service_started
+      firecrawl-playwright:
+        condition: service_started
+      firecrawl-rabbitmq:
+        condition: service_healthy
+      firecrawl-postgres:
+        condition: service_started
+    environment:
+      HOST: "0.0.0.0"
+      PORT: 3002
+      REDIS_URL: redis://firecrawl-redis:6379
+      REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape
+      POSTGRES_HOST: firecrawl-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${FIRECRAWL_PG_PASSWORD:-CHANGE_ME}
+      POSTGRES_DB: postgres
+      NUQ_RABBITMQ_URL: amqp://firecrawl-rabbitmq:5672
+      USE_DB_AUTHENTICATION: "false"
+      NUM_WORKERS_PER_QUEUE: ${NUM_WORKERS_PER_QUEUE:-8}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-5}
+      ENV: local
+    command: node dist/src/harness.js --start-docker
+    ports:
+      - "8086:3002"
+    mem_limit: 8g
+    restart: unless-stopped
+    networks: [websearch]
+
+  # ============ 重排段：Text-Embeddings-Inference + reranker 模型 ============
+  # 为什么要一个「预下载」init 容器：服务器在墙内，TEI 自带的 Rust 下载器和 hf-mirror.com
+  # 不兼容（报 "Header content-range is missing"），换任何模型都下不动。改由 python 的
+  # huggingface-cli（走 hf-mirror 稳定）先把模型下到共享卷 reranker-models，TEI 只从本地
+  # 路径加载 —— 一次 `docker compose up -d` 即可，第一次自动下载，之后秒起。
+  reranker-model-init:
+    image: python:3.11-slim
+    container_name: ws-reranker-model-init
+    environment:
+      HF_ENDPOINT: https://hf-mirror.com     # 墙内镜像；能直连 huggingface.co 则可删
+    volumes:
+      - reranker-models:/models
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ -f /models/bge-reranker-v2-m3/config.json ]; then
+          echo "[init] 模型已存在，跳过下载"; exit 0
+        fi
+        echo "[init] 安装 huggingface-cli 并从 hf-mirror 下载 BAAI/bge-reranker-v2-m3 ..."
+        pip install -q -i https://pypi.tuna.tsinghua.edu.cn/simple "huggingface_hub[cli]==0.25.2"
+        huggingface-cli download BAAI/bge-reranker-v2-m3 --local-dir /models/bge-reranker-v2-m3
+        echo "[init] 下载完成"
+    restart: "no"
+    networks: [websearch]
+
+  reranker:
+    # CPU 版镜像（无 GPU 也能跑）。如服务器有 NVIDIA GPU，换 GPU 镜像见 README「上 GPU」。
+    # tag 以 github.com/huggingface/text-embeddings-inference releases 为准，按需升级。
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: ws-reranker
+    depends_on:
+      reranker-model-init:
+        condition: service_completed_successfully   # 等模型下载完再启动
+    # 从本地预下载路径加载 BAAI/bge-reranker-v2-m3（TEI 原生支持，无需 trust_remote_code；
+    # CPU 常驻 ~2~2.5G）。/rerank 接口与 jina 一致，agent-api 无需改。
+    command: --model-id /models/bge-reranker-v2-m3 --auto-truncate
+    ports:
+      - "8087:80"
+    volumes:
+      - reranker-models:/models      # init 下好的模型（只读加载）
+      - reranker-cache:/data
+    mem_limit: 16g
+    restart: unless-stopped
+    networks: [websearch]

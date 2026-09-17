@@ -1,0 +1,44 @@
+pageType: content
+background: {type: solid, color: "#07080A"}
+elements:
+  - elementId: stat
+    elementType: text
+    bounds: [48, 140, 864, 180]
+    content:
+      align: [left, middle]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 128
+      bold: true
+      color: "#F4F1EA"
+      text: |
+        <p>1.5T</p>
+  - elementId: label
+    elementType: text
+    bounds: [56, 332, 720, 40]
+    content:
+      align: [left, top]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 20
+      color: "#C9A227"
+      text: |
+        <p>一个数字占一整页</p>
+  - elementId: note
+    elementType: text
+    bounds: [56, 380, 680, 48]
+    content:
+      align: [left, top]
+      fontFamily: {latin: "Helvetica Neue", ea: "Microsoft YaHei"}
+      fontSize: 14
+      color: "#9A968C"
+      text: |
+        <p>解释只留一行。不要四宫格卡片墙。</p>
+animations:
+  - elementId: stat
+    effect: float-in
+    direction: up
+    trigger: afterPrevious
+    durationMs: 550
+  - elementId: label
+    effect: fade-in
+    trigger: afterPrevious
+    durationMs: 400
