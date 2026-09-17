@@ -5,6 +5,7 @@ import { setAuthCache } from '@/utils/auth';
 import { TOKEN_KEY } from '@/enums/cacheEnum';
 import { router } from '@/router';
 import { PageEnum } from '@/enums/pageEnum';
+import { loginRedirectQuery } from '/@/router/postLoginRedirect';
 
 enum Api {
   GetMenuList = '/sys/permission/getUserPermissionByToken',
@@ -40,13 +41,12 @@ export function getBackMenuAndPerms() {
       const userStore = useUserStoreWithOut();
       userStore.setToken('');
       setAuthCache(TOKEN_KEY, null);
-      router.push({
-        path: PageEnum.BASE_LOGIN,
-        query: {
-          // 传入当前的路由，登录成功后跳转到当前路由
-          redirect: router.currentRoute.value.fullPath,
-        }
-      });
+      if (router.currentRoute.value.path !== PageEnum.BASE_LOGIN) {
+        router.push({
+          path: PageEnum.BASE_LOGIN,
+          query: loginRedirectQuery(router.currentRoute.value.fullPath),
+        });
+      }
     }
   });
 }

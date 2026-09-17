@@ -81,7 +81,6 @@ class UserContext(BaseModel):
     access_token: str = Field(default="", exclude=True)
 
 
-_TOKEN_CACHE_TTL = 300
 _token_cache: dict[str, tuple[float, UserContext]] = {}
 
 
@@ -93,6 +92,8 @@ def _clean_access_token(x_access_token: Optional[str], authorization: Optional[s
 
 
 def _get_cached(token: str) -> Optional[UserContext]:
+    if settings.AUTH_TOKEN_CACHE_TTL_SECONDS <= 0:
+        return None
     cached = _token_cache.get(token)
     if not cached:
         return None
@@ -101,6 +102,16 @@ def _get_cached(token: str) -> Optional[UserContext]:
         _token_cache.pop(token, None)
         return None
     return user
+
+
+def _cache_verified(token: str, user: UserContext) -> None:
+    ttl = settings.AUTH_TOKEN_CACHE_TTL_SECONDS
+    if ttl > 0:
+        now = time.time()
+        for key, (expires, _) in list(_token_cache.items()):
+            if expires <= now:
+                _token_cache.pop(key, None)
+        _token_cache[token] = (now + ttl, user)
 
 
 def _verify_gateway_signature(
@@ -257,7 +268,7 @@ async def current_user(
             if verified.user_id != user_id:
                 raise HTTPException(401, "Gateway identity does not match access token")
             verified.access_token = token
-            _token_cache[token] = (time.time() + _TOKEN_CACHE_TTL, verified)
+            _cache_verified(token, verified)
             return verified
 
         # 网关身份路径的租户保持 "0"：tenant 不在 HMAC canonical（user_id/username/
@@ -284,7 +295,7 @@ async def current_user(
         return cached
     user = await _verify_token_with_java(token)
     user.access_token = token
-    _token_cache[token] = (time.time() + _TOKEN_CACHE_TTL, user)
+    _cache_verified(token, user)
     return user
 
 

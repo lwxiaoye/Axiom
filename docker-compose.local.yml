@@ -3,10 +3,9 @@
 #   # replace CHANGE_ME
 #   docker compose --env-file deploy/local/.env -f docker-compose.local.yml up -d --build
 #
-# This starts MySQL, PostgreSQL, Qdrant, Agent API and Worker.
-# Login, knowledge ACL and campus publishing still need a compatible Java backend on :9090.
+# This starts the Vue frontend, MySQL, PostgreSQL, Qdrant, Agent API, Worker and auth.
 
-name: axiom-local
+name: axiom
 
 x-agent-environment: &agent-environment
   PROJECT_NAME: AXIOM Agent API
@@ -14,8 +13,9 @@ x-agent-environment: &agent-environment
   CHECKPOINT_DATABASE_URL: postgresql://axiom:${AXIOM_DB_PASSWORD}@postgres:5432/langgraph_checkpoints
   RUNTIME_DATABASE_URL: postgresql+psycopg://axiom:${AXIOM_DB_PASSWORD}@postgres:5432/agent_runtime
   QDRANT_URL: http://qdrant:6333
-  JAVA_INTERNAL_BASE: http://host.docker.internal:9090
-  NEWAPI_BASE_URL: http://host.docker.internal:3001/v1
+  JAVA_INTERNAL_BASE: http://auth-api:9090
+  NEWAPI_BASE_URL: ${AXIOM_MODEL_BASE_URL:-http://host.docker.internal:3001/v1}
+  AUTH_TOKEN_CACHE_TTL_SECONDS: "0"
   RUNTIME_REQUIRED: "true"
   MIGRATE_ON_STARTUP: "true"
   FILE_STORAGE_PROVIDER: local
@@ -30,6 +30,26 @@ x-agent-healthcheck: &agent-healthcheck
   start_period: 180s
 
 services:
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend/Dockerfile
+      args:
+        VITE_LOGIN_AES_KEY: ${AXIOM_LOGIN_AES_KEY:-AxiomCampusKey16}
+        VITE_LOGIN_AES_IV: ${AXIOM_LOGIN_AES_IV:-AxiomCampusIv16!}
+        VITE_REQUEST_SIGNATURE_SALT: ${AXIOM_REQUEST_SIGNATURE_SALT:-AxiomSignSalt}
+        VITE_LOCAL_DEMO_USERNAME: ${AXIOM_LOCAL_DEMO_USERNAME:-}
+        VITE_LOCAL_DEMO_PASSWORD: ${AXIOM_LOCAL_DEMO_PASSWORD:-}
+    container_name: axiom-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3200:80"
+    depends_on:
+      auth-api:
+        condition: service_healthy
+      agent-api:
+        condition: service_healthy
+
   mysql:
     image: mysql:8.0
     container_name: axiom-mysql
@@ -40,7 +60,7 @@ services:
       MYSQL_USER: axiom
       MYSQL_PASSWORD: ${AXIOM_DB_PASSWORD}
     ports:
-      - "3307:3306"
+      - "127.0.0.1:3307:3306"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
       - axiom_mysql_data:/var/lib/mysql
@@ -60,7 +80,7 @@ services:
       POSTGRES_PASSWORD: ${AXIOM_DB_PASSWORD:?Set AXIOM_DB_PASSWORD in deploy/local/.env}
       POSTGRES_DB: langgraph_checkpoints
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - axiom_pg_data:/var/lib/postgresql/data
       - ./deploy/local/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -75,13 +95,36 @@ services:
     container_name: axiom-qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"
+      - "127.0.0.1:6333:6333"
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
     volumes:
       - axiom_qdrant_data:/qdrant/storage
+
+  auth-api:
+    build: ./auth-api
+    container_name: axiom-auth-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    environment:
+      LOGIN_AES_KEY: ${AXIOM_LOGIN_AES_KEY:-AxiomCampusKey16}
+      LOGIN_AES_IV: ${AXIOM_LOGIN_AES_IV:-AxiomCampusIv16!}
+      AXIOM_ADMIN_USER: ${AXIOM_ADMIN_USER:-admin}
+      AXIOM_ADMIN_PASSWORD: ${AXIOM_ADMIN_PASSWORD:?Set a unique AXIOM_ADMIN_PASSWORD in deploy/local/.env}
+      AXIOM_LOCAL_DEMO_LOGIN: ${AXIOM_LOCAL_DEMO_LOGIN:-false}
+      AXIOM_AUTH_DB: /app/data/auth.sqlite3
+      AXIOM_CORS_ORIGINS: ${AXIOM_CORS_ORIGINS:-http://127.0.0.1:3200,http://localhost:3200}
+    volumes:
+      - axiom_auth_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9090/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   agent-api:
     build:
@@ -90,7 +133,7 @@ services:
     container_name: axiom-agent-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment: *agent-environment
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -104,6 +147,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      auth-api:
+        condition: service_healthy
 
   agent-worker:
     build:
@@ -124,8 +169,11 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      auth-api:
+        condition: service_healthy
 
 volumes:
   axiom_mysql_data:
   axiom_pg_data:
   axiom_qdrant_data:
+  axiom_auth_data:

@@ -18,6 +18,7 @@ import { useSso } from '/@/hooks/web/useSso';
 import { isOAuth2AppEnv } from "/@/views/sys/login/useLogin";
 import { recordAuditEvent } from '/@/api/audit/audit.api';
 import { getUrlParam } from "@/utils";
+import { loginRedirectQuery, resolvePostLoginPath } from '/@/router/postLoginRedirect';
 interface dictType {
   [key: string]: any;
 }
@@ -153,10 +154,15 @@ export const useUserStore = defineStore({
       try {
         const { goHome = true, mode, ...loginParams } = params;
         const data = await loginApi(loginParams, mode);
-        const { token, userInfo } = data;
-        // save token
+        const { token, userInfo } = data || {};
+        if (!token) {
+          throw new Error('登录未返回凭证');
+        }
         this.setToken(token);
-        this.setTenant(userInfo.loginTenantId);
+        if (userInfo) {
+          this.setTenant(userInfo.loginTenantId);
+          this.setUserInfo(userInfo);
+        }
         return this.afterLoginAction(goHome, data);
       } catch (error) {
         return Promise.reject(error);
@@ -179,47 +185,37 @@ export const useUserStore = defineStore({
      * @param goHome
      */
     async afterLoginAction(goHome?: boolean, data?: any): Promise<any | null> {
-      if (!this.getToken) return null;
-      //获取用户信息
-      const userInfo = await this.getUserInfoAction();
-      // Java 侧登录日志仍是认证事实源；这里补充统一审计时间线，不影响登录成功路径。
+      const token = this.token || data?.token;
+      if (token) this.setToken(token);
+      if (data?.userInfo) this.setUserInfo(data.userInfo);
+      if (!this.getToken) return data ?? null;
+      let userInfo = this.userInfo || data?.userInfo;
+      try {
+        userInfo = (await this.getUserInfoAction()) || userInfo;
+      } catch {
+        if (!userInfo) throw new Error('获取用户信息失败');
+      }
       recordAuditEvent({ category: 'login', action: '登录成功', resource: 'Web 控制台' });
       const sessionTimeout = this.sessionTimeout;
       if (sessionTimeout) {
         this.setSessionTimeout(false);
       } else {
-        // // 构建后台菜单路由
-        // const permissionStore = usePermissionStore();
-        // if (!permissionStore.isDynamicAddedRoute) {
-        //   const routes = await permissionStore.buildRoutesAction();
-        //   routes.forEach((route) => {
-        //     router.addRoute(route as unknown as RouteRecordRaw);
-        //   });
-        //   router.addRoute(PAGE_NOT_FOUND_ROUTE as unknown as RouteRecordRaw);
-        //   permissionStore.setDynamicAddedRoute(true);
-        // }
-        
         await this.setLoginInfo({ ...data, isLogin: true });
-        // 代码逻辑说明: 登录成功后缓存拖拽模块的接口前缀
         localStorage.setItem(JDragConfigEnum.DRAG_BASE_URL, useGlobSetting().domainUrl);
 
-        // 代码逻辑说明: 修复登录成功后，没有正确重定向的问题
-        const redirect = router.currentRoute.value?.query?.redirect as string;
-        // 判断是否有 redirect 重定向地址
-        // 代码逻辑说明: 【QQYUN-5195】登录之后直接刷新页面导致没有进入创建组织页面------------
-        if (redirect && goHome) {
-          // router.options.history.base可替代之前的publicPath
-          // 当前页面打开
-          window.open(`${router.options.history.base}${redirect}`, '_self');
-          return data;
-        }
-
-        // 代码逻辑说明: 【issues/1102】设置单点登录后页面，进入首页提示404，也没有绘制侧边栏 #1102---
-        const ticket = getUrlParam('ticket');
-        if(ticket){
-          goHome && (window.location.replace((userInfo && userInfo.homePath) || PageEnum.BASE_HOME));
-        }else{
-          goHome && (await router.replace((userInfo && userInfo.homePath) || PageEnum.BASE_HOME));
+        const target = resolvePostLoginPath(
+          router.currentRoute.value?.query?.redirect,
+          userInfo?.homePath,
+        );
+        if (!goHome) {
+          /* session timeout overlay keeps the current page */
+        } else if (getUrlParam('ticket')) {
+          window.location.replace(target);
+        } else {
+          await router.replace(target);
+          if (router.currentRoute.value.path === PageEnum.BASE_LOGIN) {
+            window.location.replace(target);
+          }
         }
       }
       return data;
@@ -254,7 +250,11 @@ export const useUserStore = defineStore({
       if (!this.getToken) {
         return null;
       }
-      const { userInfo, sysAllDictItems } = await getUserInfo();
+      const payload = await getUserInfo();
+      if (!payload?.userInfo) {
+        throw new Error('获取用户信息失败');
+      }
+      const { userInfo, sysAllDictItems } = payload;
       if (userInfo) {
         console.log(userInfo)
 
@@ -321,13 +321,12 @@ export const useUserStore = defineStore({
         goLogin && await router.push({ name:"Login",query:{ tenantId:tenantId }})
       }else{
         // 代码逻辑说明: 修复登录成功后，没有正确重定向的问题
-        goLogin && (await router.push({
-          path: PageEnum.BASE_LOGIN,
-          query: {
-            // 传入当前的路由，登录成功后跳转到当前路由
-            redirect: router.currentRoute.value.fullPath,
-          }
-        }));
+        if (goLogin && router.currentRoute.value.path !== PageEnum.BASE_LOGIN) {
+          await router.push({
+            path: PageEnum.BASE_LOGIN,
+            query: loginRedirectQuery(router.currentRoute.value.fullPath),
+          });
+        }
 
       }
     },

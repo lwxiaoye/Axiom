@@ -2,9 +2,12 @@
 import asyncio
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.core import auth
+from fastapi import HTTPException
+import pytest
 
 
 def test_java_auth_bypasses_environment_proxy(monkeypatch):
@@ -42,3 +45,29 @@ def test_java_auth_bypasses_environment_proxy(monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_revoked_token_is_revalidated_instead_of_using_stale_cache(monkeypatch):
+    user = auth.UserContext(user_id="test-user", username="test-name")
+    monkeypatch.setattr(auth.settings, "AUTH_TOKEN_CACHE_TTL_SECONDS", 0)
+    monkeypatch.setattr(auth.settings, "GATEWAY_IDENTITY_SIGNATURE_REQUIRED", False)
+    monkeypatch.setattr(auth, "_token_cache", {"revoked-token": (time.time() + 300, user)})
+
+    async def rejected(_token):
+        raise HTTPException(401, "revoked")
+
+    monkeypatch.setattr(auth, "_verify_token_with_java", rejected)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(auth.current_user(x_access_token="revoked-token", authorization=None))
+    assert error.value.status_code == 401
+
+
+def test_explicit_cache_ttl_and_expiration(monkeypatch):
+    user = auth.UserContext(user_id="test-user", username="test-name")
+    monkeypatch.setattr(auth.settings, "AUTH_TOKEN_CACHE_TTL_SECONDS", 5)
+    monkeypatch.setattr(auth, "_token_cache", {})
+    auth._cache_verified("test-token", user)
+    assert auth._get_cached("test-token") == user
+    expires, _ = auth._token_cache["test-token"]
+    monkeypatch.setattr(auth.time, "time", lambda: expires + 1)
+    assert auth._get_cached("test-token") is None

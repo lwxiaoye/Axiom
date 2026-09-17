@@ -7,9 +7,10 @@ import { PageEnum } from '/@/enums/pageEnum';
 import { removeTabChangeListener } from '/@/logics/mitt/routeChange';
 
 export function createStateGuard(router: Router) {
-  router.afterEach((to) => {
-    // Just enter the login page and clear the authentication information
-    if (to.path === PageEnum.BASE_LOGIN) {
+  router.afterEach((to, from) => {
+    // Only clear auth when arriving at login from another page (logout / 401).
+    // Clearing on every /login query change wipes a token just written by a successful login.
+    if (to.path === PageEnum.BASE_LOGIN && from.path !== PageEnum.BASE_LOGIN) {
       const tabStore = useMultipleTabStore();
       const userStore = useUserStore();
       const appStore = useAppStore();

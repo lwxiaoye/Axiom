@@ -8,6 +8,8 @@
 
 ## 前端
 
+当前本地栈新增 `auth-api`（FastAPI 单管理员兼容认证），可以不使用 Java 完成基本登录。它不实现用户写入管理或知识检索；这些缺失能力返回明确错误，不再以空数据伪装成功。下面有关 Java 的描述是上游完整业务接口依赖，不能理解为当前已提供完整 Java 或 Python 业务平台。认证配置、持久会话和测试见 [auth-api/README.md](../auth-api/README.md)。
+
 ```powershell
 cd D:\lwxiaoye\Axiom
 pnpm install --frozen-lockfile
@@ -60,6 +62,8 @@ API 和 Worker 必须使用同一套数据库和连接器加密密钥；不要�
 | MinIO | 有适配 | 文件可按配置使用本地存储；不复制旧文件 |
 
 新空库不能只运行 Python migrations 就假定整个 Java 业务系统已建好。
+
+本地 Compose 的 `AXIOM_MODEL_BASE_URL` 只是模型 API 地址，可以连接本机网关或云端模型。栈内没有部署模型权重或推理服务，也不会自动生成模型凭据。
 阅读 `agent-api/migrations/README.md`，按所接入 Java 版本准备业务基线后，分别执行 MySQL 与 Runtime PG 迁移。
 
 ## 校园知识依赖接口
@@ -79,7 +83,7 @@ API 和 Worker 必须使用同一套数据库和连接器加密密钥；不要�
 - APISIX 的配置改为 `config.yaml.example`；先复制到同目录 `config.yaml` 并替换管理凭据，后者被 Git 忽略。
 - 原 TLS 私钥及证书未复制；需为自己的域名重新配置。
 - 历史部署文档与脚本保留作结构参考，地址已泛化；它们不构成一键可用的整套校园后端。
-- 首次上线前检查监听地址、端口暴露、权限、存储和数据库迁移。此次没有启动任何部署栈或连接旧服务器。
+- 首次上线前检查监听地址、端口暴露、权限、存储和数据库迁移。后续本地验证已启动 AXIOM Docker 栈，前端入口为 http://127.0.0.1:3200/；未连接旧服务器。当前状态以 [2026-09-17 检查报告](AXIOM-全项目检查报告-2026-09-17.md) 为准。
 
 ## 上线前验收
 

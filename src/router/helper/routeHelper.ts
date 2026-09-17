@@ -23,6 +23,19 @@ LayoutMap.set('IFRAME', IFRAME);
 //微前端qiankun
 LayoutMap.set('LayoutsContent', LayoutContent);
 
+function layoutLookupKey(component: string): string {
+  return component.replace(/\\/g, '/').replace(/^\/+/, '').toUpperCase();
+}
+
+function resolveLayout(component: unknown) {
+  if (typeof component !== 'string' || !component) return undefined;
+  const key = layoutLookupKey(component);
+  if (key === 'LAYOUT' || key === 'LAYOUTS/DEFAULT/INDEX' || key === 'LAYOUTS/ROUTEVIEW') {
+    return LAYOUT;
+  }
+  return LayoutMap.get(component) || LayoutMap.get(key);
+}
+
 let dynamicViewsModules: Record<string, () => Promise<Recordable>>;
 
 // Dynamic introduction
@@ -83,7 +96,7 @@ function asyncImportRoute(routes: AppRouteRecordRaw[] | undefined) {
     let { component, name } = item;
     const { children } = item;
     if (component) {
-      const layoutFound = LayoutMap.get(component.toUpperCase());
+      const layoutFound = resolveLayout(component);
       if (layoutFound) {
         item.component = layoutFound;
       } else {
@@ -135,8 +148,9 @@ export function transformObjToRoute<T = AppRouteModule>(routeList: AppRouteModul
     const component = route.component as string;
     if (component) {
       route.originComponent = component;
-      if (component.toUpperCase() === 'LAYOUT') {
-        route.component = LayoutMap.get(component.toUpperCase());
+      const layoutFound = resolveLayout(component);
+      if (layoutFound) {
+        route.component = layoutFound;
       } else {
         route.children = [cloneDeep(route)];
         route.component = LAYOUT;
@@ -230,8 +244,10 @@ export function addSlashToRouteComponent(routeList: AppRouteRecordRaw[]) {
   routeList.forEach((route) => {
     let component = route.component as string;
     if (component) {
-      const layoutFound = LayoutMap.get(component);
-      if (!layoutFound) {
+      const layoutFound = resolveLayout(component);
+      if (layoutFound) {
+        route.component = 'LAYOUT';
+      } else {
         route.component = component.startsWith('/') ? component : `/${component}`;
       }
     }

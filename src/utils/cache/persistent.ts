@@ -60,11 +60,13 @@ function initPersistentMemory() {
 
 export class Persistent {
   static getLocal<T>(key: LocalKeys) {
-    // 代码逻辑说明: token过期退出重新登录，online菜单还是提示token过期----------
     const globalCache = ls.get(APP_LOCAL_CACHE_KEY);
-    // 代码逻辑说明: 【issues/7250】自动锁屏无法解锁
     if (globalCache && router?.currentRoute?.value.path !== PageEnum.BASE_LOGIN) {
       localMemory.setCache(globalCache);
+    } else if (globalCache && key === TOKEN_KEY && localMemory.get(key)?.value == null) {
+      const cached = globalCache[TOKEN_KEY];
+      const value = cached && typeof cached === 'object' && 'value' in cached ? cached.value : cached;
+      if (value) localMemory.set(key, value);
     }
     return localMemory.get(key)?.value as Nullable<T>;
   }

@@ -13,6 +13,7 @@ import {isOAuth2AppEnv, isOAuth2DingAppEnv} from '/@/views/sys/login/useLogin';
 import { OAUTH2_THIRD_LOGIN_TENANT_ID } from "/@/enums/cacheEnum";
 import { setAuthCache } from "/@/utils/auth";
 import { PAGE_NOT_FOUND_NAME_404 } from '/@/router/constant';
+import { isSafeInternalRedirect, resolvePostLoginPath } from '/@/router/postLoginRedirect';
 
 const LOGIN_PATH = PageEnum.BASE_LOGIN;
 //auth2登录路由
@@ -62,7 +63,7 @@ export function createPermissionGuard(router: Router) {
         
         try {
           if (!isSessionTimeout) {
-            next((to.query?.redirect as string) || '/');
+            next(resolvePostLoginPath(to.query?.redirect, userStore.getUserInfo.homePath));
             return;
           }
         } catch {}
@@ -122,21 +123,10 @@ export function createPermissionGuard(router: Router) {
         replace: true,
       };
 
-      // 代码逻辑说明: 【QQYUN-4713】登录代码调整逻辑有问题，改造待观察--
-      if (to.fullPath) {
-        console.log("to.fullPath 1",to.fullPath)
-        console.log("to.path 2",to.path)
-        
-        let getFullPath = to.fullPath;
-        if(getFullPath=='/' || getFullPath=='/500' || getFullPath=='/400' || getFullPath=='/login?redirect=/' || getFullPath=='/login?redirect=/login?redirect=/'){
-          return;
-        }
-        
+      if (isSafeInternalRedirect(to.fullPath)) {
         redirectData.query = {
           ...redirectData.query,
-          // 代码逻辑说明: 修复登录成功后，没有正确重定向的问题
           redirect: to.fullPath,
-
         };
       }
       next(redirectData);
@@ -180,23 +170,29 @@ export function createPermissionGuard(router: Router) {
       return;
     }
 
-    // 构建后台菜单路由
-    const routes = await permissionStore.buildRoutesAction();
-    routes.forEach((route) => {
-      router.addRoute(route as unknown as RouteRecordRaw);
-    });
-
-    router.addRoute(PAGE_NOT_FOUND_ROUTE as unknown as RouteRecordRaw);
-    permissionStore.setDynamicAddedRoute(true);
-    // 代码逻辑说明: 【issues/7500】vue-router4.5.0版本路由name:PageNotFound同名导致登录进不去
-    if (to.name === PAGE_NOT_FOUND_NAME_404) {
-      // 动态添加路由后，此处应当重定向到fullPath，否则会加载404页面内容
-      next({ path: to.fullPath, replace: true, query: to.query });
-    } else {
-      const redirectPath = (from.query.redirect || to.path) as string;
-      const redirect = decodeURIComponent(redirectPath);
-      const nextData = to.path === redirect ? { ...to, replace: true } : { path: redirect };
-      next(nextData);
+    try {
+      const routes = await permissionStore.buildRoutesAction();
+      routes.forEach((route) => {
+        try {
+          router.addRoute(route as unknown as RouteRecordRaw);
+        } catch (error) {
+          console.error(error);
+        }
+      });
+      try {
+        router.addRoute(PAGE_NOT_FOUND_ROUTE as unknown as RouteRecordRaw);
+      } catch (error) {
+        console.error(error);
+      }
+    } catch (error) {
+      console.error(error);
     }
+    permissionStore.setDynamicAddedRoute(true);
+    if (to.name === PAGE_NOT_FOUND_NAME_404) {
+      next({ path: to.fullPath, replace: true, query: to.query });
+      return;
+    }
+    const redirect = resolvePostLoginPath(from.query.redirect, to.path);
+    next(to.path === redirect ? { ...to, replace: true } : { path: redirect });
   });
 }

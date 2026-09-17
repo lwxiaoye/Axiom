@@ -1,4 +1,5 @@
-fastapi==0.109.2
+fastapi==0.115.14
+starlette==0.46.2
 uvicorn[standard]==0.27.1
 python-dotenv==1.0.1
 pydantic==2.7.4
@@ -17,10 +18,10 @@ langgraph==1.2.7
 langgraph-checkpoint-postgres==3.1.0
 psycopg[binary]==3.3.4
 sqlalchemy[asyncio]==2.0.27
-aiomysql==0.2.0
-cryptography==42.0.5
+aiomysql==0.3.0
+cryptography==44.0.1
 sse-starlette==2.0.0
-python-multipart==0.0.9
+python-multipart==0.0.22
 minio>=7.2.0
 qdrant-client==1.9.1
 mcp==1.9.4

@@ -8,6 +8,7 @@ import { setAuthCache } from '/@/utils/auth';
 import { TOKEN_KEY } from '/@/enums/cacheEnum';
 import { router } from '/@/router';
 import { PageEnum } from '/@/enums/pageEnum';
+import { loginRedirectQuery } from '/@/router/postLoginRedirect';
 import { ExceptionEnum } from "@/enums/exceptionEnum";
 
 const { createErrorModal } = useMessage();
@@ -56,6 +57,7 @@ export function loginApi(params: LoginParams, mode: ErrorMessageMode = 'modal') 
     },
     {
       errorMessageMode: mode,
+      successMessageMode: 'none',
     }
   );
 }
@@ -79,19 +81,17 @@ export function phoneLoginApi(params: LoginParams, mode: ErrorMessageMode = 'mod
  * @description: getUserInfo
  */
 export function getUserInfo() {
-  return defHttp.get<GetUserInfoModel>({ url: Api.GetUserInfo }, {}).catch((e) => {
-    // Token过期失效，直接跳转登录页面
-    if (e && (e.message.includes('timeout') || e.message.includes('401'))) {
-      //接口不通时跳转到登录界面
+  return defHttp.get<GetUserInfoModel>({ url: Api.GetUserInfo }, { errorMessageMode: 'none' }).catch((e) => {
+    if (router.currentRoute.value.path === PageEnum.BASE_LOGIN) {
+      return undefined;
+    }
+    if (e && (String(e.message || '').includes('timeout') || String(e.message || '').includes('401'))) {
       const userStore = useUserStoreWithOut();
       userStore.setToken('');
       setAuthCache(TOKEN_KEY, null);
       router.push({
         path: PageEnum.BASE_LOGIN,
-        query: {
-          // 传入当前的路由，登录成功后跳转到当前路由
-          redirect: router.currentRoute.value.fullPath,
-        }
+        query: loginRedirectQuery(router.currentRoute.value.fullPath),
       });
     }
   });
@@ -109,7 +109,7 @@ export function doLogout() {
 
 export function getCodeInfo(currdatetime) {
   const url = Api.getInputCode + `/${currdatetime}`;
-  return defHttp.get({ url: url });
+  return defHttp.get({ url: url }, { successMessageMode: 'none' });
 }
 /**
  * @description: 获取短信验证码

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     
     # Java Backend
     JAVA_INTERNAL_BASE: str = "http://127.0.0.1:9090"
+    # Default to revalidation so logout/password rotation revokes API access immediately.
+    # Nonzero values explicitly accept a revocation delay of that many seconds.
+    AUTH_TOKEN_CACHE_TTL_SECONDS: int = 0
 
     # 知识库 RAG 召回（主对话选中知识库时；检索本体在 Java /ai/knowledge/retrieval/test）
     # 前置强制检索：选了知识库即先检索并把片段注入 system prompt，不依赖模型主动调 search_knowledge，

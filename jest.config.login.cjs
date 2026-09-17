@@ -1,6 +1,6 @@
 module.exports = {
   testEnvironment: 'node',
-  roots: ['<rootDir>/src/views/skills', '<rootDir>/src/components/Markdown'],
+  roots: ['<rootDir>/src/router'],
   testMatch: ['**/*.test.ts'],
   transform: {
     '^.+\\.ts$': [
@@ -16,5 +16,7 @@ module.exports = {
       },
     ],
   },
+  moduleNameMapper: {
+    '^/@/(.*)$': '<rootDir>/src/$1',
+  },
 };
-

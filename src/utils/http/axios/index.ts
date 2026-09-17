@@ -55,7 +55,6 @@ const transform: AxiosTransform = {
     const hasSuccess = data && Reflect.has(data, 'code') && (code === ResultEnum.SUCCESS || code === 200);
     if (hasSuccess) {
       if (success && message && options.successMessageMode === 'success') {
-        //信息成功提示
         createMessage.success(message);
       }
       return result;
@@ -66,10 +65,12 @@ const transform: AxiosTransform = {
     let timeoutMsg = '';
     switch (code) {
       case ResultEnum.TIMEOUT:
-        timeoutMsg = t('sys.api.timeoutMessage');
-        const userStore = useUserStoreWithOut();
-        userStore.setToken(undefined);
-        userStore.logout(true);
+        timeoutMsg = message || t('sys.api.timeoutMessage');
+        if (!String(res.config?.url || '').includes('/sys/login')) {
+          const userStore = useUserStoreWithOut();
+          userStore.setToken(undefined);
+          userStore.logout(true);
+        }
         break;
       default:
         if (message) {
@@ -159,7 +160,12 @@ const transform: AxiosTransform = {
    */
   requestInterceptors: (config: Recordable, options) => {
     // 请求之前处理config
-    const token = getToken();
+    let token = '';
+    try {
+      token = String(useUserStoreWithOut().getToken || getToken() || '').trim();
+    } catch {
+      token = String(getToken() || '').trim();
+    }
     let tenantId: string | number = getTenantId();
     
     // 将签名和时间戳，添加在请求接口 Header
@@ -249,6 +255,16 @@ const transform: AxiosTransform = {
       throw new Error(error);
     }
 
+    const reqUrl = String(config?.url || '');
+    if (error?.response?.status === 401 && reqUrl.includes('/sys/login')) {
+      const loginMsg = msg || message || t('sys.api.errMsg401');
+      if (errorMessageMode === 'modal') {
+        createErrorModal({ title: t('sys.api.errorTip'), content: loginMsg });
+      } else if (errorMessageMode === 'message') {
+        createMessage.error(loginMsg);
+      }
+      return Promise.reject(error);
+    }
     checkStatus(error?.response?.status, msg, errorMessageMode);
     return Promise.reject(error);
   },

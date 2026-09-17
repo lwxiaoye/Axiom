@@ -1,0 +1,30 @@
+# An allow-list prevents local archives, credentials, backend data and node_modules
+# from entering the frontend build context.
+**
+!package.json
+!pnpm-lock.yaml
+!.npmrc
+!index.html
+!vite.config.ts
+!tsconfig.json
+!.env
+!.env.production
+!src/
+!src/**
+!public/
+!public/**
+!build/
+!build/**
+!types/
+!types/**
+!scripts/
+!scripts/**
+!deploy/
+!deploy/frontend/
+!deploy/frontend/Dockerfile
+!deploy/frontend/nginx.conf
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/__pycache__

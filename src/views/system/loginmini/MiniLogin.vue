@@ -221,15 +221,19 @@
 </template>
 <script lang="ts" setup name="login-mini">
 import { ref, onMounted, reactive, toRaw } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { getCodeInfo } from '/@/api/sys/user';
+import { router } from '/@/router';
+import { PageEnum } from '/@/enums/pageEnum';
+import { resolvePostLoginPath } from '/@/router/postLoginRedirect';
 
 import codeImg from '/@/assets/images/checkcode.png';
 //账号登录表单字段
 const formData = reactive<any>({
   inputCode: '',
-  username: '',
-  password: '',
+  username: import.meta.env.VITE_LOCAL_DEMO_USERNAME || '',
+  password: import.meta.env.VITE_LOCAL_DEMO_PASSWORD || '',
   loginOrgCode: '',
 });
 
@@ -242,14 +246,18 @@ const randCodeData = reactive<any>({
 /**
  * 获取验证码
  */
-function handleChangeCheckCode() {
+async function handleChangeCheckCode() {
   formData.inputCode = '';
+  randCodeData.requestCodeSuccess = false;
   // 代码逻辑说明: [QQYUN-10775]验证码可以复用 #7674------------
   randCodeData.checkKey = new Date().getTime() + Math.random().toString(36).slice(-4); // 1629428467008;
-  getCodeInfo(randCodeData.checkKey).then((res) => {
+  try {
+    const res = await getCodeInfo(randCodeData.checkKey);
     randCodeData.randCodeImage = res;
     randCodeData.requestCodeSuccess = true;
-  });
+  } catch {
+    randCodeData.randCodeImage = '';
+  }
 }
 
 
@@ -606,7 +614,9 @@ onMounted(() => {
 
 function handleLogin(e: Event) {
   e.preventDefault();
-  if (!loginLoading.value) accountLogin();
+  if (loginLoading.value) return;
+  loginLoading.value = true;
+  void accountLogin();
 }
 import { useMessage } from '/@/hooks/web/useMessage';
 import { useI18n } from '/@/hooks/web/useI18n';
@@ -626,62 +636,74 @@ const REMEMBER_USERNAME_KEY = 'LOGIN_REMEMBER_USERNAME';
 
 
 const userStore = useUserStore();
+const route = useRoute();
 
 const $ls = createLocalStorage();
 
 async function accountLogin() {
   if (!formData.username) {
+    loginLoading.value = false;
     createMessage.warn(t('sys.login.accountPlaceholder'));
     return;
   }
   if (!formData.password) {
+    loginLoading.value = false;
     createMessage.warn(t('sys.login.passwordPlaceholder'));
     return;
   }
+  if (!formData.inputCode) {
+    loginLoading.value = false;
+    createMessage.warn('请输入验证码');
+    return;
+  }
   try {
-    loginLoading.value = true;
-
-    // 密码使用AES加密传输
     const encryptedPassword = encryptAESCBC(formData.password);
-    const { userInfo } = await userStore.login(
+    const result = await userStore.login(
       toRaw({
         password: encryptedPassword,
         username: formData.username,
         loginOrgCode: formData.loginOrgCode,
         captcha: formData.inputCode,
         checkKey: randCodeData.checkKey,
-        mode: 'none', //不要默认的错误提示
+          mode: 'none',
+          goHome: false,
       })
     );
-    if (userInfo) {
-      notification.success({
-        message: t('sys.login.loginSuccessTitle'),
-        description: `${t('sys.login.loginSuccessDesc')}: ${userInfo.realname}`,
-        duration: 3,
-      });
-      // 登录成功后处理记住用户名
-      if (rememberMe.value && formData.username) {
-        $ls.set(REMEMBER_USERNAME_KEY, formData.username)
-      } else {
-        $ls.remove(REMEMBER_USERNAME_KEY)
-      }
+    const userInfo = result?.userInfo;
+    if (!userInfo) {
+      throw new Error(t('sys.login.networkExceptionMsg'));
     }
-  } catch (error:any) {
+    if (rememberMe.value && formData.username) {
+      $ls.set(REMEMBER_USERNAME_KEY, formData.username);
+    } else {
+      $ls.remove(REMEMBER_USERNAME_KEY);
+    }
+    await router.replace(resolvePostLoginPath(route.query.redirect, userInfo.homePath));
+  } catch (error: any) {
+    const desc =
+      error?.response?.data?.message ||
+      error?.message ||
+      t('sys.login.networkExceptionMsg');
     notification.error({
       message: t('sys.api.errorTip'),
-      description: error.message || t('sys.login.networkExceptionMsg'),
+      description: desc,
       duration: 3,
     });
-    handleChangeCheckCode();
+    await handleChangeCheckCode();
   } finally {
     loginLoading.value = false;
   }
 }
 
 onMounted(() => {
+  const cleaned = resolvePostLoginPath(route.query.redirect, PageEnum.BASE_HOME);
+  const rawRedirect = Array.isArray(route.query.redirect) ? route.query.redirect[0] : route.query.redirect;
+  if (typeof rawRedirect === 'string' && rawRedirect.includes('/login') && cleaned !== rawRedirect) {
+    void router.replace({ path: PageEnum.BASE_LOGIN, query: { redirect: cleaned } });
+  }
   // 恢复已记住的用户名
   const saved = $ls.get(REMEMBER_USERNAME_KEY);
-  if (saved) {
+  if (saved && !import.meta.env.VITE_LOCAL_DEMO_USERNAME) {
     formData.username = saved;
     rememberMe.value = true;
   }

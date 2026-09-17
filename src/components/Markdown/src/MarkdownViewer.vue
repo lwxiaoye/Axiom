@@ -1,25 +1,22 @@
 <template>
-  <!-- <div v-html="getHtmlData" :class="$props.class" class="markdown-viewer markdown-body"></div> -->
   <div class="preview" :class="[{ preview_dark: isDarkTheme }]">
+    <!-- eslint-disable-next-line vue/no-v-html -- Showdown 输出经 renderMarkdownHtml（DOMPurify 白名单）后再绑定 -->
     <div v-html="getHtmlData" :class="$props.class" class="markdown-viewer vditor-reset"></div>
   </div>
 </template>
 
 <script lang="ts" setup>
   import { computed, watch, ref } from 'vue';
-  import showdown from 'showdown';
   import 'vditor/dist/index.css';
   import { useRootSetting } from '/@/hooks/setting/useRootSetting';
   import { ThemeEnum } from '/@/enums/appEnum';
-  
-  const converter = new showdown.Converter();
-  converter.setOption('tables', true);
-  converter.setOption('emoji', true);
+  import { renderMarkdownHtml } from './renderMarkdownHtml';
+
   const props = defineProps({
     value: { type: String },
     class: { type: String },
   });
-  const getHtmlData = computed(() => converter.makeHtml(props.value || ''));
+  const getHtmlData = computed(() => renderMarkdownHtml(props.value || ''));
 
   // 代码逻辑说明: 【issues/918】MarkdownViewer加上暗黑主题
   const isDarkTheme = ref(false);

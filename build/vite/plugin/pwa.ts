@@ -18,7 +18,9 @@ export function configPwaPlugin(isBuild: boolean): PluginOption | PluginOption[]
     // 故彻底移除 SW 缓存；老客户端下次访问会自愈。如日后需要 PWA 再改回。
     selfDestroying: true,
     registerType: 'manual',
-    injectRegister: 'inline', // 内联注册脚本，确保浏览器能及时取到自毁 SW
+    // Do not auto-register. Old SW is already self-destroying; a new registration
+    // would keep intercepting index.html after each local Docker rebuild.
+    injectRegister: false,
     includeAssets: ['axiom-mark.svg'],
     manifest: {
       name: 'AXIOM Campus Agents',

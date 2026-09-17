@@ -126,13 +126,14 @@ export const usePermissionStore = defineStore({
     },
     async changePermissionCode() {
       const systemPermission = await getBackMenuAndPerms();
-      const codeList = systemPermission.codeList;
+      if (!systemPermission) {
+        this.setPermCodeList([]);
+        return [];
+      }
+      const codeList = systemPermission.codeList || [];
       this.setPermCodeList(codeList);
       this.setAuthData(systemPermission);
-      
-      //菜单路由
-      const routeList = systemPermission.menu;
-      return routeList;
+      return systemPermission.menu || [];
     },
     async buildRoutesAction(): Promise<AppRouteRecordRaw[]> {
       const { t } = useI18n();
