@@ -47,6 +47,8 @@ docker compose --env-file deploy/local/.env -f docker-compose.local.yml up -d --
 curl.exe http://127.0.0.1:8000/health/ready
 ```
 
+本机若已有其他 MySQL，宿主端口映射为 `3307`。容器内部仍使用 `mysql:3306`。
+本地镜像 `agent-api/Dockerfile.local` 不含 LibreOffice；Office 文档转换需要生产 `Dockerfile`。
 健康检查通过只说明 Runtime 和数据库已起来，不表示可以登录或回答校园问题。
 
 `run.py` 实际加载 `.env`，存在 `.env.dev` 时再覆盖；新项目建议先只使用 `.env`。

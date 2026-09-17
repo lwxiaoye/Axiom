@@ -40,7 +40,7 @@ services:
       MYSQL_USER: axiom
       MYSQL_PASSWORD: ${AXIOM_DB_PASSWORD}
     ports:
-      - "3306:3306"
+      - "3307:3306"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
       - axiom_mysql_data:/var/lib/mysql
@@ -84,7 +84,9 @@ services:
       - axiom_qdrant_data:/qdrant/storage
 
   agent-api:
-    build: ./agent-api
+    build:
+      context: ./agent-api
+      dockerfile: Dockerfile.local
     container_name: axiom-agent-api
     restart: unless-stopped
     ports:
@@ -104,7 +106,9 @@ services:
         condition: service_started
 
   agent-worker:
-    build: ./agent-api
+    build:
+      context: ./agent-api
+      dockerfile: Dockerfile.local
     container_name: axiom-agent-worker
     restart: unless-stopped
     command: ["python", "-m", "app.worker"]
