@@ -63,6 +63,12 @@
         @delete="emit('delete', $event)"
       />
       <SystemToolsPanel v-else-if="activePanel === 'systemTools'" @count="systemToolCount = $event" />
+      <!-- 审核台只对审核员出现（admin 是唯一管理员也是唯一审核人）；不放进 /admin 管理配置页 -->
+      <ReviewPanel
+        v-else-if="activePanel === 'review' && isReviewer"
+        @changed="emit('reviewChanged')"
+        @pending-count="pendingReviewCount = $event"
+      />
     </div>
   </section>
 </template>
@@ -72,6 +78,7 @@ import { computed, onMounted, ref } from 'vue';
 import {
   ApiOutlined,
   AppstoreOutlined,
+  AuditOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   StarOutlined,
@@ -81,9 +88,10 @@ import AgentsPanel from '../workbench/AgentsPanel.vue';
 import SkillsPanel from '../workbench/SkillsPanel.vue';
 import MyToolsPanel from '../workbench/MyToolsPanel.vue';
 import SystemToolsPanel from '../workbench/SystemToolsPanel.vue';
+import ReviewPanel from '../workbench/ReviewPanel.vue';
 import { AGENT_KINDS, TOOL_KINDS, getAiAppKind } from '../../workflow/shared/agentApp';
 import { getAgentSkillList } from '../../workflow/api/skill.api';
-import { queryBuiltinWorkflowTools } from '../../workflow/api/workflow.api';
+import { queryBuiltinWorkflowTools, queryMyCapabilities, queryReviewPage } from '../../workflow/api/workflow.api';
 
 const props = defineProps<{
   agents: any[];
@@ -102,9 +110,11 @@ const emit = defineEmits<{
   (e: 'versions', item: any): void;
   (e: 'agent-api', item: any): void;
   (e: 'delete', item: any): void;
+  /** 审核台通过/驳回后，外层刷新我的智能体与广场 */
+  (e: 'reviewChanged'): void;
 }>();
 
-type PanelKey = 'agents' | 'skills' | 'myTools' | 'systemTools';
+type PanelKey = 'agents' | 'skills' | 'myTools' | 'systemTools' | 'review';
 
 const COLLAPSE_KEY = 'wb-nav-collapsed';
 
@@ -112,6 +122,8 @@ const activePanel = ref<PanelKey>('agents');
 const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1');
 const skillCount = ref<number | undefined>();
 const systemToolCount = ref<number | undefined>();
+const isReviewer = ref(false);
+const pendingReviewCount = ref<number | undefined>();
 
 const agentCount = computed(() => props.agents.filter((item) => AGENT_KINDS.includes(getAiAppKind(item))).length);
 const toolCount = computed(() => props.agents.filter((item) => TOOL_KINDS.includes(getAiAppKind(item))).length);
@@ -121,6 +133,10 @@ const navItems = computed(() => [
   { key: 'skills' as PanelKey, label: '技能', icon: StarOutlined, count: skillCount.value },
   { key: 'myTools' as PanelKey, label: '我的工具', icon: ToolOutlined, count: toolCount.value },
   { key: 'systemTools' as PanelKey, label: '系统工具', icon: ApiOutlined, count: systemToolCount.value },
+  // 只有审核员看得到「待审核」；角标是待审数量，让 admin 一进「我的智能体」就知道有申请要处理
+  ...(isReviewer.value
+    ? [{ key: 'review' as PanelKey, label: '待审核', icon: AuditOutlined, count: pendingReviewCount.value }]
+    : []),
 ]);
 
 function toggleCollapsed() {
@@ -140,5 +156,20 @@ onMounted(() => {
       if (systemToolCount.value === undefined && Array.isArray(list)) systemToolCount.value = list.length;
     })
     .catch(() => {});
+  // 审核员身份决定「待审核」入口是否出现；能力接口失败时默认不显示（不误放审核入口）
+  queryMyCapabilities()
+    .then(async (caps) => {
+      isReviewer.value = Boolean(caps?.isReviewer);
+      if (!isReviewer.value) return;
+      try {
+        const result = await queryReviewPage({ pageNo: 1, pageSize: 1, status: 'pending_review' });
+        if (pendingReviewCount.value === undefined) pendingReviewCount.value = Number(result?.total || 0);
+      } catch {
+        // 角标只是提示
+      }
+    })
+    .catch(() => {
+      isReviewer.value = false;
+    });
 });
 </script>

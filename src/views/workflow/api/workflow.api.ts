@@ -290,6 +290,7 @@ export type WorkflowModelOption = {
  */
 enum Api {
   pageApp = '/agent-api/workflow/app/page',
+  marketplaceApps = '/agent-api/workflow/app/marketplace',
   marketplaceCreators = '/agent-api/workflow/app/marketplace-creators',
   queryAppById = '/agent-api/workflow/app/queryById',
   addApp = '/agent-api/workflow/app/add',
@@ -329,6 +330,10 @@ export type MarketplaceCreator = {
   creatorName: string;
   creatorAvatar: string;
 };
+
+/** 广场：当前用户可运行的自建已发布智能体（结构对齐 app_info 目录行，可与内置智能体直接合并） */
+export const queryMarketplaceWorkflowApps = () =>
+  defHttp.get<Record<string, unknown>[]>({ url: Api.marketplaceApps }, { ...RAW, errorMessageMode: 'none' });
 
 export const queryMarketplaceCreators = (appIds: Array<string | number>) =>
   defHttp.post<{ records: MarketplaceCreator[] }>(
@@ -522,8 +527,20 @@ export type RouteMetadata = {
   tags?: string[];
 };
 
-export type SubmitReviewResult = { version: WorkflowVersionItem; approvalRequired: boolean; message: string };
-export type MyCapabilities = { isReviewer: boolean; isPlatformAdmin: boolean; approvalRequired: boolean };
+export type SubmitReviewResult = {
+  version: WorkflowVersionItem;
+  approvalRequired: boolean;
+  /** 审批开启但提交者本人就是审核员：后端直接上线，不进待审队列 */
+  autoApproved?: boolean;
+  message: string;
+};
+export type MyCapabilities = {
+  isReviewer: boolean;
+  isPlatformAdmin: boolean;
+  approvalRequired: boolean;
+  /** 当前用户提交发布会被自动通过（审核员本人） */
+  selfPublishAutoApproved?: boolean;
+};
 export type AdminAppItem = Omit<AiWorkflowApp, 'aiAppType'> & {
   aiAppType: AiWorkflowApp['aiAppType'] | 'builtin';
   ownerUsername?: string;

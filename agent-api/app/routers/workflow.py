@@ -39,6 +39,7 @@ from app.services.agent_api.publish_policy import validate_api_workflow_capabili
 from app.services.agents.published_visibility import load_published_visibility_version, user_can_run_published_app
 from app.services.platform.user_display_name import load_user_display_names
 from app.services.workflows.workflow_model_requirements import missing_required_models
+from app.services.workflows import marketplace_catalog_service
 from app.services.workflows import presentation_service
 from app.services.workflows import sub_agent_skin_service
 from app.services.workflows.agent_metrics_service import collect_app_metrics
@@ -883,6 +884,16 @@ async def page_apps(
                 )
             )
         return {"records": records, "total": total, "size": pageSize, "current": pageNo}
+
+
+@router.get("/app/marketplace")
+async def marketplace_apps(user: UserContext = Depends(current_user)):
+    """智能体广场：当前用户可运行的自建已发布智能体（内置智能体仍走 /chat/builtin-apps）。
+
+    本地 auth-api 的 /app/appInfo/my/all/list 固定返回空，审核通过的智能体此前
+    只写进 app_info 却没有任何界面能读到；广场现在直接从发布事实源取目录。
+    """
+    return await marketplace_catalog_service.list_published_marketplace_apps(user)
 
 
 @router.post("/app/marketplace-creators")
@@ -1822,14 +1833,34 @@ async def _detect_indirect_cycle(graph: dict, current_app_id: str) -> list:
     return []
 
 
+# 对话 Agent 不用画布编辑器，它的三节点图由配置页「保存草稿」时生成。用户还没保存过配置
+# 就点发布，parse_graph 会报「工作流缺少画布模型（fastgpt 字段）」——对一个从没见过画布
+# 的对话 Agent 作者来说这句话完全不可理解，这里换成能指路的说法。
+_CHAT_AGENT_NOT_CONFIGURED_REASON = "对话 Agent 尚未完成配置：请先进入配置页选择模型、填写提示词并保存草稿"
+
+
+def _is_missing_canvas_problem(problems: list[dict]) -> bool:
+    """parse_graph 层面的失败（定义为空 / JSON 非法 / 无 fastgpt.nodes），而非节点级校验问题。"""
+    if len(problems) != 1:
+        return False
+    reason = str(problems[0].get("reason") or "")
+    return not problems[0].get("nodeId") and ("画布模型" in reason or "定义为空" in reason or "解析失败" in reason)
+
+
 async def _validate_before_publish(session, user, workflow_json: str, app_id: str) -> None:
+    app = await _get_app(session, app_id)
     problems = _validate_workflow_definition(workflow_json)
+    if problems and app.ai_app_type == "chatAgent" and _is_missing_canvas_problem(problems):
+        problems = [{"nodeId": "", "name": "", "reason": _CHAT_AGENT_NOT_CONFIGURED_REASON}]
     if not problems:
         problems = await _validate_dynamic_node_resources(session, user, workflow_json, app_id)
     if problems:
-        # 硬拒绝（蓝本 SaveAndPublish 行为）：不提供「仍然发布」，前端按 problems 列表展示
-        raise HTTPException(400, {"message": "工作流校验未通过，无法提交发布", "problems": problems})
-    app = await _get_app(session, app_id)
+        # 硬拒绝（蓝本 SaveAndPublish 行为）：不提供「仍然发布」，前端按 problems 列表展示，
+        # 并给「去配置」入口——400 不能是用户操作的终点。
+        raise HTTPException(
+            400,
+            {"message": "工作流校验未通过，无法提交发布", "code": "definition_invalid", "problems": problems},
+        )
     await presentation_service.validate_definition_for_app(
         session,
         app,
@@ -1929,8 +1960,15 @@ async def _do_publish_now(
     routing_json: Optional[str] = None,
     publish_channels: tuple[str, ...] = ("marketplace",),
     embed_origins: tuple[str, ...] = (),
+    review_comment: str = "审批关闭直接发布",
 ) -> WorkflowVersion:
-    """审批关闭（PUBLISH_APPROVAL_REQUIRED=False）时的直接发布：生成 approved 版本并即时上线。"""
+    """直接发布：生成 approved 版本并即时上线。
+
+    两种触发场景共用：
+    - 审批关闭（PUBLISH_APPROVAL_REQUIRED=False）；
+    - 审批开启但提交者本人就是审核员（见 _submit_or_publish 的自动通过分支），
+      此时 review_comment 记为「审核员本人提交，自动通过」，版本记录里能看出不是人工审核。
+    """
     before_status = app.status
     await _validate_before_publish(session, user, workflow_json, app.id)
     if bool(getattr(app, "api_enabled", False)):
@@ -1964,7 +2002,7 @@ async def _do_publish_now(
         reviewed_by=user.user_id,
         reviewed_by_name=user.real_name or user.username,
         reviewed_at=func.now(),
-        review_comment="审批关闭直接发布",
+        review_comment=review_comment,
         published_at=func.now(),
     )
     session.add(version)
@@ -2055,7 +2093,12 @@ async def _submit_or_publish(payload: DefinitionSaveRequest, user: UserContext) 
             session,
             app_id,
         )
-        if settings.PUBLISH_APPROVAL_REQUIRED:
+        # 自动通过规则：平台只有 admin 一个管理员，同时也是唯一审核人。审核员自己
+        # 提交再自己去「待审核」里点通过，纯属多一步；提交者本人具备审核权限
+        # （is_reviewer：内置 admin / AGENT_ADMIN_ROLE_IDS / AGENT_REVIEWER_ROLE_IDS）
+        # 时直接走发布，不进待审队列。普通用户仍然必须经审核员通过。
+        self_reviewed = settings.PUBLISH_APPROVAL_REQUIRED and is_reviewer(user)
+        if settings.PUBLISH_APPROVAL_REQUIRED and not self_reviewed:
             version = await _do_submit_review(
                 session,
                 app,
@@ -2069,6 +2112,11 @@ async def _submit_or_publish(payload: DefinitionSaveRequest, user: UserContext) 
                 embed_origins=embed_origins,
             )
             return {"version": _version_dict(version), "approvalRequired": True, "message": "已提交发布审核，等待审核员通过后上线"}
+        if self_reviewed:
+            # 别人（协作编辑者）提交的待审版本还挂着时，审核员直接发布会让那条待审记录
+            # 变成「通过了也不会上线」的幽灵；要求先在待审核里处理掉，和 _do_submit_review
+            # 的「同一应用只允许一个待审版本」保持一致。
+            await _reject_if_pending_review_exists(session, app_id)
         version = await _do_publish_now(
             session,
             app,
@@ -2080,9 +2128,28 @@ async def _submit_or_publish(payload: DefinitionSaveRequest, user: UserContext) 
             routing_json=routing_json,
             publish_channels=publish_channels,
             embed_origins=embed_origins,
+            review_comment="审核员本人提交，自动通过" if self_reviewed else "审批关闭直接发布",
         )
         await capability_registry.sync_from_app(app_id)
-        return {"version": _version_dict(version), "approvalRequired": False, "message": "已完成发布处理"}
+        return {
+            "version": _version_dict(version),
+            "approvalRequired": False,
+            "autoApproved": self_reviewed,
+            "message": "你是审核员，已自动通过并上线" if self_reviewed else "已完成发布处理",
+        }
+
+
+async def _reject_if_pending_review_exists(session, app_id: str) -> None:
+    """审核员直接发布前的守卫：应用已有待审版本时拒绝，提示先去待审核里处理。"""
+    pending = (
+        await session.execute(
+            select(WorkflowVersion.id).where(
+                WorkflowVersion.app_id == app_id, WorkflowVersion.status == "pending_review"
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    if pending:
+        raise HTTPException(409, "该智能体已有待审核版本，请先在「待审核」中通过或驳回后再发布")
 
 
 @router.post("/definition/publish")
@@ -3323,10 +3390,14 @@ async def truncate_run_messages(payload: RunMessageTruncate, user: UserContext =
 
 @router.get("/me/capabilities")
 async def my_capabilities(user: UserContext = Depends(current_user)):
+    reviewer = is_reviewer(user)
     return {
-        "isReviewer": is_reviewer(user),
+        "isReviewer": reviewer,
         "isPlatformAdmin": is_platform_admin(user),
         "approvalRequired": settings.PUBLISH_APPROVAL_REQUIRED,
+        # 审核员本人提交发布时自动通过（见 _submit_or_publish），前端据此把「提交审核」
+        # 文案改成「发布上线」，避免审核员看到「等待审核」却无人可等。
+        "selfPublishAutoApproved": settings.PUBLISH_APPROVAL_REQUIRED and reviewer,
     }
 
 
