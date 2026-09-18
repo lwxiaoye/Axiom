@@ -162,11 +162,12 @@ async def test_campus_config_failure_remains_an_explicit_error(monkeypatch):
     from app.services.chat.builtin_assistants.campus_services.config_service import CampusConfigError
 
     monkeypatch.setattr(runtime_service, "resolve_published_snapshot", AsyncMock(
-        side_effect=CampusConfigError(503, "校园百事通尚未发布配置"),
+        # 「未发布」是配置状态而非故障，用 409：503 会被前端当成瞬时不可用而隐藏原因
+        side_effect=CampusConfigError(409, "校园百事通尚未发布配置"),
     ))
     with pytest.raises(HTTPException) as error:
         await get_builtin_runtime_policy("campus_services").prepare_request({})
-    assert error.value.status_code == 503
+    assert error.value.status_code == 409
     assert "尚未发布" in error.value.detail
 
 
