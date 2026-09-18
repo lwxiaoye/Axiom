@@ -199,7 +199,7 @@ def build_workspace_tools(*, user_id: str, token: str = "",
     # token 校验，故此处不再直接用它取文件。
     tools: List[MainTool] = []
 
-    # 选中 skill 的文件包懒取一次、整轮缓存（provider 回源 auth-api /ai/skill/files|file，可能慢）
+    # 选中 skill 的文件包懒取一次、整轮缓存（provider 进程内解 zip/读磁盘，大包也要几十毫秒）
     _skill_pkg_cache: dict = {}
     # use_skill 即时加载的技能包（Phase 2）：模型自己从目录挑技能→本工具取包追加到这里，
     # bash 挂载时并入挂载集，无需用户手动 @ 选中。恢复得到的 model/use_skill 记录不能
@@ -426,7 +426,7 @@ def build_workspace_tools(*, user_id: str, token: str = "",
         exports["is_skill_loaded"] = _is_skill_loaded
 
     # use_skill（Phase 2：自主启用技能）——模型从系统提示词「Skill 目录」里挑中合适技能后自己调用，
-    # 后端即时校验 ACL（/ai/skill/list enabled）→ 回源完整 SKILL.md 返回给模型 → 取其脚本包挂进
+    # 后端即时校验 ACL（agent-api 自持目录 enabled）→ 取完整 SKILL.md 返回给模型 → 取其脚本包挂进
     # 沙箱 /workspace/skills/，之后模型用 bash 按 SKILL.md 执行。全程不用用户手动 @ 选中。
     async def _use_skill(args: dict) -> str:
         skill_id = str(args.get("skill_id") or "").strip()

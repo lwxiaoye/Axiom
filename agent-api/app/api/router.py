@@ -1078,7 +1078,7 @@ async def get_agents(
 
 
 # Skill endpoints 已移除（ADR-001）：内存 SkillService 是无数据源的 demo 版，前端已切
-# Java /ai/skill/*（提示词型）与 /agent-api/skill/*（工作台可执行技能）。
+# /agent-api/skill/*（Java /ai/skill/* 随 JeecgBoot 下线，目录由 services/skills/skill_catalog 自持）。
 
 
 # Master config endpoints

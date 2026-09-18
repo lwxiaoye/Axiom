@@ -674,7 +674,6 @@ def dict_items(code: str, x_access_token: Optional[str] = Header(None, alias="X-
 
 
 @app.get("/app/appInfo/my/all/list")
-@app.get("/ai/skill/list")
 def empty_local_catalog(
     x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
     authorization: Optional[str] = Header(None),
@@ -683,6 +682,23 @@ def empty_local_catalog(
     if error:
         return error
     return ok([])
+
+
+@app.get("/ai/skill/list")
+def skill_catalog_moved(
+    x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
+    authorization: Optional[str] = Header(None),
+):
+    """Skill 目录已迁至 agent-api（/agent-api/skill/list）。
+
+    这里原本返回一个永远为空的 `[]`，主对话与 Skill 广场据此把「技能目录为空」当成事实，
+    演示文稿助手因此报「未找到已启用的 ppt-studio」。改成与其它未实现接口一致的 404，
+    避免再有人把这条桩当成有数据的接口来接。
+    """
+    _, error = require_user(x_access_token, authorization)
+    if error:
+        return error
+    return fail("Skill 目录已迁至 agent-api：/agent-api/skill/list", code=404, status=404)
 
 
 @app.get("/ai/knowledge/base/queryById")

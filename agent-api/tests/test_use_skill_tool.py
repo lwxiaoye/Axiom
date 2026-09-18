@@ -262,20 +262,8 @@ if __name__ == "__main__":
 
 
 # ---------- 技能包挂载缺口必须如实告知（2026-07-27） ----------
-
-def test_binary_assets_are_not_silently_corrupted():
-    """取包通道走 Java 的 JSON 接口，二进制字节在服务端就丢了。
-
-    原实现 `str(content).encode("utf-8")` 会把损坏固定下来并挂进沙箱：模型引用一个坏掉的
-    png/ttf，产物里是空白或乱码字形，而且没有任何报错。挂坏的比不挂更糟。
-    """
-    from app.services.skills.skill_package_bridge import _BINARY_SUFFIXES
-
-    for name in ("cover.png", "logo.JPG", "font.ttf", "assets.zip", "doc.pdf", "clip.mp4"):
-        assert name.lower().endswith(_BINARY_SUFFIXES), f"{name} 应被识别为二进制"
-    for name in ("SKILL.md", "build.py", "template.html", "design.md", "run.sh", "data.json"):
-        assert not name.lower().endswith(_BINARY_SUFFIXES), f"{name} 是文本，不该被排除"
-
+# （原 test_binary_assets_are_not_silently_corrupted 随 Java JSON 取包通道一起移除：
+#   2026-09-18 起取包在进程内读磁盘/解 zip，二进制字节不再经文本通道，没有"损坏固定下来"的路径。）
 
 def test_unmounted_files_are_reported_to_the_model():
     """不说 = 模型按 SKILL.md 引用一个不存在的文件，然后在「文件不存在」里反复打转。"""

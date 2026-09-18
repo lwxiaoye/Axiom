@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from app.services.agent_harness.public_errors import ConfigurationRunError
 from app.services.chat.builtin_assistants.runtime_types import BuiltinTurnInput, BuiltinTurnServices
 from app.services.chat.types import TurnContext
 from .policy import resolve_ppt_studio_skill_id
@@ -22,6 +23,11 @@ async def prepare_turn(request: BuiltinTurnInput, services: BuiltinTurnServices)
     # 演示文稿助手的硬门槛只有两项：ACL 目录里存在启用的精确 ppt-studio，且其
     # 权威说明能够读取。记忆、个性化和历史经验仍尽量加载，但它们是可选上下文，
     # 不能因为任一服务慢或失败就把一个健康的 ppt-studio 误报为不可用。
+    #
+    # 错误分类（2026-09-18）：两项硬门槛不满足是**配置性错误**——目录里没有 ppt-studio /
+    # 说明书为空，一秒后重放同一检查点照样失败，所以抛 ConfigurationRunError（终态，原因
+    # 原样给用户）；目录读取超时/未知异常仍是 RuntimeError（可能是 DB 抖动），交给既有的
+    # waiting_system 自动恢复。
     loop = asyncio.get_running_loop()
     deadline = loop.time() + budget
 
@@ -79,7 +85,10 @@ async def prepare_turn(request: BuiltinTurnInput, services: BuiltinTurnServices)
         )
         ppt_skill_id = resolve_ppt_studio_skill_id(catalog_records)
         if not ppt_skill_id:
-            raise RuntimeError("演示文稿助手暂不可用：未找到已启用的 ppt-studio。")
+            raise ConfigurationRunError(
+                "演示文稿助手暂不可用：技能目录里没有已启用的 ppt-studio。"
+                "请管理员确认 agent-api 内置技能已注册（启动日志「内置技能 ppt-studio 已注册」）后重试。"
+            )
         remaining = deadline - loop.time()
         if remaining <= 0:
             raise asyncio.TimeoutError
@@ -87,11 +96,14 @@ async def prepare_turn(request: BuiltinTurnInput, services: BuiltinTurnServices)
             _fetch_trusted_skills([ppt_skill_id], token), timeout=remaining,
         )
         if not trusted_skills or not str(trusted_skills[0].get("instructions") or "").strip():
-            raise RuntimeError("演示文稿助手暂不可用：ppt-studio 权威说明读取失败。")
+            raise ConfigurationRunError(
+                "演示文稿助手暂不可用：ppt-studio 的 SKILL.md 说明为空，无法按其流程制作。"
+                "请管理员检查该技能的当前版本内容后重试。"
+            )
     except asyncio.TimeoutError as exc:
         await _cancel_optional(optional_task)
         raise RuntimeError("演示文稿助手暂不可用：ppt-studio 权威校验超时。") from exc
-    except RuntimeError:
+    except RuntimeError:  # 含 ConfigurationRunError（TerminalRunError 是 RuntimeError 子类）
         await _cancel_optional(optional_task)
         raise
     except Exception as exc:  # noqa: BLE001

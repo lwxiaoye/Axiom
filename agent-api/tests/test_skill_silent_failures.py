@@ -103,37 +103,21 @@ def _mounted(name="ppt-studio", *, unmounted=None):
 
 
 # ============ 1. 取包失败不得被静默吞掉 ============
-
-class _FakeResp:
-    def __init__(self, payload):
-        self._payload = payload
-
-    def json(self):
-        return self._payload
+# 2026-09-18：取包改为进程内（skill_catalog），这里用 load_skill_package_source 替身模拟三种失败形态。
 
 
-class _FakeClient:
-    """httpx.AsyncClient 替身：按 URL 决定给文件树 / 给单文件 / 抛错。"""
+def _stub_source(monkeypatch, result):
+    """skill_catalog.load_skill_package_source 替身：result 可为 dict / None / 异常实例。"""
+    from app.services.skills import skill_catalog
 
-    def __init__(self, *, tree=None, tree_error=False, file_error=True):
-        self._tree = tree if tree is not None else []
-        self._tree_error = tree_error
-        self._file_error = file_error
+    async def fake(_record_id, _token):
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_a):
-        return False
-
-    async def get(self, url, **_kw):
-        if url.endswith("/ai/skill/files"):
-            if self._tree_error:
-                raise RuntimeError("connection reset")
-            return _FakeResp({"success": True, "result": self._tree})
-        if self._file_error:
-            raise RuntimeError("connection reset")
-        return _FakeResp({"success": True, "result": "content"})
+    monkeypatch.setattr(skill_catalog, "load_skill_package_source", fake)
+    bridge._package_fetch_cache.clear()
+    bridge._package_fetch_inflight.clear()
 
 
 @pytest.mark.asyncio
@@ -143,8 +127,7 @@ async def test_tree_fetch_failure_yields_placeholder_not_silence(monkeypatch):
     空列表与「用户没选技能」在调用方眼里完全一样——而系统提示词此时已经写着
     「它们已挂在沙箱内 /workspace/skills/ 下」。这就是整族 bug 的源头。
     """
-    monkeypatch.setattr(bridge.httpx, "AsyncClient",
-                        lambda **_kw: _FakeClient(tree_error=True))
+    _stub_source(monkeypatch, RuntimeError("connection reset"))
     pkgs = await bridge.fetch_skill_packages(
         [{"id": "s1", "record_id": "rec-1", "name": "ppt-studio"}], "tok")
 
@@ -159,28 +142,48 @@ async def test_tree_fetch_failure_yields_placeholder_not_silence(monkeypatch):
 @pytest.mark.asyncio
 async def test_all_files_fail_keeps_declared_scripts_flag(monkeypatch):
     """文件树拿到了、字节全取不回来：**知道**这包本该含脚本，不该按"未知"处理。"""
-    tree = [{"name": "SKILL.md", "path": "SKILL.md"},
-            {"name": "build.py", "path": "scripts/build.py"}]
-    monkeypatch.setattr(bridge.httpx, "AsyncClient", lambda **_kw: _FakeClient(tree=tree))
+    _stub_source(monkeypatch, {
+        "files": {}, "entrypoint": None,
+        "error": "ZIP 有 2 个条目，但没有一个文件解出成功",
+        "declared_scripts": True,
+        "unmounted": {"binary": [], "over_file_limit": [], "over_byte_budget": [],
+                      "fetch_failed": ["SKILL.md", "scripts/build.py"]},
+        "channel": "zip",
+    })
     pkgs = await bridge.fetch_skill_packages(
         [{"id": "s1", "record_id": "rec-1", "name": "ppt-studio"}], "tok")
 
     assert bridge.is_unavailable(pkgs[0])
     assert pkgs[0]["hasScripts"] is True and pkgs[0]["scriptsKnown"] is True
-    assert "没有一个文件取回成功" in pkgs[0]["reason"]
+    assert "没有一个文件解出成功" in pkgs[0]["reason"]
 
 
 @pytest.mark.asyncio
 async def test_doc_only_skill_failure_is_marked_degradable(monkeypatch):
     """纯说明书类技能（树里没有脚本）取包失败可以降级——回执措辞也该不同。"""
-    tree = [{"name": "SKILL.md", "path": "SKILL.md"},
-            {"name": "TEMPLATES.md", "path": "TEMPLATES.md"}]
-    monkeypatch.setattr(bridge.httpx, "AsyncClient", lambda **_kw: _FakeClient(tree=tree))
+    _stub_source(monkeypatch, {
+        "files": {}, "entrypoint": None, "error": "技能说明书为空",
+        "declared_scripts": False,
+        "unmounted": {"binary": [], "over_file_limit": [], "over_byte_budget": [], "fetch_failed": []},
+        "channel": "local",
+    })
     pkgs = await bridge.fetch_skill_packages(
         [{"id": "s1", "record_id": "rec-1", "name": "写作规范"}], "tok")
 
     assert bridge.is_unavailable(pkgs[0])
     assert pkgs[0]["hasScripts"] is False
+
+
+@pytest.mark.asyncio
+async def test_missing_catalog_record_yields_placeholder(monkeypatch):
+    """目录里根本没有这条记录（已删除/无权限）：同样占位而不是消失。"""
+    _stub_source(monkeypatch, None)
+    pkgs = await bridge.fetch_skill_packages(
+        [{"id": "s1", "record_id": "gone", "name": "ppt-studio"}], "tok")
+
+    assert bridge.is_unavailable(pkgs[0])
+    assert "没有这条记录" in pkgs[0]["reason"]
+    assert pkgs[0]["scriptsKnown"] is False
 
 
 @pytest.mark.asyncio

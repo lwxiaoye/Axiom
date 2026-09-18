@@ -428,7 +428,9 @@ class AuditEvent(Base):
 class AgentSkill(Base):
     """智能体技能（版本化技能包，v1.9 §10.5.7；蓝本 FastGPT agent_skills）。
 
-    与 Java /ai/skill/*（提示词型 Skill 广场）是两套并存概念。
+    Java /ai/skill/*（提示词型 Skill 广场）已随 JeecgBoot 下线；本表现在是 Skill 广场、@Skill、
+    use_skill 与演示文稿助手共用的唯一目录（services/skills/skill_catalog），内置技能包
+    （services/skills/builtin/）由启动期播种注册为 source=system 记录。
     """
 
     __tablename__ = "agent_skill"

@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException
 
+from app.services.agent_harness.public_errors import ConfigurationRunError
 from app.services.chat.builtin_assistants.runtime_types import BuiltinRuntimePolicy
 from .definition import PRESENTATION_PRESET
 from .policy import (
@@ -32,8 +33,13 @@ async def prepare_request(kwargs: dict) -> None:
 
 
 def validate_resume_skills(skills: list) -> None:
+    # 续接时 ppt-studio 已从目录消失/说明为空：与首轮同款的配置性错误，直接失败并告知原因，
+    # 不能让续接轮在 waiting_system 里空转。
     if not skills or not any(str(item.get("instructions") or "").strip() for item in skills):
-        raise RuntimeError("演示文稿助手暂不可用：ppt-studio 权威说明读取失败。")
+        raise ConfigurationRunError(
+            "演示文稿助手暂不可用：续接时 ppt-studio 已不在技能目录或说明为空，本轮已结束。"
+            "请管理员确认内置技能已注册后重新发起。"
+        )
 
 
 PRESENTATION_RUNTIME_POLICY = BuiltinRuntimePolicy(
