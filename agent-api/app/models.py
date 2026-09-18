@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, Float, String, Text, DateTime, ForeignKey, Integer, SmallInteger, UniqueConstraint, func, or_
+from sqlalchemy import BigInteger, Boolean, Column, Float, Index, String, Text, DateTime, ForeignKey, Integer, SmallInteger, UniqueConstraint, func, or_
 from sqlalchemy.dialects.mysql import LONGBLOB, MEDIUMTEXT
 
 from app.core.database import Base
@@ -1085,6 +1085,38 @@ class KnowledgeDocument(Base):
     status = Column(String(16), nullable=False, default="PENDING")
     chunk_count = Column(Integer, nullable=False, default=0)
     error_message = Column(String(512), default="")
+    create_time = Column(DateTime, server_default=func.now())
+    update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class KnowledgeChunk(Base):
+    """知识库切片的正本。
+
+    此前切片只存在 Qdrant 的 payload 里，MySQL 一无所知，于是两件事做不了：
+    关键词/混合检索（要全文索引），以及页面上的「分段」管理（列表、编辑、停用、删除）。
+    现在入库时向量进 Qdrant、正文进这张表，point_id 把两边连起来；改分段要两边同步改。
+
+    content 建 ngram 全文索引（MySQL 自带的 ngram 解析器，token 长度 2）——默认解析器按
+    空格分词，对中文等于没索引。
+    """
+    __tablename__ = "agent_knowledge_chunk"
+    __table_args__ = (
+        Index("ft_agent_knowledge_chunk_content", "content", mysql_prefix="FULLTEXT", mysql_with_parser="ngram"),
+        {"mysql_charset": "utf8mb4"},
+    )
+
+    id = Column(String(64), primary_key=True)
+    knowledge_id = Column(String(64), nullable=False, index=True)
+    document_id = Column(String(64), nullable=False, index=True)
+    # 在文档内的顺序，展示与「按原文顺序浏览」用
+    chunk_index = Column(Integer, nullable=False, default=0)
+    content = Column(MEDIUMTEXT, nullable=False)
+    char_count = Column(Integer, nullable=False, default=0)
+    # Qdrant 里对应点的 id；编辑要重嵌入并 upsert 同一个点，删除要连点一起删
+    point_id = Column(String(64), nullable=False)
+    # 停用：MySQL 置 0，Qdrant 点的 payload 写 enabled=false（检索按 must_not enabled==false 过滤，
+    # 老点没有这个键也能正常命中），不删点，重新启用时不用重嵌入
+    enabled = Column(SmallInteger, nullable=False, default=1)
     create_time = Column(DateTime, server_default=func.now())
     update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
