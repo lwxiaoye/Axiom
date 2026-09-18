@@ -131,3 +131,228 @@ async def record_retrieval(
     except Exception as exc:  # noqa: BLE001 —— 日志是旁路，任何异常都不能冒泡到检索
         logger.warning("知识库检索日志写入失败（不影响检索结果）：%s", exc)
         return 0
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def resolve_range(
+    date_from: Any = None, date_to: Any = None, range_key: Any = None,
+) -> tuple[date, date]:
+    """把前端的 from / to（YYYY-MM-DD）或 range（today / 7d / 30d）解析成闭区间。
+
+    面板发的是 from / to；range 是给直接调接口的人用的简写。两者都没有就近 30 天。
+    区间倒置时交换；超过 MAX_RANGE_DAYS 时只保留靠近 to 的那一段，不报错——统计页多拉
+    几天不该变成 400。
+    """
+    today = _now_local().date()
+    start = _parse_date(date_from)
+    end = _parse_date(date_to)
+    if start is None or end is None:
+        key = str(range_key or "").strip().lower()
+        if key == "today":
+            days = 1
+        else:
+            matched = _RANGE_RE.match(key)
+            days = int(matched.group(1)) if matched else DEFAULT_RANGE_DAYS
+        days = max(1, days)
+        end = end or today
+        start = start or (end - timedelta(days=days - 1))
+    if start > end:
+        start, end = end, start
+    if (end - start).days >= MAX_RANGE_DAYS:
+        start = end - timedelta(days=MAX_RANGE_DAYS - 1)
+    return start, end
+
+
+def _decode_document_ids(raw: Any) -> list[str]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return [str(x) for x in data if str(x or "").strip()] if isinstance(data, list) else []
+
+
+def _empty_ranking(item_id: str, name: str, knowledge_id: str) -> dict[str, Any]:
+    return {
+        "id": item_id, "knowledgeId": knowledge_id, "name": name,
+        "qaCount": 0, "retrievalCount": 0, "fileRetrievalCount": 0,
+        "chunkHitCount": 0, "noHitCount": 0, "noHitRate": 0.0,
+    }
+
+
+async def _document_names(document_ids: Iterable[str]) -> dict[str, str]:
+    ids = [d for d in set(document_ids) if d]
+    if not ids:
+        return {}
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(KnowledgeDocument.id, KnowledgeDocument.name)
+            .where(KnowledgeDocument.id.in_(ids))
+        )).all()
+    return {str(r[0]): str(r[1] or "") for r in rows}
+
+
+async def load_logs(
+    knowledge_id: str, *, date_from: date, date_to: date, sources: Iterable[str] = FORMAL_SOURCES,
+) -> list[KnowledgeRetrievalLog]:
+    """取一个知识库在闭区间 [date_from, date_to] 内的日志行，按时间升序。"""
+    start = datetime.combine(date_from, datetime.min.time())
+    end = datetime.combine(date_to + timedelta(days=1), datetime.min.time())
+    source_values = [normalize_source(s) for s in sources] or list(FORMAL_SOURCES)
+    async with async_session() as session:
+        return list((await session.execute(
+            select(KnowledgeRetrievalLog)
+            .where(
+                KnowledgeRetrievalLog.knowledge_id == str(knowledge_id),
+                KnowledgeRetrievalLog.create_time >= start,
+                KnowledgeRetrievalLog.create_time < end,
+                KnowledgeRetrievalLog.source.in_(source_values),
+            )
+            .order_by(KnowledgeRetrievalLog.create_time.asc())
+        )).scalars().all())
+
+
+async def build_overview(
+    base: dict[str, Any],
+    *,
+    date_from: date,
+    date_to: date,
+    sources: Iterable[str] = FORMAL_SOURCES,
+    ranking_limit: int = RANKING_LIMIT,
+) -> dict[str, Any]:
+    """单个知识库的运营统计，输出 KnowledgeAnalyticsOverview。
+
+    base 是 knowledge_base_service.get_base 的返回（路由做完权限校验后顺手传进来，省一次
+    查询）；库存 stock 直接取它的 documentCount / chunkCount——库存是「现在」的量，与统计
+    区间无关。
+
+    trend 只在区间内至少有一条日志时才铺满每一天（缺的天补零），否则返回空数组让面板走
+    「暂无正式检索数据」的空态；铺零会让空库也画出一条贴地直线，看不出到底有没有数据。
+    knowledgeBases 恒为一项（本库），面板在单库视图里不显示它，但契约字段要在。
+    chunks 契约里有、面板不展示，也没有按切片记日志的必要，恒为空数组。
+    """
+    knowledge_id = str(base.get("id") or "")
+    rows = await load_logs(knowledge_id, date_from=date_from, date_to=date_to, sources=sources)
+
+    retrieval_count = len(rows)
+    no_hit_count = sum(1 for r in rows if int(r.hit_count or 0) == 0)
+    chunk_hit_count = sum(int(r.hit_count or 0) for r in rows)
+    latencies = [int(r.latency_ms or 0) for r in rows]
+    turns: set[str] = set()
+    file_retrieval_count = 0
+    daily: dict[date, dict[str, Any]] = defaultdict(
+        lambda: {"qa": set(), "retrieval": 0, "file": 0, "chunk": 0, "noHit": 0},
+    )
+    per_document: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"qa": set(), "retrieval": 0, "chunk": 0},
+    )
+    query_counter: Counter[str] = Counter()
+    query_no_hit: Counter[str] = Counter()
+
+    for row in rows:
+        turn_key = row.turn_id or row.id
+        turns.add(turn_key)
+        doc_ids = _decode_document_ids(row.hit_document_ids)
+        unique_docs = list(dict.fromkeys(doc_ids))
+        file_retrieval_count += len(unique_docs)
+
+        day = daily[row.create_time.date()]
+        day["qa"].add(turn_key)
+        day["retrieval"] += 1
+        day["file"] += len(unique_docs)
+        day["chunk"] += int(row.hit_count or 0)
+        if int(row.hit_count or 0) == 0:
+            day["noHit"] += 1
+
+        per_doc_chunks = Counter(doc_ids)
+        for doc_id in unique_docs:
+            stat = per_document[doc_id]
+            stat["qa"].add(turn_key)
+            stat["retrieval"] += 1
+            stat["chunk"] += per_doc_chunks[doc_id]
+
+        query_text = (row.query or "").strip()
+        if query_text:
+            query_counter[query_text] += 1
+            if int(row.hit_count or 0) == 0:
+                query_no_hit[query_text] += 1
+
+    trend: list[dict[str, Any]] = []
+    if rows:
+        cursor = date_from
+        while cursor <= date_to:
+            day = daily.get(cursor)
+            trend.append({
+                "date": cursor.isoformat(),
+                "qaCount": len(day["qa"]) if day else 0,
+                "retrievalCount": day["retrieval"] if day else 0,
+                "fileRetrievalCount": day["file"] if day else 0,
+                "chunkHitCount": day["chunk"] if day else 0,
+                "noHitCount": day["noHit"] if day else 0,
+            })
+            cursor += timedelta(days=1)
+
+    names = await _document_names(per_document.keys())
+    documents = []
+    for doc_id, stat in per_document.items():
+        item = _empty_ranking(doc_id, names.get(doc_id) or "（已删除的文档）", knowledge_id)
+        item.update({
+            "qaCount": len(stat["qa"]),
+            "retrievalCount": stat["retrieval"],
+            # 一个文档的「文件召回」就是它被召回的次数——每次召回内同一文件只算一次
+            "fileRetrievalCount": stat["retrieval"],
+            "chunkHitCount": stat["chunk"],
+        })
+        documents.append(item)
+    documents.sort(key=lambda d: (-d["fileRetrievalCount"], -d["chunkHitCount"], d["name"]))
+    limit = max(1, int(ranking_limit or RANKING_LIMIT))
+
+    no_hit_rate = (no_hit_count / retrieval_count) if retrieval_count else 0.0
+    base_rank = _empty_ranking(knowledge_id, str(base.get("name") or ""), knowledge_id)
+    base_rank.update({
+        "qaCount": len(turns),
+        "retrievalCount": retrieval_count,
+        "fileRetrievalCount": file_retrieval_count,
+        "chunkHitCount": chunk_hit_count,
+        "noHitCount": no_hit_count,
+        "noHitRate": round(no_hit_rate, 4),
+    })
+    top_queries = [
+        {"query": text, "count": count, "noHitCount": query_no_hit.get(text, 0)}
+        for text, count in query_counter.most_common(TOP_QUERY_LIMIT)
+    ]
+
+    return {
+        "from": date_from.isoformat(),
+        "to": date_to.isoformat(),
+        "stock": {
+            "knowledgeBaseCount": 1,
+            "documentCount": int(base.get("documentCount") or 0),
+            "chunkCount": int(base.get("chunkCount") or 0),
+        },
+        "metrics": {
+            "qaCount": len(turns),
+            "retrievalCount": retrieval_count,
+            "fileRetrievalCount": file_retrieval_count,
+            "chunkHitCount": chunk_hit_count,
+            "noHitCount": no_hit_count,
+            "noHitRate": round(no_hit_rate, 4),
+            "averageLatencyMs": int(round(sum(latencies) / len(latencies))) if latencies else 0,
+        },
+        "trend": trend,
+        "knowledgeBases": [base_rank],
+        "documents": documents[:limit],
+        "chunks": [],
+        # 契约之外的附加字段：热门问题（含各自的无命中次数），面板有则展示、无则忽略
+        "topQueries": top_queries,
+    }

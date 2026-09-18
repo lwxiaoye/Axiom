@@ -528,3 +528,35 @@ async def retrieval(
         "items": items,
         "chunks": chunks,
     }
+
+
+# ---- 运营统计 ----
+
+@router.get("/bases/{knowledge_id}/analytics")
+async def base_analytics(
+    knowledge_id: str,
+    range_: Optional[str] = Query(
+        None, alias="range", description="today / 7d / 30d，from/to 缺省时生效",
+    ),
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = Query(None),
+    sources: Optional[str] = Query(
+        None, description="逗号分隔的来源过滤（CHAT/AGENT/WORKFLOW/TEST）；缺省不含 TEST",
+    ),
+    user: UserContext = Depends(current_user),
+):
+    """单个知识库的运营统计，输出前端 KnowledgeAnalyticsOverview 契约。
+
+    原路径 /api/ai/knowledge/base/{id}/analytics 归已下线的 Java，面板一直报「统计迁移」。
+    面板发 from / to（YYYY-MM-DD，按用户本地日历），range 只是给直接调接口的人的简写。
+    权限与详情页一致（能看这个库就能看它的统计）；是否只对所有者显示由前端决定。
+    """
+    base = await _require_access(knowledge_id, user)
+    date_from, date_to = retrieval_log.resolve_range(from_, to, range_)
+    source_filter = (
+        [s for s in (sources or "").split(",") if s.strip()]
+        or list(retrieval_log.FORMAL_SOURCES)
+    )
+    return await retrieval_log.build_overview(
+        base, date_from=date_from, date_to=date_to, sources=source_filter,
+    )

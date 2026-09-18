@@ -176,6 +176,13 @@ export interface KnowledgeAnalyticsRanking {
   noHitRate: number;
 }
 
+// 热门问题：区间内同一检索词被问了几次、其中几次无命中（无命中的热门问题就是知识库要补的内容）
+export interface KnowledgeAnalyticsTopQuery {
+  query: string;
+  count: number;
+  noHitCount: number;
+}
+
 export interface KnowledgeAnalyticsOverview {
   from: string;
   to: string;
@@ -185,4 +192,6 @@ export interface KnowledgeAnalyticsOverview {
   knowledgeBases: KnowledgeAnalyticsRanking[];
   documents: KnowledgeAnalyticsRanking[];
   chunks: KnowledgeAnalyticsRanking[];
+  // 仅 agent-api 的单库统计返回；管理侧旧接口没有，面板按可选处理
+  topQueries?: KnowledgeAnalyticsTopQuery[];
 }

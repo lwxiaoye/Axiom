@@ -315,8 +315,11 @@ export const getManagedKnowledgeBaseAnalytics = (id: string, params: KnowledgeAn
     params,
   }, { errorMessageMode: 'none' });
 
+// 用户侧单库运营统计：数据源是 agent-api 的检索日志（agent_knowledge_retrieval_log），
+// 原 /ai/knowledge/base/{id}/analytics 归已下线的 Java，面板一直报「统计迁移」。
+// 参数仍是 from / to（YYYY-MM-DD），服务端按平台业务时区分桶。
 export const getOwnedKnowledgeBaseAnalytics = (id: string, params: KnowledgeAnalyticsRange) =>
   defHttp.get<KnowledgeAnalyticsOverview>({
-    url: `/ai/knowledge/base/${encodeURIComponent(id)}/analytics`,
+    url: `${KB}/bases/${encodeURIComponent(id)}/analytics`,
     params,
-  }, { errorMessageMode: 'none' });
+  }, KB_OPTS);

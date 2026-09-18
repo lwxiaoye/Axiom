@@ -15,12 +15,16 @@
     </header>
 
     <a-alert v-if="error" type="warning" show-icon class="analytics-error" role="alert" message="运营统计加载失败">
-      <template #description>请确认服务已完成统计迁移后重试。</template>
+      <template #description>请稍后重试；持续失败请联系管理员。</template>
       <template #action><a-button size="small" @click="load">重试</a-button></template>
     </a-alert>
 
     <a-skeleton v-if="loading && !overview" active :paragraph="{ rows: 8 }" />
     <template v-else-if="overview">
+      <!-- 接口通了但区间内没有一条日志：这是「还没人用」，不是加载失败，不能拿报错文案当空态 -->
+      <a-alert v-if="!hasRetrievals" type="info" show-icon class="analytics-empty" message="还没有检索记录">
+        <template #description>{{ emptyHint }}</template>
+      </a-alert>
       <div :class="['analytics-stock-grid', { 'single-base-stock': isSingleBase }]" aria-label="当前库存">
         <article v-if="!isSingleBase"><span>知识库总量</span><strong>{{ number(overview.stock?.knowledgeBaseCount) }}</strong><small>当前未删除</small></article>
         <article><span>文件总量</span><strong>{{ number(overview.stock?.documentCount) }}</strong><small>当前未删除</small></article>
@@ -42,7 +46,7 @@
             <span>召回 / 问答</span>
           </div>
           <div v-if="hasTrend" ref="chartRef" class="analytics-chart" role="img" :aria-label="`${overview.from} 至 ${overview.to} 的知识库运营趋势`" />
-          <a-empty v-else :image="simpleImage" description="该区间暂无正式检索数据" />
+          <a-empty v-else :image="simpleImage" description="该区间还没有检索记录" />
         </section>
 
         <section class="analytics-card quality-card">
@@ -73,6 +77,12 @@
             <span v-if="column.key === 'noHitRate'">{{ percent(record.noHitRate) }}</span>
           </template>
         </a-table>
+      </section>
+
+      <!-- 只有 agent-api 的单库统计返回 topQueries；无命中的热门问题就是知识库该补的内容 -->
+      <section v-if="overview.topQueries?.length" class="analytics-card ranking-card">
+        <div class="card-heading"><div><h3>热门问题</h3><p>区间内被检索最多的问题；无命中次数高的说明知识库缺这块内容。</p></div></div>
+        <a-table :columns="queryColumns" :data-source="overview.topQueries" :pagination="false" size="small" row-key="query" :scroll="{ x: 620 }" />
       </section>
     </template>
   </section>
@@ -111,6 +121,13 @@ const presets: Array<{ key: Exclude<KnowledgeAnalyticsPreset, 'custom'>; label: 
 ];
 const isSingleBase = computed(() => Boolean(props.knowledgeId));
 const hasTrend = computed(() => Boolean(overview.value?.trend?.length));
+// 区间内有没有任何一次检索：决定顶部是否提示「还没有检索记录」
+const hasRetrievals = computed(() => Number(overview.value?.metrics?.retrievalCount || 0) > 0);
+const emptyHint = computed(() => (
+  isSingleBase.value
+    ? '所选区间内还没有人在对话、智能体或工作流里检索到这个知识库。检索一旦发生就会在这里累计；页面上的「召回测试」不计入。'
+    : '所选区间内还没有正式检索记录。'
+));
 const baseColumns = [
   { title: '知识库', key: 'name', dataIndex: 'name' },
   { title: '问答量', dataIndex: 'qaCount', width: 100 },
@@ -123,6 +140,11 @@ const documentColumns = [
   { title: '文件', dataIndex: 'name' },
   { title: '文件召回', dataIndex: 'fileRetrievalCount', width: 120 },
   { title: '分片命中', dataIndex: 'chunkHitCount', width: 120 },
+];
+const queryColumns = [
+  { title: '问题', dataIndex: 'query', ellipsis: true },
+  { title: '检索次数', dataIndex: 'count', width: 110 },
+  { title: '无命中', dataIndex: 'noHitCount', width: 100 },
 ];
 
 function isoDate(date: Date) {
@@ -227,7 +249,7 @@ onBeforeUnmount(() => {
 .analytics-header h2 { margin: 4px 0; font-size: 22px; letter-spacing: -.02em; }
 .analytics-header p, .card-heading p { margin: 0; color: #75829a; font-size: 13px; }
 .analytics-range { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.analytics-error { margin-bottom: 16px; }
+.analytics-error, .analytics-empty { margin-bottom: 16px; }
 .analytics-stock-grid, .analytics-metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .analytics-stock-grid.single-base-stock { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .analytics-metric-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 10px; }
