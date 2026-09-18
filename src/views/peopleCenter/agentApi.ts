@@ -1670,21 +1670,18 @@ export async function getAgents(params?: { recommend?: boolean; search?: string 
   }));
 }
 
-// Skills API
+// ── Skills API ──────────────────────────────────────────────────────────────
+// Skill 目录由 agent-api 自持（2026-09-18）：原 /ai/skill/list|readme 由 JeecgBoot(Java) 提供，
+// Java 下线后 auth-api 只剩一个永远返回 [] 的桩 / 404，Skill 广场与 @Skill 面板因此永远为空。
+// agent-api 的 /agent-api/skill/list 返回系统技能（文本总结、表格分析、内置 ppt-studio）与
+// 当前用户自己的技能，字段含 skillId/recordId/enabled/version；readme 走 /agent-api/skill/content。
+// /agent-api 不在 /api 前缀之下且返回裸 JSON，故用 apiUrl:'' + isTransformResponse:false
+// （与 knowledge.api.ts 的 KB_OPTS 同一组选项）。
+const SKILL_API = '/agent-api/skill';
+const SKILL_OPTS = { apiUrl: '', isTransformResponse: false, errorMessageMode: 'none' } as const;
+
 export async function getSkills(): Promise<SkillItem[]> {
-  const data: any = await defHttp.get(
-    {
-      url: '/ai/skill/list',
-      params: {
-        pageNo: 1,
-        pageSize: 20,
-        enabled: 1,
-        column: 'updateTime',
-        order: 'desc',
-      },
-    },
-    { errorMessageMode: 'none' }
-  );
+  const data: any = await defHttp.get({ url: `${SKILL_API}/list` }, SKILL_OPTS);
   const list = Array.isArray(data)
     ? data
     : Array.isArray(data?.records)
@@ -1699,13 +1696,13 @@ export async function getSkills(): Promise<SkillItem[]> {
       const skillId = String(item?.skillId || item?.id || '').trim();
       return {
         id: skillId,
-        recordId: String(item?.id || '').trim(),
+        recordId: String(item?.recordId || item?.id || '').trim(),
         skillId,
         name: String(item?.name || skillId || '未命名 Skill'),
         description: String(item?.description || ''),
         icon: String(item?.icon || ''),
         enabled: true,
-        version: String(item?.version || ''),
+        version: String(item?.version || item?.versionName || ''),
         author: String(item?.author || ''),
         source: String(item?.source || ''),
         installStatus: String(item?.installStatus || ''),
@@ -1714,15 +1711,15 @@ export async function getSkills(): Promise<SkillItem[]> {
     .filter((item: SkillItem) => item.id);
 }
 
-/** 取某个 Skill 的 SKILL.md 正文（供广场详情弹窗展示）。recordId = ai_skill.id。 */
+/** 取某个 Skill 的 SKILL.md 正文（供广场详情弹窗展示）。recordId = agent_skill.id（与 skillId 同值）。 */
 export async function getSkillReadme(recordId: string): Promise<string> {
   if (!recordId) return '';
   const r: any = await defHttp.get(
-    { url: '/ai/skill/readme', params: { id: recordId } },
-    { errorMessageMode: 'none' }
+    { url: `${SKILL_API}/content`, params: { skillId: recordId } },
+    SKILL_OPTS,
   );
   if (typeof r === 'string') return r;
-  return String(r?.readme ?? r?.content ?? r?.result ?? '');
+  return String(r?.content ?? r?.readme ?? r?.result ?? '');
 }
 
 // Threads API

@@ -5934,7 +5934,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
     openSubagents.value = openSubagents.value.filter((item) => item.id !== id);
   }
 
-  // @ 面板的 Skill 候选目录：与广场同源（/ai/skill/list 管理员已启用），首次 @ 时懒加载
+  // @ 面板的 Skill 候选目录：与广场同源（agent-api /agent-api/skill/list，enabled 的系统技能 + 自己的技能），首次 @ 时懒加载
   async function loadMentionSkills() {
     try {
       mentionSkills.value = await getSkills();

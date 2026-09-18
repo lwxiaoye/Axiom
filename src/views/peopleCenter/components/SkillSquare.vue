@@ -198,7 +198,11 @@ function skillVisual(skill: SkillItem): SkillVisual {
 }
 
 function formatSource(source?: string) {
+  // agent-api 目录的 source 只有 system（平台内置/系统技能）与 personal（自己导入/生成）；
+  // upload/url/builtin 是旧 Java 广场的取值，留着兼容历史数据展示。
   const sourceNames: Record<string, string> = {
+    system: '系统 Skill',
+    personal: '我的 Skill',
     upload: '上传安装',
     url: '网络安装',
     builtin: '内置 Skill',
