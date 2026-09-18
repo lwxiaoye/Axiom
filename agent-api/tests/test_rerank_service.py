@@ -325,7 +325,7 @@ def kb(monkeypatch):
 
         async def search(self, *, limit, **kwargs):
             self.limits.append(limit)
-            return [SimpleNamespace(score=1 - i * 0.01, payload={'content': f'doc{i}', 'document_name': f'd{i}',
+            return [SimpleNamespace(id=f'p{i}', score=1 - i * 0.01, payload={'content': f'doc{i}', 'document_name': f'd{i}',
                                     'knowledge_id': 'k', 'document_id': f'id{i}'}) for i in range(min(limit, 30))]
 
     fake = FakeClient()
@@ -337,8 +337,16 @@ def kb(monkeypatch):
     async def embed_query(text, **kwargs):
         return [0.1, 0.2]
 
+    # 检索方式未显式传入时会去 MySQL 读知识库设置；这里没有库，按「纯向量」默认值顶上
+    async def saved_settings(ids):
+        return {
+            'top_k': kb_service.DEFAULT_TOP_K, 'score_threshold': kb_service.DEFAULT_SCORE_THRESHOLD,
+            'retrieval_mode': 'VECTOR', 'semantic_weight': 0.5, 'keyword_weight': 0.5,
+        }
+
     monkeypatch.setattr(kb_service, '_active_embedding', active_embedding)
     monkeypatch.setattr(kb_service.embedding_service, 'embed_query', embed_query)
+    monkeypatch.setattr(kb_service, '_load_base_settings', saved_settings)
     return kb_service, fake
 
 

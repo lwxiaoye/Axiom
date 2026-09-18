@@ -1062,6 +1062,12 @@ class KnowledgeBase(Base):
     # 检索参数：知识库设置里可改，search_chunks 未显式传参时取这里的值
     top_k = Column(Integer, nullable=False, default=5)
     score_threshold = Column(Float, nullable=False, default=0.3)
+    # 检索方式 VECTOR / KEYWORD / HYBRID 与混合检索两路权重（0–1）。工作流节点可按次覆盖，
+    # 主对话与知识库页面的检索走这里的值。两路权重分开存而不是只存一个：
+    # 服务端融合公式就是 semantic_weight*向量分 + keyword_weight*关键词分，存什么就用什么。
+    retrieval_mode = Column(String(16), nullable=False, default="VECTOR")
+    semantic_weight = Column(Float, nullable=False, default=0.5)
+    keyword_weight = Column(Float, nullable=False, default=0.5)
     # 入库时所用的向量模型与维度：换模型后旧集合失效，据此判断是否需要重建
     embedding_model = Column(String(128), default="")
     embedding_dimension = Column(Integer, nullable=True)

@@ -90,6 +90,10 @@ async def _migrate_chat_columns():
             # 知识库检索参数：设置抽屉里可改，此前保存后被静默丢弃（服务端只收 name/description）。
             "ALTER TABLE agent_knowledge_base ADD COLUMN top_k INT NOT NULL DEFAULT 5",
             "ALTER TABLE agent_knowledge_base ADD COLUMN score_threshold DOUBLE NOT NULL DEFAULT 0.3",
+            # 知识库级检索方式与混合检索权重：旧库默认纯向量，行为与加列前一致。
+            "ALTER TABLE agent_knowledge_base ADD COLUMN retrieval_mode VARCHAR(16) NOT NULL DEFAULT 'VECTOR'",
+            "ALTER TABLE agent_knowledge_base ADD COLUMN semantic_weight DOUBLE NOT NULL DEFAULT 0.5",
+            "ALTER TABLE agent_knowledge_base ADD COLUMN keyword_weight DOUBLE NOT NULL DEFAULT 0.5",
         ]:
             try:
                 await conn.execute(text(ddl))
