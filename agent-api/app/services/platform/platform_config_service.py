@@ -226,19 +226,10 @@ async def save_web_search(incoming: Dict[str, Any]) -> Dict[str, Any]:
 
 async def get_web_search_config() -> Dict[str, Any]:
     """运行时用：返回含明文密钥的完整配置（供联网搜索工具消费）。"""
-    cfg = _normalize_provider_pool(await _get_raw(WEB_SEARCH_KEY, WEB_SEARCH_DEFAULTS))
-    # Nonempty deployment overrides retain the original local configuration
-    # precedence. The saved admin values are used when an override is empty.
-    env_url = str(getattr(settings, "WEB_SEARCH_SEARXNG_URL", "") or "").strip()
-    if env_url:
-        cfg["searxngUrl"] = env_url
-    env_engines = str(getattr(settings, "WEB_SEARCH_SEARXNG_ENGINES", "") or "").strip()
-    if env_engines:
-        cfg["searxngEngines"] = env_engines
-    env_img = str(getattr(settings, "WEB_SEARCH_SEARXNG_IMAGE_ENGINES", "") or "").strip()
-    if env_img:
-        cfg["searxngImageEngines"] = env_img
-    return cfg
+    # env 只作为缺省值（已在 WEB_SEARCH_DEFAULTS 里播种），管理页保存过的值必须生效。
+    # 此前这里让非空的 env 反过来覆盖库里的值：compose 给了 ENGINES=bing，管理员在页面上
+    # 改成别的引擎、保存成功、检索却仍然打 bing——「配置改了不生效」正是要杜绝的交互。
+    return _normalize_provider_pool(await _get_raw(WEB_SEARCH_KEY, WEB_SEARCH_DEFAULTS))
 
 
 # ---- OCR（ADR-040） ----

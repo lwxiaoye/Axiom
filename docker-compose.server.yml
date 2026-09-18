@@ -29,7 +29,9 @@ x-server-agent-env: &server-agent-env
   # ---- web search: SearXNG on this host; scraper only when firecrawl profile is on ----
   WEB_SEARCH_ENABLED: "true"
   WEB_SEARCH_SEARXNG_URL: http://searxng:8080
-  WEB_SEARCH_SEARXNG_ENGINES: ${AXIOM_SEARXNG_ENGINES:-bing}
+  # 缺省引擎：这台 VPS 上 bing 的页面解析在当前 SearXNG 镜像里已失效（parsing error），
+  # google/baidu 对该 IP 出验证码；duckduckgo 与 brave 实测可用。管理页可改，改后以页面为准。
+  WEB_SEARCH_SEARXNG_ENGINES: ${AXIOM_SEARXNG_ENGINES:-duckduckgo,brave}
   WEB_SEARCH_FIRECRAWL_URL: ${AXIOM_FIRECRAWL_URL:-}
   WEB_SEARCH_LOCAL_RERANKER_URL: ""
   # ---- browser service (Playwright MCP) ----

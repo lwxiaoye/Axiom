@@ -118,6 +118,9 @@
         <label for="s-url">SearXNG 地址</label>
         <input id="s-url" v-model="search.form.searxngUrl" type="url" placeholder="http://searxng:8080" :disabled="search.busy" />
         <p class="hint">本机已随 compose 部署 SearXNG，容器内地址通常是 http://searxng:8080。</p>
+        <label for="s-engines">搜索引擎</label>
+        <input id="s-engines" v-model="search.form.searxngEngines" placeholder="duckduckgo,brave" :disabled="search.busy" />
+        <p class="hint">逗号分隔的 SearXNG 引擎名。本机实测 duckduckgo、brave 可用；bing 解析已失效，google/baidu 对本机 IP 出验证码。</p>
         <label for="s-rerank">结果重排</label>
         <select id="s-rerank" v-model="search.form.rerankerProvider" :disabled="search.busy">
           <option value="none">不重排</option>
@@ -380,7 +383,7 @@
   const search = reactive({
     loading: true, saving: false, testing: false, busy: false,
     feedback: null as Result | null,
-    form: { enabled: false, searxngUrl: '', rerankerProvider: 'none' },
+    form: { enabled: false, searxngUrl: '', searxngEngines: '', rerankerProvider: 'none' },
   });
   // 这页只暴露这两个；其余 provider 的取值原样保留，保存时不会被覆盖成 none
   const SIMPLE_RERANKERS = ['none', 'platform'];
@@ -390,7 +393,12 @@
     search.loading = true;
     try {
       const d = await requestAgentApi<any>('/platform-config/web-search');
-      Object.assign(search.form, { enabled: !!d.enabled, searxngUrl: d.searxngUrl || '', rerankerProvider: d.rerankerProvider || 'none' });
+      Object.assign(search.form, {
+        enabled: !!d.enabled,
+        searxngUrl: d.searxngUrl || '',
+        searxngEngines: d.searxngEngines || '',
+        rerankerProvider: d.rerankerProvider || 'none',
+      });
     } catch (e: any) { search.feedback = fail(e, '配置加载失败'); }
     finally { search.loading = false; }
   }
