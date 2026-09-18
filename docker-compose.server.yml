@@ -1,0 +1,277 @@
+# AXIOM — single-host server stack for clinirag.top (1 vCPU / 3 GB RAM).
+#
+# Layered on top of docker-compose.local.yml; one command starts everything:
+#   docker compose --env-file deploy/local/.env \
+#     -f docker-compose.local.yml -f docker-compose.server.yml up -d --build
+#
+# What this file adds to the local stack:
+#   base       : mysql:8.4 (already on host), no DB host ports (3307 is taken by
+#                another MySQL), MySQL memory trimmed, only frontend :3200 and
+#                agent-api :8000 published on 127.0.0.1.
+#   searxng    : web search (search segment). Internal only.
+#   agent-browser : Playwright MCP browser service. Internal only.
+#   opensandbox-server + agent-sandbox-py:local : code / file sandbox.
+#   firecrawl-* : page scraper (profile "firecrawl"). Off by default on this
+#                host — it alone needs ~1.5 GB RAM + ~3 GB disk. Enable with
+#                `--profile firecrawl` once the host is upgraded.
+#
+# Cloud (configured by the admin in the web UI after login, not here):
+#   chat model (multimodal, also used for OCR) -> /center/models
+#   embedding, reranker (jina/cohere)          -> 系统设置 → 能力配置 / 联网搜索配置
+#
+# All secrets come from deploy/local/.env (gitignored).
+
+x-server-agent-env: &server-agent-env
+  # ---- model gateway default (per-account cloud model is set in the UI) ----
+  NEWAPI_BASE_URL: ${AXIOM_MODEL_BASE_URL}
+  DEFAULT_EMBEDDING_MODEL: ${AXIOM_EMBEDDING_MODEL:-text-embedding-v4}
+  DEFAULT_EMBEDDING_DIMENSION: ${AXIOM_EMBEDDING_DIMENSION:-1024}
+  # ---- web search: SearXNG on this host; scraper only when firecrawl profile is on ----
+  WEB_SEARCH_ENABLED: "true"
+  WEB_SEARCH_SEARXNG_URL: http://searxng:8080
+  WEB_SEARCH_SEARXNG_ENGINES: ${AXIOM_SEARXNG_ENGINES:-bing}
+  WEB_SEARCH_FIRECRAWL_URL: ${AXIOM_FIRECRAWL_URL:-}
+  WEB_SEARCH_LOCAL_RERANKER_URL: ""
+  # ---- browser service (Playwright MCP) ----
+  BROWSER_SERVICE_URL: http://agent-browser:8089/mcp
+  # ---- sandbox: OpenSandbox on this host ----
+  SKILL_SANDBOX_ENABLED: "true"
+  SKILL_SANDBOX_PROVIDER: opensandbox
+  SKILL_SANDBOX_OPENSANDBOX_DOMAIN: http://opensandbox-server:8080
+  SKILL_SANDBOX_OPENSANDBOX_API_KEY: ${AXIOM_OPENSANDBOX_API_KEY:?Set AXIOM_OPENSANDBOX_API_KEY in deploy/local/.env}
+  SKILL_SANDBOX_OPENSANDBOX_IMAGE: agent-sandbox-py:local
+  SKILL_SANDBOX_OPENSANDBOX_USE_SERVER_PROXY: "true"
+  SKILL_SANDBOX_OPENSANDBOX_CPU: "1"
+  SKILL_SANDBOX_OPENSANDBOX_MEMORY: ${AXIOM_SANDBOX_MEMORY:-512Mi}
+  SKILL_SANDBOX_MAX_CONCURRENT: "2"
+
+services:
+  # ======================= base stack overrides =======================
+  frontend:
+    build:
+      # The Vite build does not fit in this host's RAM inside Docker; dist/ is built
+      # natively (see deploy/frontend/Dockerfile.prebuilt) and only packaged here.
+      dockerfile: deploy/frontend/Dockerfile.prebuilt
+    ports: !override
+      - "127.0.0.1:3200:80"
+
+  mysql:
+    image: mysql:8.4
+    ports: !reset []
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+    mem_limit: 512m
+
+  postgres:
+    ports: !reset []
+
+  qdrant:
+    ports: !reset []
+
+  auth-api:
+    ports: !reset []
+
+  agent-api:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+    environment: *server-agent-env
+
+  # searxng / agent-browser / opensandbox-server are plain URLs to agent-api;
+  # it starts without them and reports the tool as unavailable, so no depends_on.
+  agent-worker:
+    # Same Dockerfile as agent-api: reuse its image instead of building twice.
+    image: axiom-agent-api:latest
+    environment: *server-agent-env
+
+  # ======================= web search: SearXNG =======================
+  searxng:
+    image: searxng/searxng:latest
+    container_name: axiom-searxng
+    restart: unless-stopped
+    volumes:
+      - ./deploy/websearch-api/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+      SEARXNG_SECRET: ${AXIOM_SEARXNG_SECRET:?Set AXIOM_SEARXNG_SECRET in deploy/local/.env}
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null 'http://127.0.0.1:8080/search?q=health&format=json' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ======================= web search: Firecrawl scraper (profile) =======================
+  firecrawl-redis:
+    profiles: ["firecrawl"]
+    image: redis:alpine
+    container_name: axiom-firecrawl-redis
+    command: redis-server --bind 0.0.0.0
+    restart: unless-stopped
+    mem_limit: 128m
+
+  firecrawl-rabbitmq:
+    profiles: ["firecrawl"]
+    image: rabbitmq:3-management
+    container_name: axiom-firecrawl-rabbitmq
+    command: rabbitmq-server
+    restart: unless-stopped
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  firecrawl-postgres:
+    profiles: ["firecrawl"]
+    image: ghcr.io/firecrawl/nuq-postgres:latest
+    container_name: axiom-firecrawl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${AXIOM_FIRECRAWL_PG_PASSWORD:-${AXIOM_DB_PASSWORD}}
+      POSTGRES_DB: postgres
+    volumes:
+      - axiom_firecrawl_pg_data:/var/lib/postgresql/data
+    mem_limit: 256m
+
+  firecrawl-playwright:
+    profiles: ["firecrawl"]
+    image: ghcr.io/firecrawl/playwright-service:latest
+    container_name: axiom-firecrawl-playwright
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      MAX_CONCURRENT_PAGES: "2"
+      BLOCK_MEDIA: "true"
+    mem_limit: 768m
+
+  firecrawl-api:
+    profiles: ["firecrawl"]
+    image: ghcr.io/firecrawl/firecrawl:latest
+    container_name: axiom-firecrawl-api
+    restart: unless-stopped
+    depends_on:
+      firecrawl-redis:
+        condition: service_started
+      firecrawl-playwright:
+        condition: service_started
+      firecrawl-rabbitmq:
+        condition: service_healthy
+      firecrawl-postgres:
+        condition: service_started
+    environment:
+      HOST: "0.0.0.0"
+      PORT: 3002
+      REDIS_URL: redis://firecrawl-redis:6379
+      REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape
+      POSTGRES_HOST: firecrawl-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${AXIOM_FIRECRAWL_PG_PASSWORD:-${AXIOM_DB_PASSWORD}}
+      POSTGRES_DB: postgres
+      NUQ_RABBITMQ_URL: amqp://firecrawl-rabbitmq:5672
+      USE_DB_AUTHENTICATION: "false"
+      NUM_WORKERS_PER_QUEUE: "2"
+      MAX_CONCURRENT_JOBS: "2"
+      ENV: local
+    command: node dist/src/harness.js --start-docker
+    mem_limit: 1g
+
+  # ======================= browser service: Playwright MCP =======================
+  # Official image (chromium headless shell only, ~1.4 GB). deploy/browser-api/Dockerfile
+  # builds on mcr.microsoft.com/playwright:*-noble, which bundles chromium+firefox+webkit
+  # (~4.5 GB) and does not fit on this host. Same @playwright/mcp version and flags.
+  agent-browser:
+    image: mcr.microsoft.com/playwright/mcp:v0.0.76
+    container_name: axiom-agent-browser
+    restart: unless-stopped
+    # Image ENTRYPOINT already passes: --headless --browser chromium --no-sandbox
+    command:
+      - --isolated
+      - --block-service-workers
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8089"
+      - --allowed-hosts
+      - "*"
+      - --blocked-origins
+      - "http://localhost;http://127.0.0.1;http://169.254.169.254;http://10.*;http://192.168.*;http://172.16.*"
+      - --viewport-size
+      - "1280x800"
+      - --timeout-navigation
+      - "60000"
+      - --output-dir
+      - /tmp/pw-output
+    # Reachable only from other containers (agent-api / worker) — no host port.
+    shm_size: 256m
+    mem_limit: ${AXIOM_BROWSER_MEM_LIMIT:-1g}
+    pids_limit: 1024
+    init: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8089/',r=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ======================= sandbox: OpenSandbox =======================
+  # Builds the runtime image the sandboxes run in (python + LibreOffice + CJK fonts).
+  sandbox-runtime-image:
+    build:
+      context: ./deploy/opensandbox-api
+      dockerfile: sandbox/Dockerfile
+    image: agent-sandbox-py:local
+    container_name: axiom-sandbox-image-builder
+    entrypoint: ["/bin/true"]
+    restart: "no"
+    network_mode: "none"
+
+  opensandbox-server:
+    build:
+      context: ./deploy/opensandbox-api
+      dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${AXIOM_PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        OPENSANDBOX_SERVER_VERSION: "0.2.2"
+    image: axiom/opensandbox-server:local
+    container_name: axiom-opensandbox-server
+    restart: unless-stopped
+    environment:
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/sandbox.toml
+      OPENSANDBOX_SERVER_API_KEY: ${AXIOM_OPENSANDBOX_API_KEY}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - axiom_opensandbox_state:/root/.opensandbox
+      - ./deploy/opensandbox-api/sandbox.toml:/etc/opensandbox/sandbox.toml:ro
+    networks:
+      - default
+      - sandbox-network
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      sandbox-runtime-image:
+        condition: service_completed_successfully
+
+networks:
+  # Name must match [docker].network_mode in deploy/opensandbox-api/sandbox.toml.
+  sandbox-network:
+    name: agent-api_opensandbox_sandbox_network
+    driver: bridge
+    internal: true
+
+volumes:
+  axiom_opensandbox_state:
+  axiom_firecrawl_pg_data:

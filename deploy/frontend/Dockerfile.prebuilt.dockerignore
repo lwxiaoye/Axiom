@@ -1,0 +1,7 @@
+# Allow-list: only the built dist and the nginx config enter the build context.
+**
+!dist/
+!dist/**
+!deploy/
+!deploy/frontend/
+!deploy/frontend/nginx.conf
