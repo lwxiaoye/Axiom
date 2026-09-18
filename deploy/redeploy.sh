@@ -8,9 +8,27 @@ cd "$(dirname "$0")/.."
 COMPOSE="docker compose --env-file deploy/local/.env -f docker-compose.local.yml -f docker-compose.server.yml"
 TARGET="${1:-frontend}"
 
+# 前端构建的内存全部靠 zram 兜底：溢出到磁盘 swap 会导致数十 GB 的换页
+# 抖动，构建永远跑不完。zstd 压缩比约 3:1，解压是 GB/s 级。
+ensure_zram() {
+  local want=$((6144*1024*1024))
+  if [ "$(cat /sys/block/zram0/disksize 2>/dev/null)" != "$want" ] \
+     || ! grep -q 'zstd\]' /sys/block/zram0/comp_algorithm 2>/dev/null; then
+    echo "==> 配置 zram (6G / zstd / 最高优先级)"
+    swapoff /dev/zram0 2>/dev/null || true
+    echo 1 > /sys/block/zram0/reset
+    echo zstd > /sys/block/zram0/comp_algorithm
+    echo "$want" > /sys/block/zram0/disksize
+    mkswap /dev/zram0 >/dev/null 2>&1
+    swapon -p 100 /dev/zram0
+  fi
+  sysctl -w vm.page-cluster=0 vm.swappiness=100 >/dev/null
+}
+
 build_frontend() {
   echo "==> 释放内存（前端构建需要几乎全部内存）"
   $COMPOSE stop >/dev/null 2>&1 || true
+  ensure_zram
   sync; echo 3 > /proc/sys/vm/drop_caches || true
 
   echo "==> 构建 dist（heap 4096，zram 兜底）"
@@ -43,6 +61,7 @@ case "$TARGET" in
   *) echo "用法: $0 [frontend|backend|all]"; exit 1 ;;
 esac
 
+sysctl -w vm.swappiness=60 >/dev/null 2>&1 || true
 echo "==> 拉起全部服务"
 $COMPOSE up -d
 echo "==> 等待健康检查"
