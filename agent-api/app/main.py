@@ -87,6 +87,9 @@ async def _migrate_chat_columns():
             "ALTER TABLE ai_chat_messages ADD COLUMN execution_trace_json MEDIUMTEXT NULL",
             # 对话日志以该字段精确关联一问一答；生产仍必须由 Alembic 迁移，开发环境兜底补列。
             "ALTER TABLE ai_chat_messages ADD COLUMN turn_id VARCHAR(64) NULL",
+            # 知识库检索参数：设置抽屉里可改，此前保存后被静默丢弃（服务端只收 name/description）。
+            "ALTER TABLE agent_knowledge_base ADD COLUMN top_k INT NOT NULL DEFAULT 5",
+            "ALTER TABLE agent_knowledge_base ADD COLUMN score_threshold DOUBLE NOT NULL DEFAULT 0.3",
         ]:
             try:
                 await conn.execute(text(ddl))

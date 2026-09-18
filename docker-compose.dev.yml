@@ -19,6 +19,22 @@ services:
     command:
       ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9090", "--no-proxy-headers", "--reload"]
 
+  # agent-api 同理：源码挂进容器 + --reload（镜像里装了 watchfiles，走 inotify
+  # 而非轮询，1 vCPU 上开销可忽略）。此前改一行后端代码要重建镜像，几分钟起步。
+  agent-api:
+    volumes:
+      - ./agent-api/data/user_files:/app/data/user_files
+      - ./agent-api/app:/app/app:ro
+    command:
+      ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+
+  # worker 与 agent-api 共用同一镜像——只重建/重启 agent-api 是抓不到它的，
+  # 这里一并挂源码，改完 docker compose restart agent-worker 即可生效。
+  agent-worker:
+    volumes:
+      - ./agent-api/data/user_files:/app/data/user_files
+      - ./agent-api/app:/app/app:ro
+
   # 前端改由 Vite dev server 提供，容器不参与 up
   frontend:
     profiles: ["packaged"]

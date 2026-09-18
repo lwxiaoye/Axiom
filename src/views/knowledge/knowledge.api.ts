@@ -70,9 +70,18 @@ function asPage<T>(rows: T[]): PageResult<T> {
   return { records, total: records.length } as PageResult<T>;
 }
 
-/** 明确不支持的操作直接抛出可读原因，不做静默失败或假装成功。 */
-function unsupported(action: string): never {
-  throw new Error(`${action}暂不可用：知识库仅保存文本切片，未保留原始文件`);
+/** 把响应体存成文件。 */
+function saveBlob(blob: Blob, fileName: string) {
+  if (!blob || blob.size === 0) throw new Error('文件下载失败');
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.style.display = 'none';
+  link.href = objectUrl;
+  link.setAttribute('download', fileName);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(objectUrl);
 }
 
 
@@ -148,14 +157,17 @@ export const deleteDocument = (id: string) =>
 export const deleteDocuments = (ids: string[]) =>
   defHttp.post({ url: `${KB}/documents/delete`, params: { ids } }, KB_OPTS);
 
-export const downloadKnowledgeDocument = (_id: string, _fileName: string) => {
-  // 知识库只保存切片文本，未保留原始文件字节，无从导出——明确报错胜过下载出空文件。
-  return Promise.reject(unsupported('导出原始文档'));
-};
+// 不能复用 /@/api/common/api 的 downloadBlobFile：它走 defHttp 默认配置，会把
+// 地址拼成 /api/agent-api/...，多一层前缀直接 404。
+export const downloadKnowledgeDocument = (id: string, fileName: string) =>
+  defHttp
+    .get({ url: `${KB}/documents/${id}/download`, responseType: 'blob' }, KB_OPTS)
+    .then((blob: any) => saveBlob(blob, fileName));
 
-export const downloadKnowledgeDocumentArchive = (_ids: string[]) => {
-  return Promise.reject(unsupported('批量导出原始文档'));
-};
+export const downloadKnowledgeDocumentArchive = (ids: string[]) =>
+  defHttp
+    .post({ url: `${KB}/documents/download-zip`, params: { ids }, responseType: 'blob' }, KB_OPTS)
+    .then((blob: any) => saveBlob(blob, '知识库原始文档.zip'));
 
 export const getChunkList = (params: Recordable) =>
   defHttp.get<PageResult<KnowledgeChunk>>({ url: Api.chunkList, params }, { errorMessageMode: 'none' });

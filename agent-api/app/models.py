@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, String, Text, DateTime, ForeignKey, Integer, SmallInteger, UniqueConstraint, func, or_
+from sqlalchemy import BigInteger, Boolean, Column, Float, String, Text, DateTime, ForeignKey, Integer, SmallInteger, UniqueConstraint, func, or_
 from sqlalchemy.dialects.mysql import LONGBLOB, MEDIUMTEXT
 
 from app.core.database import Base
@@ -1055,10 +1055,13 @@ class KnowledgeBase(Base):
     description = Column(String(512), default="")
     owner_user_id = Column(String(64), nullable=False, index=True)
     owner_username = Column(String(128), default="")
-    # ENABLED / DISABLED，与校园百事通校验里的状态判定对齐
+    # 库内取值 ENABLED / DISABLED；对外序列化成 ACTIVE / DISABLED（前端契约）
     status = Column(String(16), nullable=False, default="ENABLED")
     chunk_count = Column(Integer, nullable=False, default=0)
     doc_count = Column(Integer, nullable=False, default=0)
+    # 检索参数：知识库设置里可改，search_chunks 未显式传参时取这里的值
+    top_k = Column(Integer, nullable=False, default=5)
+    score_threshold = Column(Float, nullable=False, default=0.3)
     # 入库时所用的向量模型与维度：换模型后旧集合失效，据此判断是否需要重建
     embedding_model = Column(String(128), default="")
     embedding_dimension = Column(Integer, nullable=True)
@@ -1076,7 +1079,9 @@ class KnowledgeDocument(Base):
     name = Column(String(255), nullable=False)
     content_type = Column(String(64), default="text/plain")
     size_bytes = Column(Integer, nullable=False, default=0)
-    # PENDING / PROCESSING / COMPLETED / FAILED，对齐校验里的 DOC_WARNING_STATUSES
+    # 库内取值 PENDING / PROCESSING / COMPLETED / FAILED。对外（含校验里的
+    # DOC_WARNING_STATUSES）用的是另一套更细的阶段枚举，在
+    # knowledge_base_service._serialize_document 处翻译。
     status = Column(String(16), nullable=False, default="PENDING")
     chunk_count = Column(Integer, nullable=False, default=0)
     error_message = Column(String(512), default="")
