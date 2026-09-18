@@ -78,6 +78,35 @@
       </template>
     </section>
 
+    <!-- 重排模型 -->
+    <section v-show="tab === 'embedding'" class="card">
+      <div v-if="rerank.loading" class="muted">正在加载…</div>
+      <template v-else>
+        <h2>重排模型</h2>
+        <p class="hint">用于知识库与联网搜索结果的相关性重排；留空则不重排。</p>
+        <label for="r-base">请求地址</label>
+        <input id="r-base" v-model="rerank.form.base_url" type="url" placeholder="https://api.example.com/v1" :disabled="rerank.busy" />
+        <label for="r-key">API Key <span v-if="rerank.hasKey" class="ok">已配置</span></label>
+        <input id="r-key" v-model="rerank.form.api_key" type="password" autocomplete="new-password"
+               :placeholder="rerank.hasKey ? '留空则保持原密钥' : '输入 API Key'" :disabled="rerank.busy" />
+        <label for="r-model">模型名称</label>
+        <input id="r-model" v-model="rerank.form.model" placeholder="例如 qwen3.7-text-rerank" :disabled="rerank.busy" />
+        <div class="switch-row">
+          <div><strong>启用重排</strong><p>关闭后只按向量相似度排序。</p></div>
+          <a-switch v-model:checked="rerank.form.enabled" :disabled="rerank.busy" aria-label="启用重排模型" />
+        </div>
+        <Feedback :state="rerank.feedback" />
+        <div class="actions">
+          <button type="button" class="secondary" :disabled="rerank.busy" @click="testRerank">
+            {{ rerank.testing ? '测试中…' : '测试连接' }}
+          </button>
+          <button type="button" class="primary" :disabled="rerank.busy" @click="saveRerank">
+            {{ rerank.saving ? '保存中…' : '保存' }}
+          </button>
+        </div>
+      </template>
+    </section>
+
     <!-- 联网搜索 -->
     <section v-show="tab === 'search'" class="card">
       <div v-if="search.loading" class="muted">正在加载…</div>
@@ -300,6 +329,43 @@
     finally { emb.testing = false; }
   }
 
+  // ---- 重排模型 ----
+  // 后端契约与对话模型一致：GET 返回 has_api_key，api_key 留空表示保持原密钥
+  const rerank = reactive({
+    loading: true, saving: false, testing: false, busy: false, hasKey: false,
+    feedback: null as Result | null,
+    form: { base_url: '', model: '', api_key: '', enabled: true },
+  });
+  watch(() => [rerank.saving, rerank.testing], () => { rerank.busy = rerank.saving || rerank.testing; });
+  watch(() => ({ ...rerank.form }), () => { rerank.feedback = null; }, { deep: true });
+
+  async function loadRerank() {
+    rerank.loading = true;
+    try {
+      const d = await requestAgentApi<any>('/rerank-config');
+      Object.assign(rerank.form, { base_url: d.base_url, model: d.model, api_key: '', enabled: d.has_api_key ? d.enabled : true });
+      rerank.hasKey = !!d.has_api_key;
+    } catch (e: any) { rerank.feedback = fail(e, '配置加载失败'); }
+    finally { rerank.loading = false; }
+  }
+  async function saveRerank() {
+    rerank.saving = true;
+    try {
+      const d = await requestAgentApi<any>('/rerank-config', { method: 'PUT', body: JSON.stringify(rerank.form) });
+      rerank.hasKey = !!d.has_api_key;
+      rerank.form.api_key = '';
+      rerank.feedback = { success: true, message: '已保存，下一次检索生效' };
+    } catch (e: any) { rerank.feedback = fail(e, '保存失败'); }
+    finally { rerank.saving = false; }
+  }
+  async function testRerank() {
+    rerank.testing = true;
+    rerank.feedback = null;
+    try { rerank.feedback = await requestAgentApi<Result>('/rerank-config/test', { method: 'POST', body: JSON.stringify(rerank.form) }); }
+    catch (e: any) { rerank.feedback = fail(e, '测试失败'); }
+    finally { rerank.testing = false; }
+  }
+
   // ---- 联网搜索 ----
   const search = reactive({
     loading: true, saving: false, testing: false, busy: false,
@@ -468,6 +534,7 @@
     }
     loadModel();
     loadEmbedding();
+    loadRerank();
     loadSearch();
     // 打开即显示校园百事通还差哪些配置，不用等到点发布才知道
     loadCampus().then(() => checkCampus(true));
@@ -489,6 +556,8 @@
          border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
   .tab.active { color: #18181b; font-weight: 500; border-bottom-color: #18181b; }
   .card { padding: 30px; border: 1px solid #e5e5ea; border-radius: 16px; background: #fff; }
+  .card + .card { margin-top: 18px; }
+  h2 { margin: 0; font-size: 15px; font-weight: 600; }
   label { display: flex; align-items: center; gap: 10px; margin: 22px 0 9px; font-size: 14px; font-weight: 550; }
   label:first-of-type { margin-top: 0; }
   .ok { font-size: 12px; font-weight: 400; color: #238257; }
