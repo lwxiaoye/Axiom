@@ -1,7 +1,7 @@
 <template>
   <main class="model-page">
     <header class="page-heading">
-      <div><h1>模型配置</h1><p>连接你的模型服务，为对话设置默认模型。</p></div>
+      <div><h1>模型配置</h1><p>平台已提供默认对话模型，直接开始对话即可；如需使用自己的 API Key，可在此填写（可选）。</p></div>
       <span class="protocol">OpenAI 兼容</span>
     </header>
     <div v-if="loading" class="loading" role="status">正在加载配置…</div>
@@ -10,17 +10,19 @@
     </div>
     <form v-else novalidate @submit.prevent="save">
       <section class="config-card">
-        <div class="card-heading"><div class="card-icon"><ApiOutlined /></div><div><h2>API 连接</h2><p>配置仅用于当前账号，密钥加密保存。</p></div></div>
+        <div class="card-heading"><div class="card-icon"><ApiOutlined /></div><div><h2>自定义 API 连接（可选）</h2><p>只对当前账号生效，密钥加密保存；启用后优先于平台默认模型。</p></div></div>
+        <p v-if="platform.configured" class="platform-hint" role="status">平台默认模型：<strong>{{ platform.model }}</strong>。不填写下方内容也可以正常对话。</p>
+        <p v-else class="platform-hint" role="status">平台尚未配置默认模型；你可以在此填写自己的 API Key，或联系管理员在管理配置中设置。</p>
         <label for="model-base">请求地址 <span>Base URL</span></label>
-        <input id="model-base" v-model="form.base_url" type="url" required maxlength="2048" placeholder="https://api.example.com/v1" :disabled="busy" />
+        <input id="model-base" v-model="form.base_url" type="url" maxlength="2048" placeholder="https://api.example.com/v1" :disabled="busy" />
         <p class="field-help">地址须以 https:// 或 http:// 开头（包含两个斜杠），通常以 /v1 结尾。</p>
         <label for="model-key">API Key <span v-if="hasKey" class="saved-key">已配置</span></label>
-        <input id="model-key" v-model="form.api_key" type="password" autocomplete="new-password" maxlength="8192" :required="!hasKey" :disabled="busy" :placeholder="hasKey ? '已安全保存，留空保持原密钥' : '输入服务商提供的 API Key'" />
+        <input id="model-key" v-model="form.api_key" type="password" autocomplete="new-password" maxlength="8192" :disabled="busy" :placeholder="hasKey ? '已安全保存，留空保持原密钥' : '输入服务商提供的 API Key'" />
         <p class="field-help">修改请求地址时需要重新输入密钥。</p>
         <label for="model-name">模型名称</label>
-        <input id="model-name" v-model="form.model" required maxlength="255" placeholder="例如 gpt-4o-mini 或服务商提供的模型 ID" :disabled="busy" />
+        <input id="model-name" v-model="form.model" maxlength="255" placeholder="例如 gpt-4o-mini 或服务商提供的模型 ID" :disabled="busy" />
         <p class="field-help">请与服务商的模型 ID 完全一致，保存后用于新对话。</p>
-        <div class="enable-row"><div><strong>启用此配置</strong><p>关闭后恢复原有模型网关配置。</p></div><a-switch v-model:checked="form.enabled" :disabled="busy" aria-label="启用此模型配置" /></div>
+        <div class="enable-row"><div><strong>启用此配置</strong><p>关闭后回到平台默认模型。</p></div><a-switch v-model:checked="form.enabled" :disabled="busy" aria-label="启用此模型配置" /></div>
       </section>
       <p v-if="testing" class="feedback" role="status">正在等待模型响应，服务端测试最多 15 秒…</p>
       <div v-if="feedback" class="feedback" :class="feedback.success ? 'success' : 'error'" role="status">
@@ -40,12 +42,15 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { ApiOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
 import { requestAgentApi } from '../agentApi';
 
-type Config = { base_url: string; model: string; enabled: boolean; has_api_key: boolean };
+type Platform = { configured: boolean; model: string };
+type Config = { base_url: string; model: string; enabled: boolean; has_api_key: boolean; platform?: Platform };
 type Result = { success: boolean; message: string; latency_ms?: number };
 const form = reactive({ base_url: '', model: '', api_key: '', enabled: true });
 const loading = ref(true);
 const loadError = ref('');
 const hasKey = ref(false);
+// 平台默认模型摘要（后端只给模型名和是否已配置，不带地址/密钥）
+const platform = reactive<Platform>({ configured: false, model: '' });
 const testing = ref(false);
 const saving = ref(false);
 const feedback = ref<Result | null>(null);
@@ -55,17 +60,18 @@ watch(form, () => { feedback.value = null; });
 function apply(data: Config) {
   Object.assign(form, { base_url: data.base_url, model: data.model, api_key: '', enabled: data.has_api_key ? data.enabled : true });
   hasKey.value = data.has_api_key;
+  if (data.platform) Object.assign(platform, { configured: !!data.platform.configured, model: data.platform.model || '' });
 }
 async function load() {
   loading.value = true;
   loadError.value = '';
-  try { apply(await requestAgentApi<Config>('/model-connection')); }
+  try { apply(await requestAgentApi<Config>('/model-connection/personal')); }
   catch (error: any) { loadError.value = error.message || '配置加载失败'; }
   finally { loading.value = false; }
 }
 function valid() {
   if (!form.base_url.trim() || !form.model.trim() || (!hasKey.value && !form.api_key.trim())) {
-    feedback.value = { success: false, message: '请填写请求地址、API Key 和模型名称' };
+    feedback.value = { success: false, message: '要使用自己的模型，请把请求地址、API Key 和模型名称填完整；不用自己的模型则无需保存' };
     return false;
   }
   try {
@@ -84,7 +90,7 @@ async function test() {
   feedback.value = null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
-  try { feedback.value = await requestAgentApi<Result>('/model-connection/test', { method: 'POST', body: JSON.stringify(form), signal: controller.signal }); }
+  try { feedback.value = await requestAgentApi<Result>('/model-connection/personal/test', { method: 'POST', body: JSON.stringify(form), signal: controller.signal }); }
   catch (error: any) { feedback.value = { success: false, message: controller.signal.aborted ? '等待服务器超时，请检查网络后重试' : error.message || '测试失败' }; }
   finally { clearTimeout(timer); testing.value = false; }
 }
@@ -92,7 +98,7 @@ async function save() {
   if (busy.value || !valid()) return;
   saving.value = true;
   try {
-    apply(await requestAgentApi<Config>('/model-connection', { method: 'PUT', body: JSON.stringify(form) }));
+    apply(await requestAgentApi<Config>('/model-connection/personal', { method: 'PUT', body: JSON.stringify(form) }));
     // Wait for the reactive form reset before showing the saved status.
     await nextTick();
     feedback.value = { success: true, message: '配置已保存，将用于下一次模型请求' };
@@ -112,6 +118,8 @@ p { margin: 0; color: #85858f; font-size: 13px; line-height: 1.7; }
 .protocol { padding: 5px 10px; border: 1px solid #e5e5e9; border-radius: 8px; color: #71717a; font-size: 12px; white-space: nowrap; }
 .config-card { padding: 30px; border: 1px solid #e5e5ea; border-radius: 16px; background: white; }
 .card-heading { display: flex; gap: 13px; align-items: center; margin-bottom: 28px; }
+.platform-hint { margin: -12px 0 6px; padding: 10px 14px; border-radius: 9px; background: #f4f4f5; color: #52525b; font-size: 13px; }
+.platform-hint strong { color: #18181b; font-weight: 600; }
 .card-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #f4f4f5; font-size: 21px; }
 label { display: flex; align-items: center; gap: 10px; margin: 22px 0 9px; font-size: 14px; font-weight: 550; }
 label span { font-size: 12px; font-weight: 400; color: #92929b; }
