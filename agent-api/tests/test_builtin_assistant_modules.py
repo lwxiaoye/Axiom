@@ -171,9 +171,12 @@ async def test_campus_config_failure_remains_an_explicit_error(monkeypatch):
 
 
 def test_presentation_resume_still_requires_live_skill_instructions():
+    from app.services.agent_harness.public_errors import ConfigurationRunError
+
     policy = get_builtin_runtime_policy("presentation")
     for skills in ([], [{"instructions": ""}]):
-        with pytest.raises(RuntimeError, match="ppt-studio 权威说明读取失败"):
+        # 续接时 ppt-studio 消失/说明为空同样是配置性错误：终态 + 原因可见，不进自动恢复
+        with pytest.raises(ConfigurationRunError, match="演示文稿助手暂不可用"):
             policy.validate_resume_skills(skills)
     policy.validate_resume_skills([{"instructions": "Trusted instructions"}])
 

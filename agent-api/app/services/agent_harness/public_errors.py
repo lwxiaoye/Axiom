@@ -23,6 +23,26 @@ class TerminalRunError(RuntimeError):
     exclude_run_messages_from_future_context = False
 
 
+class ConfigurationRunError(TerminalRunError):
+    """平台配置/目录缺失导致的**确定性**失败——同一检查点重放多少次结果都一样，不进恢复。
+
+    判定依据（2026-09-18）：`_pump_background_run` 只把 TerminalRunError 当终态，其余异常一律
+    `recover_run_after_error` → waiting_system → worker 一秒后重排 → 再撞同一个错，用户端
+    只看到「等待任务恢复...」且永远看不到原因（演示文稿助手因 ppt-studio 不在目录里就是
+    这样死的）。「瞬时错误」（DB/模型抖动、租约丢失、进程重启）继续走恢复；「配置性错误」
+    的特征是**换个时间重放不会自愈**：技能不在目录、说明书为空、助手依赖的能力未启用。
+    这类错误在抛出点就用本类型标明，把原因原样交给用户，而不是靠正则去猜消息文案。
+
+    public_message 就是原因本身：它是面向用户写的中文说明（「演示文稿助手暂不可用：…」），
+    不含栈、不含内部路径。
+    """
+
+    def __init__(self, public_message: str):
+        text = str(public_message or "").strip()
+        self.public_message = text or GENERIC_RUN_FAILURE
+        super().__init__(self.public_message)
+
+
 class ModelResponseContractError(TerminalRunError):
     """The model returned a control action in a tool-free report phase."""
 
@@ -135,6 +155,8 @@ def public_terminal_reason(reason: object, *, phase: str) -> str | None:
         "模型未能接受本轮请求",
         "模型服务鉴权失败",
         "模型服务拒绝了本次访问",
+        # ConfigurationRunError 的原因文案（演示文稿助手依赖的 ppt-studio 不在目录/说明书为空）
+        "演示文稿助手暂不可用",
     )
     if text.startswith(public_prefixes):
         return text

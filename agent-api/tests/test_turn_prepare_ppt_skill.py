@@ -411,10 +411,16 @@ async def test_presentation_preset_fails_closed_when_ppt_studio_is_unavailable(m
     monkeypatch.setattr(turn_prepare.personalization_service, "prompt_block", no_personalization)
     monkeypatch.setattr(turn_prepare, "_lesson_block", no_lesson)
 
-    with pytest.raises(RuntimeError, match="未找到已启用的 ppt-studio"):
+    # 目录里没有 ppt-studio 是配置性错误：必须是终态类型（ConfigurationRunError），
+    # 否则 pump 会把它当瞬时故障送进 waiting_system 无限自动恢复，用户永远看不到原因。
+    from app.services.agent_harness.public_errors import ConfigurationRunError, TerminalRunError
+
+    with pytest.raises(ConfigurationRunError, match="没有已启用的 ppt-studio") as error:
         await turn_prepare.prepare_turn(
             message="做一份演示文稿", user_context=None, subagent_id=None,
             knowledge_ids=None, selected_knowledge=None, web_search=False, image_urls=[],
             resolved_model="test-model", newapi_key="", skill_ids=None, token="token",
             user_id="user", thread_id="thread", assistant_preset="presentation",
         )
+    assert isinstance(error.value, TerminalRunError)
+    assert error.value.public_message.startswith("演示文稿助手暂不可用")
