@@ -75,6 +75,13 @@ ensure_grok_network() {
   fi
 }
 
+# 每次构建都会留下镜像层缓存，这台机器只有 24G，曾因占满导致 MySQL 建表失败
+# （Create table/tablespace failed, as disk is full）。构建后立即回收。
+echo "==> 回收构建缓存"
+docker builder prune -f >/dev/null 2>&1 || true
+docker image prune -f >/dev/null 2>&1 || true
+df -h / | tail -1
+
 echo "==> 拉起全部服务"
 $COMPOSE up -d
 ensure_grok_network
