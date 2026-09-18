@@ -89,6 +89,16 @@
         <label for="s-url">SearXNG 地址</label>
         <input id="s-url" v-model="search.form.searxngUrl" type="url" placeholder="http://searxng:8080" :disabled="search.busy" />
         <p class="hint">本机已随 compose 部署 SearXNG，容器内地址通常是 http://searxng:8080。</p>
+        <label for="s-rerank">结果重排</label>
+        <select id="s-rerank" v-model="search.form.rerankerProvider" :disabled="search.busy">
+          <option value="none">不重排</option>
+          <option value="platform">平台重排模型</option>
+          <!-- jina/cohere/local 仍由后端支持但不在这页配；库里若是这三者之一，原值照常显示并随保存原样带回，不悄悄改掉 -->
+          <option v-if="!SIMPLE_RERANKERS.includes(search.form.rerankerProvider)" :value="search.form.rerankerProvider" disabled>
+            {{ search.form.rerankerProvider }}（旧配置）
+          </option>
+        </select>
+        <p class="hint">平台重排模型未配置时按不重排处理。</p>
         <Feedback :state="search.feedback" />
         <div class="actions">
           <button type="button" class="secondary" :disabled="search.busy" @click="testSearch">
@@ -304,22 +314,24 @@
   const search = reactive({
     loading: true, saving: false, testing: false, busy: false,
     feedback: null as Result | null,
-    form: { enabled: false, searxngUrl: '' },
+    form: { enabled: false, searxngUrl: '', rerankerProvider: 'none' },
   });
+  // 这页只暴露这两个；其余 provider 的取值原样保留，保存时不会被覆盖成 none
+  const SIMPLE_RERANKERS = ['none', 'platform'];
   watch(() => [search.saving, search.testing], () => { search.busy = search.saving || search.testing; });
 
   async function loadSearch() {
     search.loading = true;
     try {
       const d = await requestAgentApi<any>('/platform-config/web-search');
-      Object.assign(search.form, { enabled: !!d.enabled, searxngUrl: d.searxngUrl || '' });
+      Object.assign(search.form, { enabled: !!d.enabled, searxngUrl: d.searxngUrl || '', rerankerProvider: d.rerankerProvider || 'none' });
     } catch (e: any) { search.feedback = fail(e, '配置加载失败'); }
     finally { search.loading = false; }
   }
   async function saveSearch() {
     search.saving = true;
     try {
-      // 后端 save_web_search 是合并语义，只传这两项不会清掉其余配置
+      // 后端 save_web_search 是合并语义，只传这几项不会清掉其余配置
       await requestAgentApi('/platform-config/web-search', { method: 'PUT', body: JSON.stringify(search.form) });
       search.feedback = { success: true, message: '已保存' };
     } catch (e: any) { search.feedback = fail(e, '保存失败'); }
