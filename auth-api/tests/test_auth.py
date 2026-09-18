@@ -132,11 +132,19 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_local_catalog_lists_are_empty_not_404(self):
         headers = await self.headers()
-        for path in ("/app/appInfo/my/all/list", "/ai/skill/list"):
+        for path in ("/app/appInfo/my/all/list",):
             response = await self.client.get(path, headers=headers)
             self.assertEqual(response.status_code, 200, path)
             self.assertTrue(response.json()["success"])
             self.assertEqual(response.json()["result"], [])
+
+    async def test_skill_catalog_stub_is_404_not_empty_success(self):
+        """Skill 目录已迁至 agent-api：这里不能再回 `[]` 假装有数据源（会让目录消费者误判为空目录）。"""
+        headers = await self.headers()
+        response = await self.client.get("/ai/skill/list", headers=headers)
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(response.json()["success"])
+        self.assertIn("agent-api", response.json()["message"])
 
     async def test_persistent_sessions_and_password_rotation(self):
         headers = await self.headers()
