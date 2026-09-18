@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import re
 import random
 import secrets
 from contextlib import asynccontextmanager
@@ -57,10 +58,10 @@ app.add_middleware(
 @app.middleware("http")
 async def login_rate_limit(request: Request, call_next):
     path = request.url.path
-    if path == "/sys/login" or path.startswith("/sys/randomImage/"):
+    if path in ("/sys/login", "/sys/user/register") or path.startswith("/sys/randomImage/"):
         # Do not trust client-supplied forwarded-IP headers.
         host = request.client.host if request.client else "unknown"
-        login_request = path == "/sys/login"
+        login_request = path in ("/sys/login", "/sys/user/register")
         key = ("login:" if login_request else "captcha:") + host
         if not app.state.store.allow_attempt(key, 10 if login_request else 30, 300 if login_request else 60):
             return fail("请求过于频繁，请稍后重试", code=429, status=429)
@@ -92,6 +93,44 @@ def decrypt_password(cipher_text: str) -> str:
         return (unpadder.update(padded) + unpadder.finalize()).decode("utf-8")
     except (ValueError, UnicodeError) as exc:
         raise ValueError("Invalid encrypted password") from exc
+
+
+MEMBER_PERMISSION_CODES = ["chat:view", "campus:view"]
+ADMIN_PERMISSION_CODES = MEMBER_PERMISSION_CODES + [
+    "admin",
+    "admin:manager",
+    "campus:admin",
+    "system:user",
+    "system:role",
+]
+
+
+def permission_codes(record: dict[str, Any] | None) -> list[str]:
+    """Only the administrator sees admin:* — the console entry keys off it."""
+    return ADMIN_PERMISSION_CODES if (record or {}).get("is_admin") else MEMBER_PERMISSION_CODES
+
+
+def session_record(session: dict[str, Any]) -> dict[str, Any] | None:
+    return app.state.store.user_record(session["user"]["username"])
+
+
+def user_payload(record: dict[str, Any]) -> dict[str, Any]:
+    """Jeecg-shaped user object for either the administrator or a member account."""
+    base = admin_user()
+    if record.get("is_admin"):
+        return base
+    username = record["username"]
+    base.update({
+        "id": f"u-{username}",
+        "username": username,
+        "realname": record.get("realname") or username,
+        "email": "",
+        "workNo": username,
+        "post": "member",
+        "userIdentity": 1,
+        "roles": [{"roleName": "成员", "value": "user", "roleCode": "user"}],
+    })
+    return base
 
 
 def admin_user() -> dict[str, Any]:
@@ -195,9 +234,13 @@ def current_session(x_access_token: Optional[str], authorization: Optional[str])
         token = token[7:].strip()
     if not token:
         return None
-    if not app.state.store.valid_session(token):
+    username = app.state.store.session_username(token)
+    if username is None:
         return None
-    return {"user": admin_user()}
+    record = app.state.store.user_record(username)
+    if record is None:
+        return None
+    return {"user": user_payload(record)}
 
 
 def require_user(x_access_token: Optional[str], authorization: Optional[str]):
@@ -265,9 +308,44 @@ def login(body: LoginBody):
         return fail("登录加密参数或密码格式错误", code=400, status=400)
     if not app.state.store.verify_password(username, password):
         return fail("用户名或密码错误", code=401, status=401)
-    token = app.state.store.create_session(TOKEN_TTL_SECONDS)
-    user = admin_user()
-    return ok({"token": token, "userInfo": user, "sysAllDictItems": {}})
+    record = app.state.store.user_record(username)
+    if record is None:
+        return fail("用户名或密码错误", code=401, status=401)
+    token = app.state.store.create_session(TOKEN_TTL_SECONDS, username)
+    return ok({"token": token, "userInfo": user_payload(record), "sysAllDictItems": {}})
+
+
+USERNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{2,31}$")
+MIN_PASSWORD_LENGTH = 8
+
+
+class RegisterBody(BaseModel):
+    username: str = Field(default="", max_length=128)
+    password: str = Field(default="", max_length=4096)
+    realname: str = Field(default="", max_length=64)
+    captcha: str = Field(default="", max_length=16)
+    checkKey: str = Field(default="", max_length=128)
+
+
+@app.post("/sys/user/register")
+def register(body: RegisterBody):
+    if not app.state.store.consume_captcha(body.checkKey, body.captcha.strip()):
+        return fail("验证码错误或已过期，请刷新后重试", code=412)
+    username = (body.username or "").strip()
+    if not USERNAME_PATTERN.match(username):
+        return fail("用户名需为 3-32 位字母、数字或下划线，且以字母开头", code=400)
+    try:
+        password = decrypt_password(body.password)
+    except ValueError:
+        return fail("注册加密参数或密码格式错误", code=400, status=400)
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return fail(f"密码至少 {MIN_PASSWORD_LENGTH} 位", code=400)
+    error = app.state.store.register_user(username, password, (body.realname or "").strip())
+    if error:
+        return fail(error, code=409)
+    record = app.state.store.user_record(username)
+    token = app.state.store.create_session(TOKEN_TTL_SECONDS, username)
+    return ok({"token": token, "userInfo": user_payload(record), "sysAllDictItems": {}}, message="注册成功")
 
 
 @app.api_route("/sys/logout", methods=["GET", "POST"])
@@ -301,7 +379,7 @@ def get_perm_code(
     session, error = require_user(x_access_token, authorization)
     if error:
         return error
-    return ok(["admin", "campus:view", "campus:admin", "chat:view", "system:user", "system:role"])
+    return ok(permission_codes(session_record(session)))
 
 
 @app.get("/sys/permission/getUserPermissionByToken")
@@ -312,7 +390,7 @@ def get_user_permission(
     session, error = require_user(x_access_token, authorization)
     if error:
         return error
-    codes = ["admin", "campus:view", "campus:admin", "chat:view", "system:user", "system:role"]
+    codes = permission_codes(session_record(session))
     auth = [{"action": code, "type": "1", "status": "1", "describe": code} for code in codes]
     return ok({"menu": menus(), "auth": auth, "allAuth": auth, "codeList": codes, "sysSafeMode": False})
 
@@ -327,8 +405,9 @@ def user_list(
     session, error = require_user(x_access_token, authorization)
     if error:
         return error
-    records = [admin_user()]
-    return ok({"records": records, "total": 1, "size": pageSize, "current": pageNo, "pages": 1})
+    records = [admin_user()] + [user_payload(r) for r in app.state.store.list_users()]
+    total = len(records)
+    return ok({"records": records, "total": total, "size": pageSize, "current": pageNo, "pages": 1})
 
 
 @app.get("/sys/role/list")

@@ -100,7 +100,7 @@
         </button>
         <button v-if="hasPermission('admin:manager')" class="menu-item" type="button" role="menuitem" @click="goToAdmin">
           <SettingOutlined />
-          <span>后台管理</span>
+          <span>管理配置</span>
         </button>
         <button class="menu-item" type="button" role="menuitem" @click="handleLogout">
           <LogoutOutlined />
@@ -1020,7 +1020,7 @@ function handleProfileSaved() {
 
 function goToAdmin() {
   userMenuOpen.value = false;
-  window.open('/dashboard/workbench', '_blank');
+  router.push('/center/admin');
 }
 
 function handleLogout() {

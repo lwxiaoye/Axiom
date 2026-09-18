@@ -25,6 +25,12 @@ class AuthStore:
                     salt BLOB NOT NULL, password_hash BLOB NOT NULL);
                 CREATE TABLE IF NOT EXISTS sessions (
                     token_hash TEXT PRIMARY KEY, expires REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    realname TEXT NOT NULL DEFAULT '',
+                    salt BLOB NOT NULL,
+                    password_hash BLOB NOT NULL,
+                    created_at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS captchas (
                     key TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS rate_limits (
@@ -41,6 +47,12 @@ class AuthStore:
                 # Changing the configured account revokes every prior session.
                 db.execute("DELETE FROM sessions")
                 db.execute("DELETE FROM captchas")
+            # Sessions predate multi-user support; add the owner column in place.
+            columns = {r[1] for r in db.execute("PRAGMA table_info(sessions)")}
+            if "username" not in columns:
+                db.execute("ALTER TABLE sessions ADD COLUMN username TEXT NOT NULL DEFAULT ''")
+                db.execute("UPDATE sessions SET username=?", (username,))
+        self.admin_username = username
 
     @contextmanager
     def connect(self):
@@ -58,20 +70,67 @@ class AuthStore:
     def verify_password(self, username: str, password: str) -> bool:
         with self.connect() as db:
             row = db.execute("SELECT username, salt, password_hash FROM administrator WHERE id=1").fetchone()
-        valid = hmac.compare_digest(self.password_hash(password, row[1]), row[2])
-        return valid and hmac.compare_digest(username.encode(), row[0].encode())
+            if hmac.compare_digest(username.encode(), row[0].encode()):
+                return hmac.compare_digest(self.password_hash(password, row[1]), row[2])
+            member = db.execute(
+                "SELECT salt, password_hash FROM users WHERE username=?", (username,)
+            ).fetchone()
+        if member is None:
+            # Hash anyway so a missing account costs the same time as a wrong password.
+            self.password_hash(password, b"\x00" * 32)
+            return False
+        return hmac.compare_digest(self.password_hash(password, member[0]), member[1])
 
-    def create_session(self, ttl: int) -> str:
+    def register_user(self, username: str, password: str, realname: str) -> str:
+        """Create a member account. Returns "" on success, or a message on refusal."""
+        if username == self.admin_username:
+            return "该用户名已被占用"
+        salt = secrets.token_bytes(32)
+        digest_ = self.password_hash(password, salt)
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+                return "该用户名已被占用"
+            db.execute(
+                "INSERT INTO users VALUES (?, ?, ?, ?, ?)",
+                (username, realname or username, salt, digest_, time.time()),
+            )
+        return ""
+
+    def list_users(self) -> list[dict]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT username, realname, created_at FROM users ORDER BY created_at"
+            ).fetchall()
+        return [{"username": r[0], "realname": r[1], "is_admin": False, "created_at": r[2]} for r in rows]
+
+    def user_record(self, username: str) -> dict | None:
+        if username == self.admin_username:
+            return {"username": username, "realname": "管理员", "is_admin": True, "created_at": 0.0}
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT username, realname, created_at FROM users WHERE username=?", (username,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {"username": row[0], "realname": row[1], "is_admin": False, "created_at": row[2]}
+
+    def create_session(self, ttl: int, username: str) -> str:
         token = secrets.token_urlsafe(32)
         with self.connect() as db:
             db.execute("DELETE FROM sessions WHERE expires <= ?", (time.time(),))
-            db.execute("INSERT INTO sessions VALUES (?, ?)", (digest(token), time.time() + ttl))
+            db.execute("INSERT INTO sessions VALUES (?, ?, ?)",
+                       (digest(token), time.time() + ttl, username))
         return token
 
     def valid_session(self, token: str) -> bool:
+        return self.session_username(token) is not None
+
+    def session_username(self, token: str) -> str | None:
         with self.connect() as db:
-            return db.execute("SELECT 1 FROM sessions WHERE token_hash=? AND expires>?",
-                              (digest(token), time.time())).fetchone() is not None
+            row = db.execute("SELECT username FROM sessions WHERE token_hash=? AND expires>?",
+                             (digest(token), time.time())).fetchone()
+        return row[0] if row else None
 
     def revoke(self, token: str):
         with self.connect() as db:

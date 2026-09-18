@@ -46,6 +46,13 @@ export const mainOutRoutes: AppRouteModule[] = [
         meta: { title: '模型配置' },
       },
       {
+        // 管理员专用配置台，入口在右上角用户菜单（admin:manager 权限码）
+        path: 'admin',
+        name: 'CenterAdmin',
+        component: () => import('/@/views/peopleCenter/pages/AdminConsolePage.vue'),
+        meta: { title: '管理配置' },
+      },
+      {
         path: 'chat',
         name: 'CenterChat',
         component: () => import('/@/views/peopleCenter/pages/ChatPage.vue'),

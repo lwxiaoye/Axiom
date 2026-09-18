@@ -1,0 +1,24 @@
+# 服务器上做开发时的叠加配置：前端不再以容器形式提供，而是在宿主机跑
+# Vite dev server（端口 3200，见 .env / .env.development）。
+#
+#   docker compose --env-file deploy/local/.env \
+#     -f docker-compose.local.yml -f docker-compose.server.yml -f docker-compose.dev.yml up -d
+#   pnpm dev
+#
+# 回到容器化部署时去掉本文件即可。
+services:
+  # dev server 在宿主机，需要能直接访问 auth-api（VITE_PROXY 指向 127.0.0.1:9090）。
+  # 源码挂进容器并开启 --reload：改 auth-api 的 Python 代码即时生效，不必重建镜像。
+  auth-api:
+    ports: !override
+      - "127.0.0.1:9090:9090"
+    volumes:
+      # 与 docker-compose.local.yml 的 axiom_auth_data 卷合并，不替换
+      - ./auth-api/app.py:/app/app.py:ro
+      - ./auth-api/store.py:/app/store.py:ro
+    command:
+      ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9090", "--no-proxy-headers", "--reload"]
+
+  # 前端改由 Vite dev server 提供，容器不参与 up
+  frontend:
+    profiles: ["packaged"]

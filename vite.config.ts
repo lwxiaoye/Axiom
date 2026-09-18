@@ -87,6 +87,12 @@ export default ({ command, mode }: ConfigEnv): UserConfig => {
       // @ts-ignore
       https: false,
       port: VITE_PORT,
+      // 服务器上开发时 dev server 只绑 127.0.0.1（由 --host 指定），页面经 nginx
+      // 以 https://<VITE_DEV_PUBLIC_HOST> 提供，HMR 的 websocket 必须回连该域名，
+      // 否则浏览器会去连 127.0.0.1:3200 而失败。
+      hmr: process.env.VITE_DEV_PUBLIC_HOST
+        ? { protocol: 'wss', host: process.env.VITE_DEV_PUBLIC_HOST, clientPort: 443 }
+        : undefined,
       // Load proxy configuration from .env
       proxy: createProxy(VITE_PROXY),
       // 合并 server 配置
