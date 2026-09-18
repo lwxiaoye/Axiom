@@ -137,6 +137,12 @@ def build_app_info_column_values(
         "update_by": version.reviewed_by or version.submitted_by or owner_user_id,
         "tenant_id": app.tenant_id,
         "del_flag": 0,
+        # agent-api 自建的 app_info 表（models.AppInfo）里 order_num 是 NOT NULL 且只有 Python 侧
+        # default、没有 DB 默认值；Java 建的表也一样。原生 INSERT 不带它会在严格模式下直接
+        # 报 1364 "Field 'order_num' doesn't have a default value"——审核通过/直接发布整条链路
+        # 就此 500，用户看到的是「通过了但永远没上线」。首插给 0；重发不覆盖（见 upsert 的
+        # 更新列排除），管理员在应用管理里调过的排序保留。
+        "order_num": 0,
         "use_models": ",".join(
             merge_required_model_ids(
                 required_model_ids if required_model_ids is not None else extract_required_model_ids(workflow_json)
@@ -416,7 +422,7 @@ async def upsert_app_info_for_approved_version(
 
         # AI 应用以 agent-api 的 owner_user_id 为唯一创建者事实源。历史版本曾把用户名
         # 写进 create_by，Java 广场按用户 ID 查询时会让创建者看不到自己的应用；重发时顺带纠正。
-        update_columns = [c for c in insert_columns if c not in {"id", "create_time"}]
+        update_columns = [c for c in insert_columns if c not in {"id", "create_time", "order_num"}]
         update_clause = ", ".join(f"`{c}` = VALUES(`{c}`)" for c in update_columns)
         sql = (
             f"INSERT INTO app_info ({', '.join(f'`{c}`' for c in insert_columns)}) "

@@ -226,6 +226,57 @@ class AppInfoPublishSyncTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(session.upsert_values["open_type"], "iframe")
 
+    async def test_upsert_inserts_order_num_but_never_overwrites_it_on_republish(self):
+        """线上库 app_info.order_num NOT NULL 无默认值：不带它 INSERT 直接 1364，审核通过整条链路 500。"""
+        from types import SimpleNamespace
+
+        from app.services.agents.app_info_publish_service import upsert_app_info_for_approved_version
+
+        class FakeResult:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def mappings(self):
+                return self
+
+            def all(self):
+                return self.rows
+
+            def first(self):
+                return self.rows[0] if self.rows else None
+
+        class FakeSession:
+            app_info_columns = {"id", "app_name", "order_num", "status", "create_by", "create_time", "update_time"}
+
+            def __init__(self):
+                self.upsert_sql = ""
+                self.upsert_values = None
+
+            async def execute(self, statement, params=None):
+                sql = str(statement)
+                if "information_schema.COLUMNS" in sql:
+                    columns = self.app_info_columns if params["table_name"] == "app_info" else set()
+                    return FakeResult([{"COLUMN_NAME": column} for column in columns])
+                if "SELECT form_options" in sql:
+                    return FakeResult([])
+                if "INSERT INTO app_info" in sql:
+                    self.upsert_sql = sql
+                    self.upsert_values = params
+                return FakeResult([])
+
+        app = SimpleNamespace(
+            id="app-1", name="审批助手", description="", app_icon="", app_category="", ai_app_type="chatAgent",
+            owner_username="zhangsan", owner_user_id="u1", tenant_id="0",
+        )
+        version = SimpleNamespace(version_no=1, visible_role_ids=[], visible_dept_ids=[], reviewed_by="r1", submitted_by="u1", definition_json="{}")
+        session = FakeSession()
+
+        await upsert_app_info_for_approved_version(session, app, version)
+
+        self.assertEqual(session.upsert_values["order_num"], 0)
+        self.assertIn("`order_num`", session.upsert_sql.split("ON DUPLICATE KEY UPDATE")[0])
+        self.assertNotIn("`order_num` = VALUES", session.upsert_sql)
+
     @unittest.skipUnless(importlib.util.find_spec("sqlalchemy"), "sqlalchemy not installed")
     async def test_approved_publish_projects_version_visibility_into_marketplace_relations(self):
         """广场按 app_role/app_dept 过滤，审核版本的可见范围必须落到这两张关联表。"""
