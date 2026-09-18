@@ -62,8 +62,22 @@ case "$TARGET" in
 esac
 
 sysctl -w vm.swappiness=60 >/dev/null 2>&1 || true
+# 对话模型经 grok2api 提供，但它属于另一套 compose，只发布在宿主机回环端口上。
+# agent-api 要按容器名访问它，必须与之同网；docker network connect 是运行时操作，
+# grok2api 重建后会丢失，因此每次发布都幂等地重连一次。
+ensure_grok_network() {
+  docker inspect grok2api >/dev/null 2>&1 || return 0
+  local net
+  net="$(docker inspect axiom-agent-api --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null | awk '{print $1}')"
+  [ -n "$net" ] || net=axiom_default
+  if ! docker inspect grok2api --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null | grep -q "$net"; then
+    docker network connect "$net" grok2api 2>/dev/null && echo "==> 已将 grok2api 接入 $net"
+  fi
+}
+
 echo "==> 拉起全部服务"
 $COMPOSE up -d
+ensure_grok_network
 echo "==> 等待健康检查"
 for i in $(seq 1 30); do
   sleep 5
