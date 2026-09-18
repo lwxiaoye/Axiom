@@ -122,6 +122,9 @@
         <label for="s-engines">搜索引擎</label>
         <input id="s-engines" v-model="search.form.searxngEngines" placeholder="duckduckgo,brave" :disabled="search.busy" />
         <p class="hint">逗号分隔的 SearXNG 引擎名。本机实测 duckduckgo、brave 可用；bing 解析已失效，google/baidu 对本机 IP 出验证码。</p>
+        <label for="s-image-engines">图片搜索引擎</label>
+        <input id="s-image-engines" v-model="search.form.searxngImageEngines" placeholder="bing images" :disabled="search.busy" />
+        <p class="hint">演示文稿助手等要配图的场景用。留空则按上面的引擎推导（如 duckduckgo images），本机实测那两个图片引擎被限流/拒绝，bing images 可用。</p>
         <label for="s-rerank">结果重排</label>
         <select id="s-rerank" v-model="search.form.rerankerProvider" :disabled="search.busy">
           <option value="none">不重排</option>
@@ -392,7 +395,7 @@
   const search = reactive({
     loading: true, saving: false, testing: false, busy: false,
     feedback: null as Result | null,
-    form: { enabled: false, searxngUrl: '', searxngEngines: '', rerankerProvider: 'none' },
+    form: { enabled: false, searxngUrl: '', searxngEngines: '', searxngImageEngines: '', rerankerProvider: 'none' },
   });
   // 这页只暴露这两个；其余 provider 的取值原样保留，保存时不会被覆盖成 none
   const SIMPLE_RERANKERS = ['none', 'platform'];
@@ -406,6 +409,7 @@
         enabled: !!d.enabled,
         searxngUrl: d.searxngUrl || '',
         searxngEngines: d.searxngEngines || '',
+        searxngImageEngines: d.searxngImageEngines || '',
         rerankerProvider: d.rerankerProvider || 'none',
       });
     } catch (e: any) { search.feedback = fail(e, '配置加载失败'); }
