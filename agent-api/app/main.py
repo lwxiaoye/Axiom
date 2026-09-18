@@ -327,6 +327,37 @@ async def _migrate_user_file_version_constraints():
             pass  # 约束已存在
 
 
+async def _encrypt_embedding_keys():
+    """把 ai_embedding_model.api_key 里的存量明文原地加密成 Fernet 密文（幂等）。
+
+    对话/重排模型的密钥早已密文入库，embedding 是唯一明文的例外：线上那行 DashScope key
+    直接躺在表里，一份库备份就能带走。不加新列，复用 api_key 列：新写入走
+    embedding_service._store_key，读取走 _read_key（明文/密文都认），这里只负责把历史行
+    转成密文。核心逻辑在 embedding_service.encrypt_plaintext_keys（纯函数，便于测试）。
+
+    - 这是 DML 不是 DDL，所以放在 MIGRATE_ON_STARTUP 分支之外无条件执行：生产走 Alembic
+      关掉启动期 DDL 时，密钥仍需迁移。
+    - 解不开的伪密文（换过 CONNECTOR_SECRET_KEY）只告警不覆盖，管理员在页面重填即覆盖。
+    - 任何异常只记日志不阻塞启动：迁移前 _read_key 对明文原样放行，服务不会因此不可用。
+    """
+    from sqlalchemy import select
+    from app.services.knowledge import embedding_service
+
+    log = logging.getLogger(__name__)
+    try:
+        async with async_session() as session:
+            rows = (await session.execute(select(EmbeddingModel))).scalars().all()
+            stats = embedding_service.encrypt_plaintext_keys(rows)
+            if stats["migrated"]:
+                await session.commit()
+        log.info(
+            "ai_embedding_model.api_key 密文迁移：迁移 %d 行，已是密文 %d 行，跳过 %d 行，空 %d 行",
+            stats["migrated"], stats["already"], stats["skipped"], stats["empty"],
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("ai_embedding_model.api_key 密文迁移失败，跳过（下次启动重试）", exc_info=True)
+
+
 async def _ensure_qdrant_collection():
     """启动时确保平台激活 Embedding 配置对应的 Qdrant 集合存在。"""
     from app.services.knowledge.embedding_service import get_active_embedding_config
@@ -436,6 +467,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logging.getLogger(__name__).info(
             "MIGRATE_ON_STARTUP=false：跳过启动期 DDL（create_all/_migrate_* 系列），"
             "schema 以 Alembic 迁移为准（mysql revision=%s）", _rev)
+    # 无论开关都要跑（DML）：存量明文 embedding key 原地加密，见 _encrypt_embedding_keys
+    await _encrypt_embedding_keys()
     # 无论开关都要跑：缺列即 fail fast（见 _assert_chat_message_columns docstring）
     await _assert_chat_message_columns()
     try:

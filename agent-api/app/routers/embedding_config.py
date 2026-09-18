@@ -78,11 +78,16 @@ async def get_config(user: UserContext = Depends(current_user)):
     if not row:
         return EmbeddingConfigResponse()
 
+    # 库里是 Fernet 密文，遮罩必须对解密后的明文做：直接遮密文会把页面上的 `sk-w****Ck8n`
+    # 变成 `gAAA****xxxx`，管理员会误以为 key 被人改了。解不开的密文 _read_key 返回空 →
+    # 页面显示无 key，正好提示重填。
+    plain_key = embedding_service._read_key(row) if row.api_key else ""
+
     return EmbeddingConfigResponse(
         id=row.id,
         model=row.model_id,
         base_url=row.base_url,
-        api_key_masked=_mask_key(row.api_key) if row.api_key else None,
+        api_key_masked=_mask_key(plain_key) if plain_key else None,
         dimension=row.dimension,
         is_active=bool(row.is_active),
         test_status=row.test_status,
@@ -99,6 +104,13 @@ async def update_config(
     """保存平台 Embedding 配置。"""
     if not is_admin(user):
         raise HTTPException(403, "需要管理员权限")
+
+    # api_key 列只存 Fernet 密文（与对话/重排模型一致），明文不落库；超长等入库前就能判定的
+    # 问题按 400 返回，不让它变成一条截断后永远解不开的记录
+    try:
+        stored_key = embedding_service._store_key(body.api_key) if body.api_key else None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     async with async_session() as session:
         active_row = (
@@ -128,8 +140,8 @@ async def update_config(
                 row.dimension = None
             row.model_id = body.model
             row.base_url = body.base_url
-            if body.api_key:
-                row.api_key = body.api_key
+            if stored_key:
+                row.api_key = stored_key
             row.enabled = 1
             row.is_active = 1
             row.test_status = None
@@ -140,7 +152,7 @@ async def update_config(
                 dimension=1024,
                 enabled=1,
                 is_default=0,
-                api_key=body.api_key,
+                api_key=stored_key,
                 base_url=body.base_url,
                 is_active=1,
             )
@@ -180,7 +192,8 @@ async def test_config(
                 )
             ).scalars().first()
             if row:
-                api_key = row.api_key
+                # 库里是密文，回落时解成明文再拿去探测；解不开返回空 → 下面按「未提供」处理
+                api_key = embedding_service._read_key(row)
 
     if not api_key:
         return TestResult(status="failed", message="未提供 API Key")
