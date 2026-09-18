@@ -12,6 +12,7 @@ import re
 import random
 import secrets
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Any, Optional
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -29,6 +30,7 @@ DEFAULT_USERNAME = os.environ.get("AXIOM_ADMIN_USER", "admin")
 TOKEN_TTL_SECONDS = int(os.environ.get("AXIOM_TOKEN_TTL", "86400"))
 
 CAPTCHA_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -114,17 +116,34 @@ def session_record(session: dict[str, Any]) -> dict[str, Any] | None:
     return app.state.store.user_record(session["user"]["username"])
 
 
+def profile_payload(record: dict[str, Any]) -> dict[str, Any]:
+    """个人资料列 → Jeecg 字段。birthday 空串给 None，前端 dayjs('') 判为无效日期会当空处理，
+    但 Jeecg 原本就是 null，保持一致。"""
+    return {
+        "realname": record.get("realname") or "",
+        "avatar": record.get("avatar") or "",
+        "birthday": record.get("birthday") or None,
+        "sex": int(record.get("sex") or 0),
+        "email": record.get("email") or "",
+        "phone": record.get("phone") or "",
+    }
+
+
 def user_payload(record: dict[str, Any]) -> dict[str, Any]:
     """Jeecg-shaped user object for either the administrator or a member account."""
     base = admin_user()
+    profile = profile_payload(record)
     if record.get("is_admin"):
+        # 管理员没填邮箱时沿用旧的占位地址，前端有地方拿它当展示文本。
+        profile["email"] = profile["email"] or base["email"]
+        base.update(profile)
         return base
     username = record["username"]
+    base.update(profile)
     base.update({
         "id": f"u-{username}",
         "username": username,
-        "realname": record.get("realname") or username,
-        "email": "",
+        "realname": profile["realname"] or username,
         "workNo": username,
         "post": "member",
         "userIdentity": 1,
@@ -393,6 +412,92 @@ def get_user_permission(
     codes = permission_codes(session_record(session))
     auth = [{"action": code, "type": "1", "status": "1", "describe": code} for code in codes]
     return ok({"menu": menus(), "auth": auth, "allAuth": auth, "codeList": codes, "sysSafeMode": False})
+
+
+# ---------------- 个人资料 ----------------
+
+class UserEditBody(BaseModel):
+    """前端 userEdit 只传改动的键（头像单独一次、基本资料一次），全部可选。
+    id 收下但不用：只能改会话本人的资料，改谁由 token 决定。"""
+    id: Optional[int | str] = None
+    realname: Optional[str] = Field(default=None, max_length=100)
+    avatar: Optional[str] = Field(default=None, max_length=256)
+    birthday: Optional[str] = Field(default=None, max_length=32)
+    sex: Optional[int | str] = None
+    email: Optional[str] = Field(default=None, max_length=128)
+    phone: Optional[str] = Field(default=None, max_length=32)
+
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PHONE_PATTERN = re.compile(r"^\+?[0-9-]{6,20}$")
+
+
+def validate_profile_patch(body: UserEditBody) -> tuple[dict[str, Any], str]:
+    """把请求体收敛成能直接写库的字段；返回 (字段, 错误文案)。"""
+    fields: dict[str, Any] = {}
+    if body.realname is not None:
+        realname = body.realname.strip()
+        if not realname:
+            return {}, "名称不能为空"
+        fields["realname"] = realname
+    if body.avatar is not None:
+        fields["avatar"] = body.avatar.strip()
+    if body.birthday is not None:
+        birthday = body.birthday.strip()[:10]
+        if birthday:
+            try:
+                birthday = date.fromisoformat(birthday).isoformat()
+            except ValueError:
+                return {}, "生日格式应为 YYYY-MM-DD"
+        fields["birthday"] = birthday
+    if body.sex is not None:
+        sex = str(body.sex).strip()
+        if sex not in ("", "0", "1", "2"):
+            return {}, "性别取值无效"
+        fields["sex"] = int(sex or 0)
+    if body.email is not None:
+        email = body.email.strip()
+        if email and not EMAIL_PATTERN.match(email):
+            return {}, "邮箱格式不正确"
+        fields["email"] = email
+    if body.phone is not None:
+        phone = body.phone.strip()
+        if phone and not PHONE_PATTERN.match(phone):
+            return {}, "手机号格式不正确"
+        fields["phone"] = phone
+    return fields, ""
+
+
+@app.get("/sys/user/login/setting/getUserData")
+def get_user_data(
+    x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
+    authorization: Optional[str] = Header(None),
+):
+    """「个人资料」弹窗的读接口：就是当前用户的 Jeecg 用户对象。"""
+    session, error = require_user(x_access_token, authorization)
+    if error:
+        return error
+    return ok(session["user"])
+
+
+@app.api_route("/sys/user/login/setting/userEdit", methods=["POST", "PUT"])
+def user_edit(
+    body: UserEditBody,
+    x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
+    authorization: Optional[str] = Header(None),
+):
+    """改自己的资料。前端用 POST；Jeecg 原版是 PUT，两个都接。"""
+    session, error = require_user(x_access_token, authorization)
+    if error:
+        return error
+    fields, message = validate_profile_patch(body)
+    if message:
+        return fail(message, code=400)
+    username = session["user"]["username"]
+    if fields:
+        app.state.store.update_user_profile(username, fields)
+    record = app.state.store.user_record(username)
+    return ok(user_payload(record))
 
 
 @app.get("/sys/user/list")
