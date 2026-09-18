@@ -43,6 +43,8 @@ from app.api.interview import router as interview_router
 api_router = APIRouter()
 from app.routers.model_connection import router as model_connection_router
 api_router.include_router(model_connection_router)
+from app.routers.rerank_config import router as rerank_config_router
+api_router.include_router(rerank_config_router)
 api_router.include_router(embedding_config_router)
 api_router.include_router(platform_config_router)
 api_router.include_router(knowledge_router)
