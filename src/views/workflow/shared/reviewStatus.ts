@@ -61,3 +61,41 @@ export function getWorkflowReviewPresentation(item: WorkflowReviewItem): Workflo
   }
   return { statusClass: 'draft', text: '草稿', canSubmit: true, canWithdraw: false };
 }
+
+export type WorkflowNextActionKey = 'run' | 'configure' | 'waiting' | 'resubmit' | 'publish';
+
+export type WorkflowNextAction = {
+  key: WorkflowNextActionKey;
+  label: string;
+  /** 只是状态说明、不可点击（例如等待审核） */
+  passive?: boolean;
+};
+
+/**
+ * 卡片上「下一步」按钮：每个状态都要让用户知道接下来该做什么，而不是只有已发布才有「运行」。
+ * - 已发布 → 运行；
+ * - 待审核 → 等待审核（被动提示，撤回在更多操作里）；
+ * - 已驳回 → 查看原因并重新提交；
+ * - 已下架 → 重新发布；
+ * - 草稿 → 去配置 / 去编排。
+ */
+export function getWorkflowNextAction(item: WorkflowReviewItem & { aiAppType?: string }): WorkflowNextAction {
+  const presentation = getWorkflowReviewPresentation(item);
+  const review = item.reviewSummary;
+  const lifecycle = item.status === 'pending_review' ? 'draft' : String(item.status || 'draft');
+
+  if (review?.status === 'pending_review') {
+    return { key: 'waiting', label: '等待审核', passive: true };
+  }
+  if (lifecycle === 'published') {
+    return { key: 'run', label: '运行' };
+  }
+  if (review?.status === 'rejected') {
+    return { key: 'resubmit', label: presentation.canSubmit ? '查看原因并重新提交' : '查看驳回原因' };
+  }
+  if (lifecycle === 'unpublished') {
+    return { key: 'publish', label: '重新发布' };
+  }
+  const chatAgent = ['chatAgent', 'simple', 'agent'].includes(String(item.aiAppType || 'chatAgent'));
+  return { key: 'configure', label: chatAgent ? '去配置' : '去编排' };
+}

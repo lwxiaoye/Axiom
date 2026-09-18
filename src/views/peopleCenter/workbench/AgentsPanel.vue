@@ -91,8 +91,9 @@
             <i></i>
             {{ statusText(item) }}
           </span>
+          <!-- 驳回原因入口已并入右侧「下一步」按钮；这里只给没有该按钮的人（非编辑者）留一个入口 -->
           <button
-            v-if="reviewPresentation(item).reviewComment"
+            v-if="reviewPresentation(item).reviewComment && !(isOwner(item) || canEdit(item))"
             class="wb-review-reason"
             type="button"
             @click.stop="showReviewReason(item)"
@@ -100,8 +101,9 @@
             查看原因
           </button>
           <div class="wb-card-ops" @click.stop @keydown.enter.stop>
+            <!-- 每个状态都给出下一步：已发布→运行；草稿→去配置；待审核→等待；驳回→看原因并重提；下架→重新发布 -->
             <button
-              v-if="isPublished(item)"
+              v-if="nextAction(item).key === 'run'"
               class="wb-op"
               type="button"
               title="运行"
@@ -109,6 +111,21 @@
             >
               <PlayCircleOutlined />
               <span>运行</span>
+            </button>
+            <span v-else-if="nextAction(item).passive" class="wb-op wb-op-passive" :title="nextAction(item).label">
+              <ClockCircleOutlined />
+              <span>{{ nextAction(item).label }}</span>
+            </span>
+            <button
+              v-else-if="isOwner(item) || canEdit(item)"
+              class="wb-op"
+              type="button"
+              :title="nextAction(item).label"
+              @click="runNextAction(item)"
+            >
+              <SettingOutlined v-if="nextAction(item).key === 'configure'" />
+              <SendOutlined v-else />
+              <span>{{ nextAction(item).label }}</span>
             </button>
             <a-dropdown :trigger="['click']" placement="bottomRight">
               <button class="wb-op icon-only" type="button" title="更多操作" aria-label="更多操作">
@@ -176,6 +193,7 @@ import { computed, ref } from 'vue';
 import { Modal, message } from 'ant-design-vue';
 import {
   ApiOutlined,
+  ClockCircleOutlined,
   CopyOutlined,
   DeleteOutlined,
   DownloadOutlined,
@@ -214,7 +232,7 @@ import {
   getAiAppPrimaryAction,
   type AiAppKind,
 } from '../../workflow/shared/agentApp';
-import { getWorkflowReviewPresentation } from '../../workflow/shared/reviewStatus';
+import { getWorkflowNextAction, getWorkflowReviewPresentation } from '../../workflow/shared/reviewStatus';
 
 const props = defineProps<{
   agents: any[];
@@ -298,6 +316,18 @@ function statusText(item: any) {
 
 function reviewPresentation(item: any) {
   return getWorkflowReviewPresentation(item);
+}
+
+function nextAction(item: any) {
+  return getWorkflowNextAction(item);
+}
+
+/** 卡片「下一步」按钮：草稿去配置、驳回看原因后重提、下架重新发布 */
+function runNextAction(item: any) {
+  const action = nextAction(item);
+  if (action.key === 'configure') emit('openDesigner', item);
+  else if (action.key === 'resubmit') showReviewReason(item, canSubmitPublish(item));
+  else if (action.key === 'publish') emit('publish', item);
 }
 
 function isOwner(item: any) {
@@ -414,12 +444,26 @@ async function unpublish(item: any) {
   }
 }
 
-function showReviewReason(item: any) {
+function showReviewReason(item: any, offerResubmit = false) {
   const review = reviewPresentation(item);
-  Modal.info({
+  const reviewer = item?.reviewSummary?.reviewedByName ? `（审核员：${item.reviewSummary.reviewedByName}）` : '';
+  const content = `${review.reviewComment || '审核员未填写具体原因'}${reviewer}`;
+  if (!offerResubmit) {
+    Modal.info({
+      title: `驳回原因 · v${item?.reviewSummary?.versionNo || '-'}`,
+      content,
+      okText: '知道了',
+    });
+    return;
+  }
+  // 驳回后的下一步是「改完重新提交」：看完原因直接进发布弹窗，不用再去更多操作里找；
+  // 要先改配置的话点卡片本身就是进配置页。
+  Modal.confirm({
     title: `驳回原因 · v${item?.reviewSummary?.versionNo || '-'}`,
-    content: review.reviewComment || '审核员未填写具体原因',
-    okText: '知道了',
+    content: `${content}。修改后可直接重新提交；需要先改配置请点击卡片进入。`,
+    okText: '重新提交发布',
+    cancelText: '关闭',
+    onOk: () => emit('publish', item),
   });
 }
 
@@ -453,5 +497,13 @@ async function withdrawReview(item: any) {
 .wb-review-reason:hover {
   color: #3d5ce5;
   text-decoration: underline;
+}
+
+/* 待审核：只是状态说明，不是按钮 */
+.wb-op.wb-op-passive {
+  cursor: default;
+  color: #64748b;
+  border-style: dashed;
+  background: transparent;
 }
 </style>

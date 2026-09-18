@@ -1,4 +1,34 @@
-import { getWorkflowReviewPresentation } from './reviewStatus';
+import { getWorkflowNextAction, getWorkflowReviewPresentation } from './reviewStatus';
+
+describe('workflow next action on the card', () => {
+  it('points a draft chat agent to the config page', () => {
+    expect(getWorkflowNextAction({ status: 'draft', aiAppType: 'chatAgent' })).toEqual({ key: 'configure', label: '去配置' });
+  });
+
+  it('points a draft workflow to the editor', () => {
+    expect(getWorkflowNextAction({ status: 'draft', aiAppType: 'workflow' })).toEqual({ key: 'configure', label: '去编排' });
+  });
+
+  it('shows a passive waiting state while the version is pending review', () => {
+    expect(
+      getWorkflowNextAction({ status: 'pending_review', reviewSummary: { status: 'pending_review', versionId: 'v1', versionNo: 1 } })
+    ).toEqual({ key: 'waiting', label: '等待审核', passive: true });
+  });
+
+  it('offers resubmission after a rejection', () => {
+    expect(
+      getWorkflowNextAction({ status: 'draft', reviewSummary: { status: 'rejected', versionId: 'v1', versionNo: 1, reviewComment: '补充说明' } })
+    ).toEqual({ key: 'resubmit', label: '查看原因并重新提交' });
+  });
+
+  it('keeps run as the primary action for a published app, even with unpublished edits', () => {
+    expect(getWorkflowNextAction({ status: 'published', hasUnpublishedChanges: true })).toEqual({ key: 'run', label: '运行' });
+  });
+
+  it('offers republish for an unpublished app', () => {
+    expect(getWorkflowNextAction({ status: 'unpublished' })).toEqual({ key: 'publish', label: '重新发布' });
+  });
+});
 
 describe('workflow review status presentation', () => {
   it('keeps the published lifecycle while a replacement version is under review', () => {

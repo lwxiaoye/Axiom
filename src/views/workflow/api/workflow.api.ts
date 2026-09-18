@@ -522,8 +522,20 @@ export type RouteMetadata = {
   tags?: string[];
 };
 
-export type SubmitReviewResult = { version: WorkflowVersionItem; approvalRequired: boolean; message: string };
-export type MyCapabilities = { isReviewer: boolean; isPlatformAdmin: boolean; approvalRequired: boolean };
+export type SubmitReviewResult = {
+  version: WorkflowVersionItem;
+  approvalRequired: boolean;
+  /** 审批开启但提交者本人就是审核员：后端直接上线，不进待审队列 */
+  autoApproved?: boolean;
+  message: string;
+};
+export type MyCapabilities = {
+  isReviewer: boolean;
+  isPlatformAdmin: boolean;
+  approvalRequired: boolean;
+  /** 当前用户提交发布会被自动通过（审核员本人） */
+  selfPublishAutoApproved?: boolean;
+};
 export type AdminAppItem = Omit<AiWorkflowApp, 'aiAppType'> & {
   aiAppType: AiWorkflowApp['aiAppType'] | 'builtin';
   ownerUsername?: string;
