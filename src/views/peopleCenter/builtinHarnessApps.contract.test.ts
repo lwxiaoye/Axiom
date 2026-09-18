@@ -52,7 +52,11 @@ describe('系统内置 Harness 应用契约', () => {
     expect(list).toContain("label: '删除'");
     expect(list).not.toContain('isAiAgentApp');
     expect(list).not.toContain('isSystemManagedApp');
-    expect(editor).toContain("appType: 'external'");
+    // 编辑器的新建默认值已从 external 改为 custom（组件副标题写明「新增应用默认为自建业务应用，
+    // 可按实际交付方式切换为外部接入应用」）；仓库历史是压缩快照，找不到改它的提交。
+    // 本契约关心的是「内置应用能作为普通外部应用被录入」，所以只钉 external 仍是可选来源，不钉默认值。
+    expect(editor).toContain('<a-radio-button value="external">');
+    expect(editor).toContain("if (source === 'external') return 'external';");
     expect(editor).not.toContain('systemManagedCoreSnapshot');
     expect(editor).toContain('selectedRoleValues');
     expect(editor).toContain('selectedDepartValues');

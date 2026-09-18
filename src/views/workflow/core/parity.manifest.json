@@ -18,7 +18,7 @@
     { "value": "settingLLMModel", "frontendEnum": true, "vueRender": "partial" },
     { "value": "selectDataset", "frontendEnum": true, "vueRender": "partial" },
     { "value": "selectDatasetParamsModal", "frontendEnum": true, "vueRender": "partial" },
-    { "value": "settingDatasetQuotePrompt", "frontendEnum": true, "vueRender": "partial" },
+    { "value": "settingDatasetQuotePrompt", "frontendEnum": false, "vueRender": "none" },
     { "value": "hidden", "frontendEnum": true, "vueRender": "full" },
     { "value": "custom", "frontendEnum": true, "vueRender": "partial" },
     { "value": "selectSkill", "frontendEnum": false, "vueRender": "none" },

@@ -9,7 +9,10 @@ describe('thread model switching contract', () => {
     const page = fs.readFileSync(path.join(root, 'pages/ChatPage.vue'), 'utf8');
     const tab = fs.readFileSync(path.join(root, 'tabs/ChatTab.vue'), 'utf8');
 
-    expect(composable).toContain('updateThreadModel(threadId, nextModel)');
+    // 只钉前两个实参：updateThreadModel 后来加了第三个 threadScope（主对话 / PPT / 校园百事通
+    // 三个历史域各自持久化下一轮模型，见 builtinHarnessApps.contract.test.ts）。本契约关心的是
+    // 「切模型会落库到当前线程」，与是否带 scope 无关。
+    expect(composable).toMatch(/updateThreadModel\(threadId, nextModel(?:, threadScope)?\)/);
     expect(composable).toContain('currentRunModel');
     expect(composable).toContain("model: payload.model || turnModel");
     expect(page).toContain(':current-run-model="currentRunModel"');

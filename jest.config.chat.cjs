@@ -6,6 +6,8 @@
  */
 module.exports = {
   testEnvironment: 'node',
+  // 时区钉成 +08：serverTime 的哨兵测试要求非 UTC 环境，而测试文件内部无法自行设置（见该文件注释）
+  globalSetup: '<rootDir>/jest.globalSetup.tz.cjs',
   roots: ['<rootDir>/src/views/peopleCenter', '<rootDir>/src/views/agent/run'],
   testMatch: ['**/*.test.ts'],
   transform: {

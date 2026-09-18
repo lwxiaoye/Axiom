@@ -47,10 +47,16 @@ describe('MyKnowledgeTab chunk refresh', () => {
     const editor = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunkEditorDrawer.vue'), 'utf8');
     expect(component).toContain('v-model:open="chunkEditorOpen"');
     expect(component).toContain('<KnowledgeChunkEditorDrawer');
-    expect(editor).toContain('@contextmenu.prevent="openChunkImageMenu"');
+    // 右键菜单：编辑器后来把 @contextmenu.prevent 直接绑 openChunkImageMenu 改成先过一层
+    // handleChunkContextMenu（只读态放行浏览器原生菜单，可编辑态才 preventDefault 再打开）。
+    // 这里只钉「文本框容器绑了 contextmenu、且最终走到 openChunkImageMenu」，不钉中间那层的名字。
+    expect(editor).toMatch(/class="chunk-editor-textarea-wrap"[^>]*@contextmenu(?:\.prevent)?="\w+"/);
+    expect(editor).toMatch(/openChunkImageMenu\(event\)|@contextmenu\.prevent="openChunkImageMenu"/);
     expect(editor).toContain('ref="chunkTextareaRef"');
     expect(editor).toContain('uploadChunkImageFromMenu');
-    expect(editor).toContain('uploadKnowledgeChunkImage(props.chunk.id, options.file as File)');
+    // 上传：同一个抽屉现在同时服务用户侧与管理侧（props.management 三元选 API），
+    // 本契约只关心用户侧仍走 uploadKnowledgeChunkImage 且带上分段 id。
+    expect(editor).toMatch(/uploadKnowledgeChunkImage\)?\(props\.chunk\.id, /);
     expect(editor).toContain('insertChunkImage(image, chunkInsertSelection.value)');
     expect(editor).toContain('const contentWithImages = chunkEditorContent.value.trim();');
     expect(editor).toContain('const content = stripMarkdownImages(contentWithImages);');
@@ -74,7 +80,9 @@ describe('MyKnowledgeTab chunk refresh', () => {
     expect(detail).toContain('<KnowledgeChunksPanel');
     expect(chunksPanel).toContain('title="确定删除该分段？"');
     expect(chunksPanel).toContain('@confirm="removeChunk(item)"');
-    expect(chunksPanel).toContain('await deleteChunk(record.id);');
+    // 面板同时服务用户侧与管理侧（props.management 三元选 deleteChunk / deleteManagedChunk），
+    // 只钉「用户侧删除仍调 deleteChunk 且传分段 id」。
+    expect(chunksPanel).toMatch(/await \(?[^;\n]*\bdeleteChunk\)?\(record\.id\);/);
   });
 
   it('keeps document and chunk lists aligned with knowledge management', () => {
@@ -93,10 +101,13 @@ describe('MyKnowledgeTab chunk refresh', () => {
 
   it('keeps the shared chunk list hover style isolated from legacy center chunk styles', () => {
     const chunksPanel = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunksPanel.vue'), 'utf8');
-    expect(chunksPanel).toContain("['knowledge-chunk-item', { editable: canEdit }]");
-    expect(chunksPanel).not.toContain("['chunk-item', { editable: canEdit }]");
-    expect(chunksPanel).toContain('.knowledge-chunk-item.editable:hover');
-    expect(chunksPanel).not.toContain('.chunk-item.editable:hover');
+    // 本契约保护的是「分段条目样式挂在 knowledge-chunk-item 命名空间下，不与个人中心旧的 .chunk-item 撞」。
+    // hover 后来从 .editable 改挂到 .interactive（只读用户也能点开分段详情，所以人人有 hover），
+    // 修饰类名不是契约内容，只钉根类名与 hover 规则的命名空间。
+    expect(chunksPanel).toMatch(/:class="\['knowledge-chunk-item', \{/);
+    expect(chunksPanel).not.toMatch(/:class="\['chunk-item', \{/);
+    expect(chunksPanel).toMatch(/\.knowledge-chunk-item\.\w+:hover/);
+    expect(chunksPanel).not.toMatch(/(?<![\w-])\.chunk-item(?:\.\w+)?:hover/);
   });
 
   it('resets document and chunk list state when opening another knowledge base', () => {

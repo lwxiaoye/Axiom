@@ -8,7 +8,9 @@ describe('workflow editor loop quick add behavior', () => {
     expect(source).toContain('parentNodeId?: string');
     expect(source).toContain('if (parentNodeId) node.parentNodeId = parentNodeId;');
     expect(source).toContain('const inheritedParentNodeId = source?.parentNodeId;');
-    expect(source).toContain('addNodeFromTemplate(template, request?.position, inheritedParentNodeId)');
+    // 位置来源变量后来从 request 改名 connectionRequest（同时覆盖显式连线与隐式挂到开始/工具调用节点
+    // 的请求），本契约只关心第三个实参仍把继承到的 parentNodeId 传进去，不钉变量名。
+    expect(source).toMatch(/addNodeFromTemplate\(template, \w+\?\.position, inheritedParentNodeId\)/);
   });
 
   it('uses the inherited loop container when quick adding a loop break node', () => {

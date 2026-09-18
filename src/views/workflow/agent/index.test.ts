@@ -17,10 +17,19 @@ describe('workflow agent run preview chart outputs', () => {
   });
 
   it('keeps the tool and skill picker modal actions comfortably spaced', () => {
-    expect(source).toContain('margin: 8px 0 0');
-    expect(source).toContain('padding: 16px 0 20px');
-    expect(source).toContain('gap: 12px');
-    expect(source).toContain('min-width: 76px');
+    // 旧的 modal-actions 块（margin 8px / padding 16px 0 20px / min-width 76px）已被 picker-footer 取代，
+    // 取消/确认收进 footer 右侧的按钮组。像素值不是契约内容，只钉「两个动作按钮同在 footer 里、
+    // 按钮组声明了间距」；footer 与弹窗底边的距离由下面那条用例单独把关。
+    const footerStart = source.indexOf('<div class="picker-footer">');
+    expect(footerStart).toBeGreaterThan(-1);
+    const footerTemplate = source.slice(footerStart, source.indexOf('</a-modal>', footerStart));
+    expect(footerTemplate).toContain('@click="cancelPicker"');
+    expect(footerTemplate).toContain('@click="confirmPicker"');
+
+    const styleStart = source.indexOf('.picker-footer {');
+    expect(styleStart).toBeGreaterThan(-1);
+    const footerStyle = source.slice(styleStart, source.indexOf('\n}\n', styleStart));
+    expect(footerStyle).toMatch(/>\s*div\s*\{[^}]*gap:\s*\d+px/);
   });
 
   it('explicitly calls saveDraft from the toolbar so click events do not silence success messages', () => {
