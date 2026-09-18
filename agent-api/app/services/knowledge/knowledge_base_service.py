@@ -639,6 +639,33 @@ async def save_acl(knowledge_id: str, entries: list[dict[str, Any]]) -> list[dic
     return await list_acl(kid)
 
 
+async def accessible_ids(
+    knowledge_ids: list[str], *, user_id: str, is_admin: bool = False
+) -> list[str]:
+    """过滤出用户有权检索的知识库，并剔除已停用的。
+
+    对话侧检索必须自己做这层过滤：原先这道校验在 Java 检索接口里，Java 下线后
+    如果直接把前端传来的 id 丢给向量库，就等于谁都能检索任何人的知识库。
+    """
+    ids = [str(x).strip() for x in (knowledge_ids or []) if str(x).strip()]
+    if not ids:
+        return []
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id.in_(ids),
+                KnowledgeBase.status == "ENABLED",
+            )
+        )).scalars().all()
+    allowed: list[str] = []
+    for row in rows:
+        if await permission_for(row, user_id=user_id, is_admin=is_admin):
+            allowed.append(row.id)
+    # 保持调用方传入的顺序，便于日志比对
+    order = {kid: i for i, kid in enumerate(ids)}
+    return sorted(allowed, key=lambda kid: order.get(kid, 0))
+
+
 async def list_acl(knowledge_id: str) -> list[dict[str, Any]]:
     async with async_session() as session:
         rows = (await session.execute(

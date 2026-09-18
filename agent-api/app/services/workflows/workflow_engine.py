@@ -1133,7 +1133,7 @@ class WorkflowEngine:
             async with async_session() as session:
                 row = (
                     await session.execute(
-                        text("select tenant_id from ai_knowledge_base where id = :id limit 1"),
+                        text("select tenant_id from agent_knowledge_base where id = :id limit 1"),
                         {"id": str(knowledge_ids[0])},
                     )
                 ).first()
