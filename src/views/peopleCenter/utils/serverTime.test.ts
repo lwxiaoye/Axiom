@@ -1,7 +1,11 @@
-// 必须在任何 Date 之前设置：Node 首次用到 Date 之后会缓存时区。
-// 固定成 +08 是为了让「MySQL 本地时间」与「Python UTC」这两条路的差异真的显现出来——
-// 在 UTC 机器上跑，两个解析器返回同一个值，任何断言都会**恰好通过**（假绿灯）。
-process.env.TZ = 'Asia/Shanghai';
+// 本文件要求测试进程时区为 +08：只有在非 UTC 环境下，「MySQL 本地时间」与「Python UTC」
+// 两条解析路径的差异才会真的显现出来——在 UTC 机器上跑，两个解析器返回同一个值，
+// 任何断言都会**恰好通过**（假绿灯）。
+//
+// 时区不能在这里用 `process.env.TZ = …` 钉：Jest 沙箱给测试文件的 process.env 是一份拷贝，
+// 赋值触发不了 Node 的 tzset（在开发机上"能过"只是因为系统时区本来就是 +08）。
+// 真正的钉法在 jest.globalSetup.tz.cjs（由 jest.config.chat.cjs 挂载）；下面第一个 describe
+// 是哨兵：一旦有人换了配置或换了跑法，它会先红，避免后面的断言变成假绿灯。
 
 import { formatDbNaiveTime, parseDbNaiveTs, parseUtcNaiveTs } from './serverTime';
 
