@@ -42,7 +42,10 @@ openpyxl>=3.1.0
 alembic>=1.13.0
 # P1 双目标迁移（migrations/）：MySQL 目标的同步驱动——env.py 把 aiomysql URL 转 pymysql
 # 跑迁移；应用运行时仍用 aiomysql，互不影响
-pymysql>=1.1.0
+# aiomysql 0.3.0 调 PyMySQL 私有的 escape_bytes_prefixed，PyMySQL 1.2 把它改成了别的东西：
+# 任何 LONGBLOB 参数（外观皮肤包导入、内置皮肤 ensure_builtin_skins）都会炸
+# "'str' object is not callable" → /workflow/presentation/presets 500。锁到 1.1.x。
+pymysql>=1.1.0,<1.2
 # ADR-047 §6.5：本地沙箱 provider 的 sdk 后端（容器内无 docker CLI，经 socket 走 docker-py）
 docker>=7.0.0
 # OpenSandbox provider（与 opensandbox_adapter.py 的 current SDK contract 对齐）
