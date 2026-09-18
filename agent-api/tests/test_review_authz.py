@@ -37,27 +37,27 @@ class ReviewEndpointAuthzTest(unittest.TestCase):
     def test_review_page_permission_grants_reviewer_gate(self):
         user = UserContext(user_id="u-reviewer", username="wangwu", access_token="token-review")
 
-        with mock.patch.object(wf, "_java_user_has_menu_path", new=mock.AsyncMock(return_value=True)):
+        with mock.patch.object(wf, "_auth_api_user_has_menu_path", new=mock.AsyncMock(return_value=True)):
             _run(wf._require_review_permission(user))
 
     def test_review_page_permission_gate_rejects_user_without_menu(self):
         user = UserContext(user_id="u-reviewer", username="wangwu", access_token="token-review")
 
-        with mock.patch.object(wf, "_java_user_has_menu_path", new=mock.AsyncMock(return_value=False)):
+        with mock.patch.object(wf, "_auth_api_user_has_menu_path", new=mock.AsyncMock(return_value=False)):
             with self.assertRaises(HTTPException) as ctx:
                 _run(wf._require_review_permission(user))
 
         self.assertEqual(ctx.exception.status_code, 403)
 
-    def test_role_reviewer_does_not_call_java_permission_service(self):
+    def test_role_reviewer_does_not_call_auth_api_permission_service(self):
         user = UserContext(user_id="u-reviewer", username="reviewer", role_ids=["reviewer-role"])
 
-        java_check = mock.AsyncMock(return_value=False)
+        auth_api_check = mock.AsyncMock(return_value=False)
         with mock.patch.object(wf.settings, "AGENT_REVIEWER_ROLE_IDS", "reviewer-role"):
-            with mock.patch.object(wf, "_java_user_has_menu_path", new=java_check):
+            with mock.patch.object(wf, "_auth_api_user_has_menu_path", new=auth_api_check):
                 _run(wf._require_review_permission(user))
 
-        java_check.assert_not_awaited()
+        auth_api_check.assert_not_awaited()
 
     def test_approve_rejects_non_reviewer(self):
         with self.assertRaises(HTTPException) as ctx:
@@ -102,7 +102,7 @@ class RegistryEventSignatureFailClosedTest(unittest.TestCase):
     def _patch_secret(self, secret: str):
         stub = SimpleNamespace(
             INTERNAL_SYNC_SECRET=secret,
-            GATEWAY_IDENTITY_MAX_AGE_SECONDS=300,
+            INTERNAL_SYNC_MAX_AGE_SECONDS=300,
         )
         return mock.patch.object(reg, "settings", stub)
 

@@ -1,6 +1,7 @@
 """WS2/WS3/WS4 冒烟：发布审批状态机 + 版本历史/回滚 + 后台跨用户管理。
 
-本地开发鉴权走 X-User-Id/X-Username 头（GATEWAY_IDENTITY_SIGNATURE_REQUIRED=False）。
+注意：agent-api 只信 X-Access-Token 回源 auth-api，下面 AUTHOR/ADMIN 的 X-User-Id/X-Username 头
+不会被当作身份；要跑通需先登录拿到 token 并放进请求头。
 运行：python scripts/ws_publish_review_smoke.py
 """
 import asyncio
