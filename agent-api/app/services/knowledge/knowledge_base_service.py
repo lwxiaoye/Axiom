@@ -29,7 +29,7 @@ from sqlalchemy import delete, func, select
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import KnowledgeAcl, KnowledgeBase, KnowledgeDocument
-from app.services.knowledge import embedding_service
+from app.services.knowledge import embedding_service, rerank_service
 from app.services.knowledge.vector_service import _get_client
 
 logger = logging.getLogger(__name__)
@@ -255,6 +255,8 @@ _DOC_STATUS_TO_API = {
 
 DEFAULT_TOP_K = 5
 DEFAULT_SCORE_THRESHOLD = 0.3
+# 重排是二次筛选：候选得比 top_k 宽，否则只是给同一批结果换个顺序。
+RERANK_CANDIDATE_MIN = 20
 
 
 def _serialize_base(
@@ -454,11 +456,18 @@ async def search_chunks(
     query: str,
     top_k: Optional[int] = None,
     score_threshold: Optional[float] = None,
+    rerank: Optional[bool] = None,
 ) -> list[dict[str, Any]]:
     """检索。top_k / 阈值未显式传入时，取知识库设置里保存的值。
 
     此前两者都是写死的默认值，于是「知识库设置」里改完保存、检索行为却纹丝不动。
     多库检索取各库中最宽松的一组，否则严格的那个库会把宽松库的结果一起砍掉。
+
+    rerank：None = 配置并启用了重排模型就用；True = 要求重排（未配置则记日志、按向量序）；
+    False = 只按向量排序（工作流节点没勾重排时传的就是它）。启用时先从 Qdrant 多取候选、
+    重排、再截到 top_k。每条结果的 `score` 是最终排序依据（重排后就是重排分），`vectorScore`
+    永远是向量分。两者量纲不同——余弦相似度 vs 交叉编码器相关度——所以 score_threshold
+    只作用在向量分上，在 Qdrant 粗召回阶段就生效，不拿它去卡重排分。
     """
     ids = [str(x).strip() for x in (knowledge_ids or []) if str(x).strip()]
     if not ids or not (query or "").strip():
@@ -476,6 +485,11 @@ async def search_chunks(
                 [float(r[1] if r[1] is not None else DEFAULT_SCORE_THRESHOLD) for r in rows],
                 default=DEFAULT_SCORE_THRESHOLD,
             )
+    rerank_config = None
+    if rerank is not False:
+        rerank_config = await rerank_service.get_active_rerank_config()
+        if rerank and rerank_config is None:
+            logger.info("检索方要求重排，但重排模型未配置或未启用，按向量相似度排序返回")
     config = await _active_embedding()
     vector = await embedding_service.embed_query(
         query, config=config, audit_purpose_detail="knowledge_search",
@@ -486,23 +500,51 @@ async def search_chunks(
     client = _get_client()
     if not await client.collection_exists(collection):
         return []
+    k = max(1, int(top_k))
     hits = await client.search(
         collection_name=collection,
         query_vector=vector,
-        limit=max(1, int(top_k)),
+        limit=max(k * 4, RERANK_CANDIDATE_MIN) if rerank_config else k,
         query_filter=Filter(must=[
             FieldCondition(key="knowledge_id", match=MatchAny(any=ids))
         ]),
         score_threshold=float(score_threshold) or None,
         with_payload=True,
     )
-    return [{
+    results = [{
         "content": (h.payload or {}).get("content", ""),
         "source": (h.payload or {}).get("document_name", ""),
         "knowledgeId": (h.payload or {}).get("knowledge_id", ""),
         "documentId": (h.payload or {}).get("document_id", ""),
         "score": float(h.score),
+        "vectorScore": float(h.score),
     } for h in hits]
+    if rerank_config is None or not results:
+        return results
+    return await _rerank_hits(query, results, k, rerank_config)
+
+
+async def _rerank_hits(
+    query: str, results: list[dict[str, Any]], top_k: int, config: rerank_service.RerankConfig,
+) -> list[dict[str, Any]]:
+    """向量候选 -> 重排 -> 截 top_k。重排失败退回向量排序，但 warning 留痕，不能静默降级。"""
+    candidates = [r for r in results if str(r.get("content") or "").strip()]
+    if not candidates:
+        return results[:top_k]
+    try:
+        ranked = await rerank_service.rerank(
+            query, [r["content"] for r in candidates], top_n=top_k, config=config,
+            audit_purpose_detail="knowledge_rerank",
+        )
+    except rerank_service.RerankError as exc:
+        logger.warning("知识库重排失败，本次退回向量排序：%s", exc)
+        return results[:top_k]
+    reranked = []
+    for index, score in ranked[:top_k]:
+        item = dict(candidates[index])
+        item["score"] = score
+        reranked.append(item)
+    return reranked
 
 
 async def get_document(document_id: str) -> Optional[dict[str, Any]]:
