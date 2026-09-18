@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ async def analyze_ppt_style_reference(
             base_url = vision_base
             api_key = str(conf.get("visionApiKey") or "").strip()
         else:
-            base_url = settings.NEWAPI_BASE_URL.rstrip("/")
+            base_url = get_model_base_url().rstrip("/")
             api_key = newapi_key
         if not api_key:
             return ""

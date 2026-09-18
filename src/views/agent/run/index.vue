@@ -35,6 +35,16 @@
           region="sidebar"
         />
       </span>
+      <button
+        type="button"
+        class="run-back"
+        :title="canGoBack ? '返回上一页' : '返回智能体广场'"
+        :aria-label="canGoBack ? '返回上一页' : '返回智能体广场'"
+        @click="goBack"
+      >
+        <ArrowLeftOutlined />
+        <span class="run-back-label">{{ canGoBack ? '返回' : '智能体广场' }}</span>
+      </button>
       <div class="run-brand">
         <span class="run-brand-avatar" aria-hidden="true">
           <span>{{ brandInitials }}</span>
@@ -304,6 +314,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute } from 'vue-router';
 import { message } from 'ant-design-vue';
 import {
+  ArrowLeftOutlined,
   ArrowUpOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -351,6 +362,7 @@ import { filesFromClipboard, longTextAsPastedFile } from '../../peopleCenter/uti
 import { createSmoothStreamText } from '../../peopleCenter/composables/smoothStreamText';
 import RunAssistantMarkdown from './components/RunAssistantMarkdown.vue';
 import RunCompactHeader from './components/RunCompactHeader.vue';
+import { usePageBack } from '/@/hooks/web/usePageBack';
 import RunGeneratedFiles from './components/RunGeneratedFiles.vue';
 import RunInspirationPanel from './components/RunInspirationPanel.vue';
 import RunMessageActions from './components/RunMessageActions.vue';
@@ -424,6 +436,10 @@ type UploadedFile = {
 };
 
 const route = useRoute();
+// 子智能体是从工作台点进来的独立页面，必须给一条明确的回头路；直接贴地址栏
+// 打开时没有上一页，退回智能体广场。
+const { goBack, canGoBack } = usePageBack('/center/agent');
+
 const appId = String(route.params.appId || route.query.appId || '');
 
 function firstQueryValue(value: unknown) {

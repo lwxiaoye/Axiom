@@ -27,6 +27,7 @@ from app.services.chat.builtin_assistants.registry import origin_for_preset
 from app.routers.connectors import router as connectors_router
 from app.routers.embedding_config import router as embedding_config_router
 from app.routers.platform_config import router as platform_config_router
+from app.routers.knowledge import router as knowledge_router
 from app.routers.workflow import router as workflow_router
 from app.routers.agent_skill import router as agent_skill_router
 from app.routers.files import router as files_router
@@ -40,8 +41,11 @@ from app.routers.external_agent_runs import router as external_agent_runs_router
 from app.api.interview import router as interview_router
 
 api_router = APIRouter()
+from app.routers.model_connection import router as model_connection_router
+api_router.include_router(model_connection_router)
 api_router.include_router(embedding_config_router)
 api_router.include_router(platform_config_router)
+api_router.include_router(knowledge_router)
 api_router.include_router(workflow_router)
 api_router.include_router(agent_skill_router)
 api_router.include_router(files_router)
@@ -60,6 +64,14 @@ logger = logging.getLogger(__name__)
 
 
 # Chat endpoints
+@api_router.get("/chat/builtin-apps")
+async def list_builtin_apps_route(user: UserContext = Depends(current_user)):
+    """智能体广场里的内置智能体列表（校园百事通 / 面试助手 / 演示文稿助手）。"""
+    from app.services.chat.builtin_app_access import list_builtin_apps
+
+    return await list_builtin_apps(user)
+
+
 @api_router.get("/chat/builtin-apps/{preset}")
 async def get_builtin_app(preset: str, user: UserContext = Depends(current_user)):
     """Resolve one administrator-configured Harness page and enforce its current ACL."""

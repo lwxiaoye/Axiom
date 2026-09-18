@@ -39,6 +39,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 
 from .base import INTENT_PROP, MainTool, ToolSoftError, ToolValue, current_tool_call_id, text_tool_body
@@ -875,7 +876,7 @@ async def _digest(
         cached_digest = _DIGEST_CACHE.get(digest_key)
     if cached_digest is not None:
         return cached_digest[1]
-    base_url = settings.NEWAPI_BASE_URL.rstrip("/")
+    base_url = get_model_base_url().rstrip("/")
     system = (
         "你从一个网页的正文里回答问题。只依据给定正文作答，正文里没有的不要编造，"
         "缺失就明确说「页面里没有这部分信息」。保留原文里的关键数字、名称、代码和链接。"

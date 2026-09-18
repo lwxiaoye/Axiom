@@ -1237,7 +1237,7 @@ async def _resolve_kb_tenant(session, kb_ids: List[str]) -> Optional[str]:
 
     async def _q(s) -> Optional[str]:
         row = (await s.execute(
-            text("select tenant_id from ai_knowledge_base where id = :id limit 1"),
+            text("select tenant_id from agent_knowledge_base where id = :id limit 1"),
             {"id": str(kb_ids[0])},
         )).first()
         return str(row[0]) if row and row[0] is not None else None

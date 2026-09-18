@@ -348,7 +348,8 @@ export function numToUpper(value) {
 }
 
 // 代码逻辑说明: 解决老的vue2动态导入文件语法 vite不支持的问题
-const allModules = import.meta.glob('../views/**/*.vue');
+// SLIM-BUILD: 同 routeHelper.ts，范围需与之保持一致
+const allModules = import.meta.glob('../views/{agent,sys,system,dashboard,peopleCenter}/**/*.vue');
 export function importViewsFile(path): Promise<any> {
   if (path.startsWith('/')) {
     path = path.substring(1);

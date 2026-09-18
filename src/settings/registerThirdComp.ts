@@ -1,6 +1,8 @@
 import type { App } from 'vue';
-import { registerJVxeTable } from '/@/components/jeecg/JVxeTable';
-import { registerJVxeCustom } from '/@/components/JVxeCustom';
+// SLIM-BUILD: JVxeTable 会急加载 vxe-pc-ui + vxe-table + vxe-table-plugin-antd，
+// 仅被 system / peopleCenter 等后台页面使用，agent 使用界面不依赖。
+// import { registerJVxeTable } from '/@/components/jeecg/JVxeTable';
+// import { registerJVxeCustom } from '/@/components/JVxeCustom';
 
 // 注册全局dayjs
 import dayjs from 'dayjs';
@@ -10,10 +12,9 @@ import { createAsyncComponent } from '/@/utils/factory/createAsyncComponent';
 
 export async function registerThirdComp(app: App) {
   //---------------------------------------------------------------------
-  // 注册 JVxeTable 组件
-  registerJVxeTable(app);
-  // 注册 JVxeTable 自定义组件
-  await registerJVxeCustom();
+  // SLIM-BUILD: 见文件顶部说明
+  // registerJVxeTable(app);
+  // await registerJVxeCustom();
   //---------------------------------------------------------------------
   // 注册全局聊天表情包
   // 代码逻辑说明: 【QQYUN-8241】emoji-mart-vue-fast库异步加载

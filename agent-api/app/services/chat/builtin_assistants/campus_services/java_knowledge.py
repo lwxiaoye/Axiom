@@ -1,7 +1,9 @@
-"""Read campus configuration knowledge APIs with the current administrator token.
+"""校园百事通读取知识库信息。
 
-These helpers never use a service account.  Response shape is taken from the
-runtime JSON, not guessed field names.
+历史上这些数据由 JeecgBoot(Java) 提供，本模块经 HTTP 回源；Java 下线后该路径只会
+拿到 auth-api 的 503 桩，导致校园百事通永远校验不过「至少绑定一个可用知识库」。
+知识库现由 agent-api 自持（knowledge_base_service），故改为进程内直接调用——
+同一进程还绕开一次 HTTP 往返。函数名与返回字段保持不变，调用方无需改动。
 """
 
 from __future__ import annotations
@@ -63,25 +65,31 @@ async def _java_get(
 
 
 async def fetch_knowledge_base(token: str, tenant_id: str, knowledge_id: str) -> Optional[dict]:
-    payload = await _java_get(
-        token, tenant_id, "/ai/knowledge/base/queryById", {"id": knowledge_id},
-    )
-    return payload if isinstance(payload, dict) else None
+    """token / tenant_id 保留在签名里只为兼容调用方；本地库按 id 直查。"""
+    from app.services.knowledge import knowledge_base_service as kb
+    try:
+        return await kb.get_base(knowledge_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("读取知识库失败：%s", knowledge_id)
+        return None
 
 
 async def fetch_documents(token: str, tenant_id: str, knowledge_id: str) -> list[dict]:
-    payload = await _java_get(
-        token, tenant_id, "/ai/knowledge/document/list",
-        {"knowledgeId": knowledge_id, "pageNo": 1, "pageSize": 200},
-    )
-    return _records(payload)
+    from app.services.knowledge import knowledge_base_service as kb
+    try:
+        return await kb.list_documents(knowledge_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("读取知识库文档失败：%s", knowledge_id)
+        return []
 
 
 async def fetch_acl(token: str, tenant_id: str, knowledge_id: str) -> list[dict]:
-    payload = await _java_get(
-        token, tenant_id, "/ai/knowledge/acl/list", {"knowledgeId": knowledge_id},
-    )
-    return _records(payload)
+    from app.services.knowledge import knowledge_base_service as kb
+    try:
+        return await kb.list_acl(knowledge_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("读取知识库授权失败：%s", knowledge_id)
+        return []
 
 
 def permission_of(row: dict) -> str:

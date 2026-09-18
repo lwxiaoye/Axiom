@@ -158,7 +158,7 @@ async def _resolve_capability_names(session, caps: Dict[str, Any]) -> List[str]:
         try:
             from sqlalchemy import bindparam, text
             stmt = text(
-                "SELECT name FROM ai_knowledge_base WHERE id IN :ids"
+                "SELECT name FROM agent_knowledge_base WHERE id IN :ids"
             ).bindparams(bindparam("ids", expanding=True))
             rows = (await session.execute(stmt, {"ids": kb_ids})).scalars().all()
             names += [str(r) for r in rows if r]

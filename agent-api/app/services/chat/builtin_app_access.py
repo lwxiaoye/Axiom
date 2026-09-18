@@ -328,6 +328,23 @@ async def require_builtin_app_access(user: UserContext, preset: object) -> dict[
     )
 
 
+async def list_builtin_apps(user: UserContext) -> list[dict[str, Any]]:
+    """当前用户可见的内置智能体（广场列表）。
+
+    与 require_builtin_app_access 共用同一套可见性判定，区别只是返回全部而非单个。
+    上架记录缺失或被管理员停用的条目自然不会出现，无需额外过滤。
+    """
+    rows = await _visible_rows_for_user(user)
+    items: list[dict[str, Any]] = []
+    for preset, row in rows.items():
+        spec = _SPECS_BY_PRESET.get(preset)
+        if spec is None:
+            continue
+        items.append(_row_to_marketplace(row, spec))
+    items.sort(key=lambda item: (item.get("orderNum") or item.get("order_num") or 0, item.get("appName") or ""))
+    return items
+
+
 async def require_thread_access(
     user: UserContext,
     thread_id: object,

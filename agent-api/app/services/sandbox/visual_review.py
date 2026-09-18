@@ -17,6 +17,7 @@ from typing import Optional
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 
 from .base import ExecuteOptions
@@ -502,7 +503,7 @@ async def _ask_vision(
     if vision_base:
         base_url, api_key = vision_base, str(conf.get("visionApiKey") or "").strip()
     else:
-        base_url, api_key = settings.NEWAPI_BASE_URL.rstrip("/"), newapi_key
+        base_url, api_key = get_model_base_url().rstrip("/"), newapi_key
     if not api_key:
         return None
 

@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, String, Text, DateTime, ForeignKey, Integer, SmallInteger, UniqueConstraint, func, or_
+from sqlalchemy import BigInteger, Boolean, Column, Float, String, Text, DateTime, ForeignKey, Integer, SmallInteger, UniqueConstraint, func, or_
 from sqlalchemy.dialects.mysql import LONGBLOB, MEDIUMTEXT
 
 from app.core.database import Base
@@ -957,3 +957,147 @@ class AgentPresentationAssignment(Base):
     published_version = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ─── 原 JeecgBoot(Java) 业务库表 ────────────────────────────────────────────
+# 这些表原先由已下线的 Java 后端建立与维护，agent-api 只读不建。Java 移除后表
+# 从未被创建，导致 builtin_app_access 查询 app_info 直接抛异常，内置智能体全部
+# 返回 503「应用目录暂时不可用」——登录后落地校园百事通即白屏。
+# 现由 Python 侧自行拥有 schema（create_all 负责建表），彻底断开对 Java 的依赖。
+# 列集合取自实际查询语句，不臆造字段。
+
+class AppInfo(Base):
+    """智能体广场上架记录：名称/图标/分类/状态/归属，与 BUILTIN_APP_SPECS 按 route 关联。"""
+    __tablename__ = "app_info"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    app_name = Column(String(128), nullable=False, default="")
+    app_remark = Column(String(512), default="")
+    # external=广场应用；custom=自建。见 builtin_app_access.CATALOG_APP_TYPES
+    app_type = Column(String(32), nullable=False, default="external")
+    app_icon = Column(String(512), default="")
+    app_category = Column(String(64), default="")
+    pc_url = Column(String(255), index=True, default="")
+    h5_url = Column(String(255), index=True, default="")
+    form_options = Column(Text, nullable=True)
+    status = Column(String(8), nullable=False, default="1")  # "1" 启用
+    order_num = Column(Integer, nullable=False, default=0)
+    open_type = Column(String(32), default="route")
+    del_flag = Column(Integer, nullable=False, default=0)
+    create_by = Column(String(64), default="")
+    create_time = Column(DateTime, server_default=func.now())
+
+
+class AppRole(Base):
+    """应用可见范围——角色维度。无行表示不限角色。"""
+    __tablename__ = "app_role"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    app_id = Column(String(64), nullable=False, index=True)
+    role_id = Column(String(64), nullable=False, index=True)
+
+
+class AppDept(Base):
+    """应用可见范围——部门维度。无行表示不限部门。"""
+    __tablename__ = "app_dept"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    app_id = Column(String(64), nullable=False, index=True)
+    dept_id = Column(String(64), nullable=False, index=True)
+
+
+class SysUser(Base):
+    """用户档案：仅供展示创建者信息（_load_creator_profiles）。认证仍在 auth-api。"""
+    __tablename__ = "sys_user"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    username = Column(String(128), index=True, nullable=False)
+    realname = Column(String(128), default="")
+    avatar = Column(String(512), default="")
+
+
+class SysUserRole(Base):
+    __tablename__ = "sys_user_role"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    role_id = Column(String(64), nullable=False, index=True)
+
+
+class SysUserDepart(Base):
+    __tablename__ = "sys_user_depart"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    dep_id = Column(String(64), nullable=False, index=True)
+
+
+# ─── 知识库 ───────────────────────────────────────────────────────────────
+# 原先整块归 JeecgBoot(Java)，Java 下线后 auth-api 只留了一个统一返回 503 的桩
+# （「知识库业务服务尚未接入」），导致：知识库页面空转、校园百事通因「至少绑定一个
+# 可用知识库」永远无法发布、RAG 检索完全不可用。现由 agent-api 自持——它本来就握着
+# Qdrant 与 Embedding 配置，是唯一合理的归属方。
+
+class KnowledgeBase(Base):
+    """知识库。chunk_count 由入库流程维护，校园百事通发布校验会读它判断是否可用。"""
+    __tablename__ = "agent_knowledge_base"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(32), nullable=False, default="0", index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(String(512), default="")
+    owner_user_id = Column(String(64), nullable=False, index=True)
+    owner_username = Column(String(128), default="")
+    # 库内取值 ENABLED / DISABLED；对外序列化成 ACTIVE / DISABLED（前端契约）
+    status = Column(String(16), nullable=False, default="ENABLED")
+    chunk_count = Column(Integer, nullable=False, default=0)
+    doc_count = Column(Integer, nullable=False, default=0)
+    # 检索参数：知识库设置里可改，search_chunks 未显式传参时取这里的值
+    top_k = Column(Integer, nullable=False, default=5)
+    score_threshold = Column(Float, nullable=False, default=0.3)
+    # 入库时所用的向量模型与维度：换模型后旧集合失效，据此判断是否需要重建
+    embedding_model = Column(String(128), default="")
+    embedding_dimension = Column(Integer, nullable=True)
+    create_time = Column(DateTime, server_default=func.now())
+    update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class KnowledgeDocument(Base):
+    """知识库中的一篇文档。切片本身在 Qdrant，这里只存元信息与处理状态。"""
+    __tablename__ = "agent_knowledge_document"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    knowledge_id = Column(String(64), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    content_type = Column(String(64), default="text/plain")
+    size_bytes = Column(Integer, nullable=False, default=0)
+    # 库内取值 PENDING / PROCESSING / COMPLETED / FAILED。对外（含校验里的
+    # DOC_WARNING_STATUSES）用的是另一套更细的阶段枚举，在
+    # knowledge_base_service._serialize_document 处翻译。
+    status = Column(String(16), nullable=False, default="PENDING")
+    chunk_count = Column(Integer, nullable=False, default=0)
+    error_message = Column(String(512), default="")
+    create_time = Column(DateTime, server_default=func.now())
+    update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class KnowledgeAcl(Base):
+    """知识库授权。无行表示仅所有者可见；permission 取值对齐 RETRIEVAL_PERMISSIONS。"""
+    __tablename__ = "agent_knowledge_acl"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    knowledge_id = Column(String(64), nullable=False, index=True)
+    subject_type = Column(String(16), nullable=False, default="user")  # user / role / dept
+    subject_id = Column(String(64), nullable=False, index=True)
+    # VIEWER / EDITOR / OWNER —— 对齐 config_service.RETRIEVAL_PERMISSIONS
+    permission = Column(String(16), nullable=False, default="VIEWER")
+    create_time = Column(DateTime, server_default=func.now())

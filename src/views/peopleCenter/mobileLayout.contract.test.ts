@@ -17,18 +17,17 @@ const loginPage = readFileSync(resolve(root, '../system/loginmini/MiniLogin.vue'
 const indexHtml = readFileSync(resolve(root, '../../../index.html'), 'utf8');
 
 describe('手机端登录与主对话布局契约', () => {
-  it('登录页为手机和 iPad 分别提供通栏与双栏布局', () => {
+  it('登录页为极简单栏卡片，且保证手机端可滚动、输入框不触发 iOS 缩放', () => {
+    // 登录页在 2026-09 改为极简单栏卡片（登录/注册双模式），
+    // 断言随之对准新实现，保留的是同一组移动端可用性意图。
     expect(loginPage).toContain('overflow-y: auto;');
     expect(loginPage).toContain('min-height: 100dvh;');
-    expect(loginPage).toContain('@media (min-width: 720px) and (max-width: 1024px)');
-    expect(loginPage).toContain('grid-template-columns: minmax(230px, 0.72fr) minmax(420px, 1.28fr);');
-    expect(loginPage).toContain('@media (max-width: 719px)');
+    expect(loginPage).toContain('@media (max-width: 480px)');
     expect(loginPage).toContain('font-size: 16px;');
     expect(loginPage).toContain('aria-label="刷新图形验证码"');
-    expect(loginPage).toContain("window.matchMedia('(max-width: 1024px), (prefers-reduced-motion: reduce)')");
-    expect(loginPage).toContain(':disabled="loginLoading"');
-    expect(loginPage).toContain('.body[data-theme="A"] .field-input');
-    expect(loginPage).toContain('padding-left: 16px;');
+    expect(loginPage).toContain(':disabled="loading"');
+    // 单栏卡片不应重新引入横向分栏
+    expect(loginPage).not.toContain('grid-template-columns');
   });
 
   it('主对话统一处理顶底安全区，空对话与已有对话共用固定输入区', () => {
@@ -56,7 +55,7 @@ describe('手机端登录与主对话布局契约', () => {
     expect(centerShell).toContain('class="compact-menu-trigger"');
     expect(centerShell).toContain('class="compact-nav-shortcuts"');
     expect(centerShell).toContain("label: '我的内容'");
-    expect(compactGroupsSource).toContain("item.key === 'files'");
+    expect(compactGroupsSource).toContain("['files', 'models'].includes(item.key)");
     expect(compactGroupsSource).not.toContain("'myAgent'");
     expect(compactGroupsSource).not.toContain("'knowledge'");
     expect(centerStyles).toContain('@media (max-width: 1024px)');
@@ -113,8 +112,8 @@ describe('手机端登录与主对话布局契约', () => {
 
   it('启用全屏安全区并使用 AXIOM Agent 小球作为标签页图标', () => {
     expect(indexHtml).toContain('viewport-fit=cover');
-    expect(indexHtml).toContain('type="image/png"');
-    expect(indexHtml).toContain('href="/favicon.png?v=20260902"');
+    expect(indexHtml).toContain('type="image/svg+xml"');
+    expect(indexHtml).toContain('href="/axiom-mark.svg"');
   });
 
   it('我的文件全端都有缩略图/列表切换，不再放「显示全部文件」按钮', () => {
@@ -172,6 +171,8 @@ describe('手机端登录与主对话布局契约', () => {
     expect(centerStyles).toContain('animation: background-task-enter-compact 0.22s');
     expect(centerStyles).toContain('.workspace:has(> .background-chat-task) .agent-market');
     expect(centerStyles).toContain('.workspace:has(> .background-chat-task) .skill-square-section');
+    expect(centerStyles).toContain('.workspace:has(> .background-chat-task) .model-page');
+    expect(centerStyles).toContain('.workspace:has(> .background-chat-task) .my-knowledge-section');
     expect(centerStyles).toMatch(/\.toast-error,[\s\S]*?\.toast-info\s*\{[\s\S]*?transform:\s*none;/);
   });
 

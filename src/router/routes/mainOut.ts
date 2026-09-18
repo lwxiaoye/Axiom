@@ -30,6 +30,13 @@ export const mainOutRoutes: AppRouteModule[] = [
     meta: { title: '面试助手' },
   },
   {
+    // 管理配置：独立页面，由右上角菜单新开标签页打开，不套 center 外壳
+    path: '/admin',
+    name: 'AdminConsole',
+    component: () => import('/@/views/peopleCenter/pages/AdminConsolePage.vue'),
+    meta: { title: '管理配置' },
+  },
+  {
     // WS1：用户侧 Agent 聚合服务改为路由多页（父路由外壳 + 板块子路由）
     path: '/center',
     name: 'Center',
@@ -39,6 +46,12 @@ export const mainOutRoutes: AppRouteModule[] = [
       title: 'AI聚合服务',
     },
     children: [
+      {
+        path: 'models',
+        name: 'CenterModels',
+        component: () => import('/@/views/peopleCenter/pages/ModelConfigPage.vue'),
+        meta: { title: '模型配置' },
+      },
       {
         path: 'chat',
         name: 'CenterChat',

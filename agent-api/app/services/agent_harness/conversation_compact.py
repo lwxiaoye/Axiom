@@ -20,6 +20,7 @@ import logging
 import time
 from typing import Any, Iterable, Optional
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.agent_harness import model_usage_audit
 from app.services.agent_harness.responses_protocol import (
@@ -338,7 +339,7 @@ async def _generate_compaction_segment(
     import httpx
 
     working = _fit_compaction_input(messages, model=model)
-    base_url = settings.NEWAPI_BASE_URL.rstrip("/")
+    base_url = get_model_base_url().rstrip("/")
     last_error: Optional[Exception] = None
     failure_key = _compaction_failure_key(
         messages,

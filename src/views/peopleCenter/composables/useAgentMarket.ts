@@ -1,6 +1,6 @@
 import { computed, ref, watch, type Ref } from 'vue';
 import { myAppList } from '../../flow/app/AppInfo.api';
-import { getMarketplaceModelOptions, type AgentItem } from '../agentApi';
+import { getMarketplaceModelOptions, listBuiltinApps, type AgentItem } from '../agentApi';
 import { resolveAppJumpUrl } from '/@/utils/jump';
 import { openAgentRunWindow } from '../../workflow/shared/runtimeRoute';
 import { decorateAppsWithModelAvailability } from './agentModelRequirements';
@@ -14,7 +14,7 @@ import {
   type MarketplaceApp,
 } from '../agentMarketCapabilities';
 
-export type CenterSectionKey = 'chat' | 'agent' | 'myAgent' | 'knowledge' | 'skill' | 'files';
+export type CenterSectionKey = 'chat' | 'agent' | 'myAgent' | 'knowledge' | 'skill' | 'files' | 'models';
 
 type UseAgentMarketOptions = {
   activeSection: { value: CenterSectionKey };
@@ -24,9 +24,18 @@ type UseAgentMarketOptions = {
   liveWorkflowReady?: Ref<boolean>;
 };
 
+function catalogHttpStatus(error: unknown): number {
+  if (!error || typeof error !== 'object') return 0;
+  const payload = error as { status?: unknown; response?: { status?: unknown } };
+  const status = payload.response?.status ?? payload.status;
+  return typeof status === 'number' ? status : Number(status) || 0;
+}
+
 export function useAgentMarket(options: UseAgentMarketOptions) {
   const userStore = useUserStore();
   const rawAppList = ref<MarketplaceApp[]>([]);
+  let catalogUnavailable = false;
+  let catalogLoaded = false;
   const appList = computed<MarketplaceApp[]>(() => {
     return excludeOwnedDeletedRuntimeApps(
       rawAppList.value,
@@ -77,15 +86,38 @@ export function useAgentMarket(options: UseAgentMarketOptions) {
   }
 
   async function reloadApps() {
+    if (appLoading.value) return;
+    // 主对话发送/切会话会在空目录时重试。目录一旦拉过（含 404 空结果）就不要再打断对话。
+    if (catalogLoaded && options.activeSection.value !== 'agent') return;
     appLoading.value = true;
     try {
-      const [appResult, modelResult] = await Promise.allSettled([
+      // 内置智能体的上架记录归 agent-api（app_info），用户自建应用仍走 myAppList。
+      // 两路独立取，任一失败不影响另一路。
+      const [appResult, modelResult, builtinResult] = await Promise.allSettled([
         myAppList({ column: 'createTime', order: 'desc' }),
         getMarketplaceModelOptions(),
+        listBuiltinApps(),
       ]);
-      if (appResult.status === 'rejected') throw appResult.reason;
+      const builtinApps: MarketplaceApp[] =
+        builtinResult.status === 'fulfilled' ? (builtinResult.value as MarketplaceApp[]) : [];
+      if (builtinResult.status === 'rejected') {
+        console.warn('load builtin assistants failed', builtinResult.reason);
+      }
+      if (appResult.status === 'rejected') {
+        // 自建应用目录挂了不该连带内置智能体一起消失
+        rawAppList.value = builtinApps;
+        const status = catalogHttpStatus(appResult.reason);
+        catalogUnavailable = status === 404 || status === 501 || status === 503;
+        if (options.activeSection.value === 'agent' && !catalogUnavailable) {
+          options.showError('智能体广场暂时无法加载，请稍后重试');
+        } else if (!catalogUnavailable) {
+          console.warn('load marketplace catalog failed', appResult.reason);
+        }
+        return;
+      }
 
-      const apps = normalizeAppListResponse(appResult.value);
+      catalogUnavailable = false;
+      const apps = [...builtinApps, ...normalizeAppListResponse(appResult.value)];
       // 模型目录失败时不做本地预警；运行端仍会以当前授权做最终校验。
       const availableModels = modelResult.status === 'fulfilled'
         ? modelResult.value.filter((model) => model.available !== false).map((model) => model.value)
@@ -99,8 +131,14 @@ export function useAgentMarket(options: UseAgentMarketOptions) {
         selectedCategory.value = 'all';
       }
     } catch (error) {
-      options.showError(error);
+      rawAppList.value = [];
+      if (options.activeSection.value === 'agent') {
+        options.showError('智能体广场暂时无法加载，请稍后重试');
+      } else {
+        console.warn('load marketplace catalog failed', error);
+      }
     } finally {
+      catalogLoaded = true;
       appLoading.value = false;
     }
   }

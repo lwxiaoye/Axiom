@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import ChatMessage, ChatThread, live_chat_message_clause
@@ -1960,7 +1961,7 @@ async def generate_title(
         title_model = settings.TITLE_MODEL or model
         llm = ChatOpenAI(
             model=title_model,
-            base_url=settings.NEWAPI_BASE_URL,
+            base_url=get_model_base_url(),
             api_key=api_key,
             streaming=False,
             max_tokens=32,

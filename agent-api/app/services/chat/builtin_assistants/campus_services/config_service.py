@@ -382,7 +382,7 @@ async def _model_available(session: AsyncSession, model_id: str) -> bool:
 async def _kb_tenant(session: AsyncSession, knowledge_id: str) -> Optional[str]:
     try:
         row = (await session.execute(
-            text("select tenant_id from ai_knowledge_base where id = :id limit 1"),
+            text("select tenant_id from agent_knowledge_base where id = :id limit 1"),
             {"id": knowledge_id},
         )).first()
     except Exception:  # noqa: BLE001

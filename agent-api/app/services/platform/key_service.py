@@ -10,12 +10,19 @@ logger = logging.getLogger(__name__)
 
 
 class KeyService:
-    """按 user_id 从 new_api_user_key 表读取该用户在 new-api 网关的专属 key。
+    """优先使用账号保存的模型连接，否则读取 new-api 网关专属 key。
 
     该表由 Java 侧在用户注册时写入，agent-api 只读不写。
     """
 
     async def get_user_key(self, user_id: str) -> Optional[str]:
+        from app.core.model_endpoint import bind_model_connection
+        from app.services.platform.model_connection import runtime
+        bind_model_connection(None)
+        connection = await runtime(user_id)
+        if connection:
+            bind_model_connection(connection)
+            return connection["api_key"]
         async with async_session() as session:
             row = (
                 await session.execute(

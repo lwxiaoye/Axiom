@@ -15,6 +15,9 @@ x-agent-environment: &agent-environment
   QDRANT_URL: http://qdrant:6333
   JAVA_INTERNAL_BASE: http://auth-api:9090
   NEWAPI_BASE_URL: ${AXIOM_MODEL_BASE_URL:-http://host.docker.internal:3001/v1}
+  # 空表时用于初始化 ai_chat_model（模型目录）。校园百事通等处的模型下拉读的是这张表，
+  # 不设则目录为空、管理员无法为智能体选择模型。逗号分隔，第一个为默认。
+  INITIAL_CHAT_MODELS: ${AXIOM_INITIAL_CHAT_MODELS:-}
   AUTH_TOKEN_CACHE_TTL_SECONDS: "0"
   RUNTIME_REQUIRED: "true"
   MIGRATE_ON_STARTUP: "true"

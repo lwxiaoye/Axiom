@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ async def route(
         f"用户当前消息：{message[:1000]}\n\n可用智能体：\n{_candidate_block(candidates)}\n\n"
         "请结合最近对话判定【当前消息】是否新业务请求，只输出 JSON。"
     )
-    base_url = settings.NEWAPI_BASE_URL.rstrip("/")
+    base_url = get_model_base_url().rstrip("/")
     wire_payload = {
         "model": model,
         "messages": [

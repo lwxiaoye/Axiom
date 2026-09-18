@@ -8,6 +8,7 @@ export const centerSectionRouteName: Record<CenterSectionKey, string> = {
   knowledge: 'CenterKnowledge',
   skill: 'CenterSkill',
   files: 'CenterFiles',
+  models: 'CenterModels',
 };
 
 /** 子路由 name → 板块 */
@@ -26,6 +27,7 @@ export const centerSectionPath: Record<CenterSectionKey, string> = {
   knowledge: '/center/knowledge',
   skill: '/center/skill',
   files: '/center/files',
+  models: '/center/models',
 };
 
 /** 旧 /centerNew?section=xxx 兼容映射 */

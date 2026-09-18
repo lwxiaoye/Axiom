@@ -299,6 +299,23 @@ async def current_user(
     return user
 
 
+async def user_from_token(token: str) -> Optional[UserContext]:
+    """用访问令牌换用户上下文（带缓存）。供 FastAPI 依赖之外的场景使用，
+    例如对话工具里要按当前用户过滤知识库权限。令牌无效时返回 None。"""
+    cleaned = (token or "").strip()
+    if not cleaned:
+        return None
+    cached = _get_cached(cleaned)
+    if cached:
+        return cached
+    try:
+        user = await _verify_token_with_java(cleaned)
+    except Exception:  # noqa: BLE001 - 含 HTTPException(401)
+        return None
+    _cache_verified(cleaned, user)
+    return user
+
+
 def is_admin(user: UserContext) -> bool:
     return user.username == "admin" or "admin" in user.role_ids
 

@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import math
 import re
 import time
@@ -19,12 +20,17 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.runtime_db import runtime_session
 from .governance import IDENTITY_INSTRUCTIONS, grounded_quote, memory_identity, sensitive_reason
 
 logger = logging.getLogger(__name__)
 
+# 记忆抽取/摘要都是后台任务，延迟不影响用户感知，但带推理的模型处理上千字提示词
+# 加数千字证据时 30s 明显不够（实测 grok-4.6 稳定 ReadTimeout，每轮白耗一次调用）。
+# 放宽到 120s；真正卡死仍由外层任务生命周期收敛。
+MEMORY_MODEL_TIMEOUT = float(os.environ.get("MEMORY_MODEL_TIMEOUT", "120"))
 # 记忆文本 embedding 的内容级 LRU 缓存（按内容哈希）：稳态下每次召回只需为「当前问题」算 1 次，
 # 候选记忆向量命中缓存。进程级、重启回暖；embedding 不可用时按关键词相关性召回。
 _MEM_VEC_CACHE: "OrderedDict[str, List[float]]" = OrderedDict()
@@ -1127,9 +1133,11 @@ async def extract_and_store(
         response_payload: Dict[str, Any] = {}
         resp = None
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            _endpoint = f"{get_model_base_url().rstrip('/')}/chat/completions"
+            logger.info("memory_extract 请求 endpoint=%s model=%s", _endpoint, model)
+            async with httpx.AsyncClient(timeout=MEMORY_MODEL_TIMEOUT) as client:
                 resp = await client.post(
-                    f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                    _endpoint,
                     headers={"Authorization": f"Bearer {api_key}"},
                     json=wire_payload,
                 )
@@ -1264,7 +1272,12 @@ async def extract_and_store(
             except Exception:  # noqa: BLE001
                 pass
     except Exception as e:  # noqa: BLE001
-        logger.info("记忆抽取失败（不影响对话）: %s", e)
+        # TimeoutError 一类异常的 str(e) 是空串，只打 %s 等于没有信息——排查时
+        # 完全看不出是超时、连错地址还是鉴权失败。带上类型与目标端点。
+        logger.info(
+            "记忆抽取失败（不影响对话）: %s: %s [endpoint=%s]",
+            type(e).__name__, e, get_model_base_url(),
+        )
 
 
 async def generate_summary(
@@ -1312,9 +1325,9 @@ async def generate_summary(
     response_payload: Dict[str, Any] = {}
     resp = None
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=MEMORY_MODEL_TIMEOUT) as client:
             resp = await client.post(
-                f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                f"{get_model_base_url().rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=wire_payload,
             )
@@ -1380,9 +1393,9 @@ async def update_from_text(user_id: str, text: str, *, model: str, api_key: str)
     )
     items: List[Dict[str, Any]] = []
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=MEMORY_MODEL_TIMEOUT) as client:
             resp = await client.post(
-                f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                f"{get_model_base_url().rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={"model": model, "stream": False, "messages": [
                     {"role": "system", "content": prompt},

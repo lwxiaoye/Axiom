@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.agents.agent_service import agent_service
 from app.services.platform.text_protocol_guard import StreamingProtocolScrubber
@@ -152,7 +153,7 @@ class FunctionRoundClient:
 
         try:
             stream = _iter_model_stream_with_reconnect(
-                client=client, url=f"{settings.NEWAPI_BASE_URL.rstrip('/')}/{'responses' if responses else 'chat/completions'}",
+                client=client, url=f"{get_model_base_url().rstrip('/')}/{'responses' if responses else 'chat/completions'}",
                 payload=payload, headers={"Authorization": f"Bearer {self.api_key}"},
                 use_responses_transport=responses, responses_fallback_allowed=self.fallback_allowed,
                 before_attempt=before_attempt, after_attempt=after_attempt,

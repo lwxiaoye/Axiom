@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.messages.utils import convert_to_messages
 from sqlalchemy import func
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.models import ChatMessage
 from app.services.memory import context_service, memory_service
@@ -614,7 +615,7 @@ async def stream_llm_round(env):
     def _new_llm() -> ChatOpenAI:
         llm_options: dict[str, Any] = {
             "model": resolved_model,
-            "base_url": settings.NEWAPI_BASE_URL,
+            "base_url": get_model_base_url(),
             "api_key": newapi_key,
             "streaming": True,
             "stream_usage": True,

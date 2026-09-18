@@ -6,17 +6,13 @@ kb_search_query(短问指代折叠)、build_kb_pre_context(前置强制检索,�
 search_knowledge 工具供模型多轮按需补检。harness_orchestrator 经 main_agent re-export 调用。
 """
 import asyncio
-import hashlib
-import hmac
 import logging
 import re
-import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
-import httpx
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import async_session
@@ -24,87 +20,6 @@ from app.core.database import async_session
 from .base import MainTool, ToolSoftError, ToolValue, _query_param
 
 logger = logging.getLogger(__name__)
-
-
-def _internal_retrieval_canonical(timestamp: str, user_id: str, payload: Dict[str, Any]) -> bytes:
-    """Match Java's length-prefixed internal-retrieval HMAC payload exactly."""
-    values = [
-        timestamp,
-        user_id,
-        payload.get("agentId"),
-        payload.get("query"),
-        payload.get("topK"),
-        payload.get("scoreThreshold"),
-        payload.get("semanticWeight"),
-        payload.get("keywordWeight"),
-        payload.get("retrievalMode"),
-        payload.get("rerankEnabled"),
-        payload.get("rerankTopN"),
-        str(len(payload.get("knowledgeIds") or [])),
-        *(payload.get("knowledgeIds") or []),
-    ]
-    parts: list[bytes] = []
-    for value in values:
-        if value is None:
-            text_value = ""
-        elif isinstance(value, bool):
-            text_value = "true" if value else "false"
-        else:
-            text_value = str(value)
-        encoded = text_value.encode("utf-8")
-        parts.append(f"{len(encoded)}:".encode("utf-8") + encoded)
-    return b"".join(parts)
-
-
-def _internal_retrieval_headers(user_id: str, payload: Dict[str, Any]) -> Dict[str, str]:
-    secret = str(settings.INTERNAL_SYNC_SECRET or "")
-    if not secret or secret in {"CHANGE_ME", "change-me"}:
-        raise ValueError("知识库内部检索密钥未配置")
-    timestamp = str(int(time.time()))
-    signature = hmac.new(
-        secret.encode("utf-8"),
-        _internal_retrieval_canonical(timestamp, user_id, payload),
-        hashlib.sha256,
-    ).hexdigest()
-    return {
-        "X-Internal-Timestamp": timestamp,
-        "X-Internal-User-Id": user_id,
-        "X-Internal-Signature": signature,
-    }
-
-
-def _analytics_retrieval_headers(
-    user_id: str,
-    payload: Dict[str, Any],
-    *,
-    execution_id: str,
-    turn_id: str,
-    source: str,
-) -> Dict[str, str]:
-    """Build Java-verifiable analytics attribution headers without exposing query content."""
-    secret = str(settings.INTERNAL_SYNC_SECRET or "")
-    if not secret or secret in {"CHANGE_ME", "change-me"}:
-        raise ValueError("知识库内部检索密钥未配置")
-    timestamp = str(int(time.time()))
-    retrieval_signature = hmac.new(
-        secret.encode("utf-8"),
-        _internal_retrieval_canonical(timestamp, user_id, payload),
-        hashlib.sha256,
-    ).hexdigest()
-    values = [timestamp, user_id, execution_id, turn_id, source, retrieval_signature]
-    canonical = b"".join(
-        f"{len(value.encode('utf-8'))}:".encode("utf-8") + value.encode("utf-8")
-        for value in values
-    )
-    signature = hmac.new(secret.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
-    return {
-        "X-Knowledge-Analytics-Timestamp": timestamp,
-        "X-Knowledge-Analytics-User-Id": user_id,
-        "X-Knowledge-Analytics-Execution-Id": execution_id,
-        "X-Knowledge-Analytics-Turn-Id": turn_id,
-        "X-Knowledge-Analytics-Source": source,
-        "X-Knowledge-Analytics-Signature": signature,
-    }
 
 
 def _strip_markdown_images(value: Any) -> str:
@@ -246,35 +161,12 @@ async def resolve_kb_tenant(knowledge_ids: List[str]) -> Optional[str]:
     try:
         async with async_session() as s:
             row = (await s.execute(
-                text("select tenant_id from ai_knowledge_base where id = :id limit 1"),
+                text("select tenant_id from agent_knowledge_base where id = :id limit 1"),
                 {"id": str(knowledge_ids[0])},
             )).first()
             return str(row[0]) if row and row[0] is not None else None
     except Exception:  # noqa: BLE001
         return None
-
-
-async def _group_knowledge_ids_by_tenant(knowledge_ids: List[str]) -> Dict[str, List[str]]:
-    """按知识库自身租户拆分检索请求。
-
-    Java 检索接口一次只接收一个 X-Tenant-Id；把跨租户 id 混在同一请求里会让除第一个
-    租户以外的库被静默过滤。查库失败时返回空，由调用方保留原有单请求降级行为。
-    """
-    ids = [str(k) for k in knowledge_ids if k]
-    if not ids:
-        return {}
-    try:
-        async with async_session() as s:
-            stmt = text("select id, tenant_id from ai_knowledge_base where id in :ids") \
-                .bindparams(bindparam("ids", expanding=True))
-            rows = (await s.execute(stmt, {"ids": ids})).all()
-    except Exception:  # noqa: BLE001
-        return {}
-    groups: Dict[str, List[str]] = {}
-    for kid, tenant in rows:
-        key = str(tenant) if tenant is not None else ""
-        groups.setdefault(key, []).append(str(kid))
-    return groups
 
 
 async def retrieve_knowledge(
@@ -302,128 +194,71 @@ async def retrieve_knowledge(
 
     显式区分三种结果，不再把失败吞成「没找到」（这是此前 RAG「用不了却无报错」的根因）：
     返回 {"ok": bool, "chunks": [{content, source, score}], "error": str|None}。
-    - HTTP 非 200 / 连接异常 / Java success:false → ok=False + error（调用方决定是否透出）。
+    - 无权访问 / 向量模型未配置 / 检索异常 → ok=False + error（调用方决定是否透出）。
     - ok=True 且 chunks 为空 → 真·无命中。
     命中片段按内容前缀去重（多查询/重叠切片场景），并回填 citation_sink。
+
+    retrieval_mode / semantic_weight / keyword_weight / rerank_enabled 是工作流
+    知识检索节点传下来的混合检索配置。进程内检索目前只做向量召回，收到非默认
+    配置时记一条日志说明未生效，而不是假装已按配置执行。
     """
     q = (query or "").strip()
     if not q:
         return {"ok": False, "chunks": [], "error": "query 为空"}
     if not knowledge_ids:
         return {"ok": False, "chunks": [], "error": "未选择知识库"}
-    execution_id = str(execution_id or uuid.uuid4().hex)
-    tenant_groups = await _group_knowledge_ids_by_tenant(knowledge_ids)
-    if len(tenant_groups) > 1:
-        # 同一用户显式选择多个租户的共享库时，按租户分别请求 Java 再合并；不能把首库
-        # tenant 当作所有库的 tenant。子调用不直接写 citation，避免重复来源。
-        grouped = await asyncio.gather(*[
-            retrieve_knowledge(
-                token, ids, q, top_k=top_k, threshold=threshold,
-                tenant_id=tenant or None, agent_id=agent_id, agent_user_id=agent_user_id, citation_sink=None,
-                telemetry_user_id=telemetry_user_id, turn_id=turn_id, source=source,
-                execution_id=f"{execution_id}-{index}", retrieval_mode=retrieval_mode,
-                semantic_weight=semantic_weight, keyword_weight=keyword_weight, rerank_enabled=rerank_enabled,
-                image_sink=image_sink,
-            )
-            for index, (tenant, ids) in enumerate(tenant_groups.items(), 1)
-        ])
-        merged: Dict[str, dict] = {}
-        for result in grouped:
-            for chunk in result.get("chunks") or []:
-                key = str(chunk.get("textContent") or chunk.get("content") or "")[:120]
-                if key and key not in merged:
-                    merged[key] = chunk
-        chunks = sorted(merged.values(), key=lambda item: item.get("score") or 0, reverse=True)
-        chunks = chunks[: int(top_k or settings.KNOWLEDGE_TOP_K)]
-        if citation_sink is not None:
-            for chunk in chunks:
-                citation_sink.append({
-                    "type": "knowledge",
-                    "title": chunk.get("source") or "知识库片段",
-                    "source": chunk.get("source") or "",
-                    "snippet": _strip_markdown_images(chunk.get("textContent") or chunk.get("content"))[:300],
-                })
-        failures = [str(result.get("error") or "") for result in grouped if not result.get("ok")]
-        return {
-            "ok": any(bool(result.get("ok")) for result in grouped),
-            "chunks": chunks,
-            "error": "；".join(error for error in failures if error) or None,
-        }
-    # 租户兜底：调用方没给就从知识库自身 tenant_id 解析（Java 可访问性校验必需）——
-    # 覆盖工作流子智能体等未显式传租户的路径。
-    if not tenant_id:
-        tenant_id = await resolve_kb_tenant(knowledge_ids)
-    agent_bound = bool(agent_id)
-    if agent_bound and not agent_user_id:
-        return {"ok": False, "chunks": [], "error": "智能体检索缺少当前用户标识"}
-    endpoint = "internal" if agent_bound else "test"
-    url = f"{settings.JAVA_INTERNAL_BASE}/ai/knowledge/retrieval/{endpoint}"
+    # 检索改为进程内直连（原先 POST 到 Java 的 /ai/knowledge/retrieval/*）。
+    # Java 下线后 auth-api 只剩一个统一返回 503 的桩：知识库页面能检索、对话里
+    # 却恒报「知识库检索暂不可用」——同一套知识库两条链路，只有这条断着。
+    from app.core import auth as core_auth
+    from app.services.knowledge import knowledge_base_service as kb
+
+    # 可访问性校验原本在 Java 侧。这里必须自己做：直接把调用方传来的 id 丢给
+    # 向量库，等于任何人都能检索别人的知识库。
+    acting_user_id = str(agent_user_id or telemetry_user_id or "").strip()
+    is_admin_user = False
+    if not acting_user_id:
+        user = await core_auth.user_from_token(token)
+        if user is None:
+            return {"ok": False, "chunks": [], "error": "检索身份校验失败，请重新登录"}
+        acting_user_id = str(user.user_id)
+        is_admin_user = core_auth.is_admin(user)
+
+    allowed_ids = await kb.accessible_ids(
+        knowledge_ids, user_id=acting_user_id, is_admin=is_admin_user,
+    )
+    if not allowed_ids:
+        return {"ok": False, "chunks": [], "error": "没有可检索的知识库（无权访问或已停用）"}
+
+    if (retrieval_mode and str(retrieval_mode).upper() not in {"", "VECTOR", "SEMANTIC"}) \
+            or rerank_enabled or keyword_weight:
+        # 说清楚而不是默默降级：工作流节点上勾了混合检索/重排，这里只做了向量召回。
+        logger.info(
+            "知识检索收到混合检索配置但当前仅支持向量召回：mode=%s rerank=%s keywordWeight=%s",
+            retrieval_mode, rerank_enabled, keyword_weight,
+        )
+
     k = int(top_k or settings.KNOWLEDGE_TOP_K)
     th = settings.KNOWLEDGE_THRESHOLD if threshold is None else threshold
-    payload = {
-        "knowledgeIds": [str(knowledge_id) for knowledge_id in knowledge_ids],
-        "query": q[:512],
-        "topK": k,
-        "scoreThreshold": th,
-    }
-    if agent_bound:
-        payload["agentId"] = str(agent_id)
-    if retrieval_mode:
-        payload["retrievalMode"] = str(retrieval_mode)
-    if semantic_weight is not None:
-        payload["semanticWeight"] = semantic_weight
-    if keyword_weight is not None:
-        payload["keywordWeight"] = keyword_weight
-    if rerank_enabled is not None:
-        payload["rerankEnabled"] = rerank_enabled
-    # Java 检索的可访问性校验依赖租户上下文：只带 X-Access-Token 会被判「无可访问知识库」→ 空。
-    # 前端 defHttp 自动带 X-Tenant-Id，agent-api 必须补上（否则 RAG 恒空——实测根因）。
-    headers = {"X-Access-Token": token or ""}
-    if tenant_id:
-        headers["X-Tenant-Id"] = str(tenant_id)
-    if agent_bound:
-        try:
-            headers.update(_internal_retrieval_headers(str(agent_user_id), payload))
-        except ValueError as exc:
-            return {"ok": False, "chunks": [], "error": str(exc)}
-    attribution_user_id = str(telemetry_user_id or agent_user_id or "").strip()
-    if attribution_user_id and turn_id and source in {"CHAT", "AGENT", "WORKFLOW"}:
-        try:
-            headers.update(_analytics_retrieval_headers(
-                attribution_user_id, payload, execution_id=execution_id,
-                turn_id=str(turn_id), source=str(source),
-            ))
-        except ValueError as exc:
-            logger.warning("知识库运营统计来源未签名: %s", exc)
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("知识库检索连接异常: %s", e)
-        return {"ok": False, "chunks": [], "error": f"检索服务连接失败: {e}"}
-    if resp.status_code != 200:
-        body = (resp.text or "")[:200]
-        logger.warning("知识库检索 HTTP %s: %s", resp.status_code, body)
-        return {"ok": False, "chunks": [], "error": f"检索服务返回 HTTP {resp.status_code}"}
-    try:
-        data = resp.json()
-    except Exception:  # noqa: BLE001
-        return {"ok": False, "chunks": [], "error": "检索响应非 JSON"}
-    if isinstance(data, dict) and data.get("success") is False:
-        # Java 业务失败（如 Token 非法、参数错误）——过去被当成 result=null → 空 chunks → 假装没找到
-        return {"ok": False, "chunks": [], "error": str(data.get("message") or "检索失败")}
-    result = data.get("result") if isinstance(data, dict) else None
-    result = result if isinstance(result, dict) else (data if isinstance(data, dict) else {})
-    # Java /ai/knowledge/retrieval/test 返回 RetrievalResponse{query,latencyMs,items:[...]}——
-    # 命中片段在 `items`（前端 knowledge.types.ts 契约）。此前只读 chunks/records/list，
-    # 字段名不匹配 → 即使检索有结果也被解析成空（RAG「用不了」的直接元凶之一）。items 优先。
-    raw = (
-        result.get("items")
-        or result.get("chunks")
-        or result.get("records")
-        or result.get("list")
-        or []
-    )
+        hits = await kb.search_chunks(
+            knowledge_ids=allowed_ids, query=q[:512], top_k=k, score_threshold=th,
+        )
+    except ValueError as exc:
+        # 向量模型未配置等可读原因，原样透出而不是假装没找到
+        return {"ok": False, "chunks": [], "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("知识库检索失败: %s", exc, exc_info=True)
+        return {"ok": False, "chunks": [], "error": f"检索失败: {exc}"}
+
+    # 归一到下面那段解析逻辑认得的字段名，复用它的去重、配图与引用回填。
+    raw = [{
+        "content": hit.get("content"),
+        "documentName": hit.get("source"),
+        "score": hit.get("score"),
+        "knowledgeId": hit.get("knowledgeId"),
+        "documentId": hit.get("documentId"),
+    } for hit in hits]
     chunks: List[dict] = []
     seen: set = set()
     for c in raw:

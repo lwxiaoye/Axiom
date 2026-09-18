@@ -205,7 +205,7 @@ async def _knowledge_embedding_models_for_workflow(session, workflow_json: Any) 
     if not knowledge_ids:
         return []
 
-    columns = await _table_columns(session, "ai_knowledge_base")
+    columns = await _table_columns(session, "agent_knowledge_base")
     if "id" not in columns or "embedding_model" not in columns:
         return []
 
@@ -217,7 +217,7 @@ async def _knowledge_embedding_models_for_workflow(session, workflow_json: Any) 
     rows = (
         await session.execute(
             text(
-                "SELECT id, embedding_model FROM ai_knowledge_base "
+                "SELECT id, embedding_model FROM agent_knowledge_base "
                 f"WHERE {' AND '.join(where_parts)}"
             ),
             params,

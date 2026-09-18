@@ -100,7 +100,7 @@
         </button>
         <button v-if="hasPermission('admin:manager')" class="menu-item" type="button" role="menuitem" @click="goToAdmin">
           <SettingOutlined />
-          <span>后台管理</span>
+          <span>管理配置</span>
         </button>
         <button class="menu-item" type="button" role="menuitem" @click="handleLogout">
           <LogoutOutlined />
@@ -628,6 +628,7 @@ const navItems = [
   { key: 'knowledge' as const, label: '我的知识库', icon: ReadOutlined },
   { key: 'skill' as const, label: 'Skill广场', icon: ToolOutlined },
   { key: 'files' as const, label: '我的文件', icon: FolderOutlined },
+  { key: 'models' as const, label: '模型配置', icon: SettingOutlined },
 ];
 
 type CenterNavItem = (typeof navItems)[number];
@@ -642,7 +643,7 @@ const compactNavGroups = [
     key: 'library',
     label: '我的内容',
     // 手机/iPad 只保留文件入口；智能体与知识库仍保留在桌面端，不删除路由或权限。
-    items: navItems.filter((item) => item.key === 'files'),
+    items: navItems.filter((item) => ['files', 'models'].includes(item.key)),
   },
 ];
 const visibleNavGroups = computed(() => (isCompactShell.value ? compactNavGroups : desktopNavGroups));
@@ -1019,7 +1020,9 @@ function handleProfileSaved() {
 
 function goToAdmin() {
   userMenuOpen.value = false;
-  window.open('/dashboard/workbench', '_blank');
+  // 同标签页跳转而非 window.open：新开标签页没有历史，管理页里的「返回」
+  // 就无处可回，用户只能手动关标签页。
+  void router.push('/admin');
 }
 
 function handleLogout() {

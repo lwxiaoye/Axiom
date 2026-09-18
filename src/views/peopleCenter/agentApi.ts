@@ -233,6 +233,13 @@ function normalizeBuiltinApp(item: any): BuiltinAppItem | null {
   };
 }
 
+/** 智能体广场里的内置智能体（校园百事通 / 面试助手 / 演示文稿助手）。
+ *  上架记录由 agent-api 的 app_info 提供；管理员停用后自然不再返回。 */
+export async function listBuiltinApps(): Promise<BuiltinAppItem[]> {
+  const data = await requestAgentApi<BuiltinAppItem[]>('/chat/builtin-apps');
+  return Array.isArray(data) ? data : [];
+}
+
 export async function getBuiltinApp(preset: AssistantPreset): Promise<BuiltinAppItem> {
   const data: any = await requestAgentApi(
     `/chat/builtin-apps/${encodeURIComponent(preset)}`,

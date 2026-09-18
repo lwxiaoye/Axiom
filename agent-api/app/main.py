@@ -87,6 +87,9 @@ async def _migrate_chat_columns():
             "ALTER TABLE ai_chat_messages ADD COLUMN execution_trace_json MEDIUMTEXT NULL",
             # 对话日志以该字段精确关联一问一答；生产仍必须由 Alembic 迁移，开发环境兜底补列。
             "ALTER TABLE ai_chat_messages ADD COLUMN turn_id VARCHAR(64) NULL",
+            # 知识库检索参数：设置抽屉里可改，此前保存后被静默丢弃（服务端只收 name/description）。
+            "ALTER TABLE agent_knowledge_base ADD COLUMN top_k INT NOT NULL DEFAULT 5",
+            "ALTER TABLE agent_knowledge_base ADD COLUMN score_threshold DOUBLE NOT NULL DEFAULT 0.3",
         ]:
             try:
                 await conn.execute(text(ddl))
@@ -230,6 +233,67 @@ async def _migrate_chat_thread_origin():
             pass  # 回填失败不阻塞启动
 
 
+async def _seed_builtin_app_catalog():
+    """为内置智能体补上 app_info 上架记录（幂等）。
+
+    app_info / app_role / app_dept 原属 JeecgBoot(Java) 业务库，Java 下线后无人建表，
+    builtin_app_access 查询即抛异常 → 所有内置智能体 503「应用目录暂时不可用」，
+    登录后落地 /center/chat/campus 直接白屏。表已改由 create_all 建（见 models.py），
+    这里补种数据：每个 BUILTIN_APP_SPECS 按 pc_url(route) 唯一，缺则插入、存在则跳过，
+    不覆盖管理员后续的改名/换图标/下架操作。
+    """
+    from sqlalchemy import text
+    from app.services.chat.builtin_app_access import BUILTIN_APP_SPECS, CATALOG_APP_TYPE
+
+    log = logging.getLogger(__name__)
+
+    async with engine.begin() as conn:
+        for spec in BUILTIN_APP_SPECS:
+            try:
+                existing = (
+                    await conn.execute(
+                        text("SELECT id FROM app_info WHERE pc_url = :route LIMIT 1"),
+                        {"route": spec.route},
+                    )
+                ).first()
+                if existing:
+                    continue
+                await conn.execute(
+                    text(
+                        "INSERT INTO app_info (id, app_name, app_remark, app_type, app_icon,"
+                        " app_category, pc_url, h5_url, status, order_num, open_type,"
+                        " del_flag, create_by)"
+                        " VALUES (:id, :name, :remark, :type, :icon, :category, :route,"
+                        " :route, '1', :order_num, 'route', 0, 'admin')"
+                    ),
+                    {
+                        "id": f"builtin-{spec.preset}",
+                        "name": spec.name,
+                        "remark": spec.description,
+                        "type": CATALOG_APP_TYPE,
+                        "icon": spec.icon,
+                        "category": spec.category,
+                        "route": spec.route,
+                        "order_num": spec.order_num,
+                    },
+                )
+                log.info("已为内置智能体 %s 补建广场上架记录", spec.preset)
+            except Exception:
+                log.exception("补建 app_info 记录失败：%s", spec.preset)
+
+    # 创建者展示信息；认证仍由 auth-api 负责，这里只为界面显示作者名。
+    async with engine.begin() as conn:
+        try:
+            await conn.execute(
+                text(
+                    "INSERT IGNORE INTO sys_user (id, username, realname, avatar)"
+                    " VALUES ('1', 'admin', '管理员', '')"
+                )
+            )
+        except Exception:
+            log.exception("补建 sys_user 管理员档案失败")
+
+
 async def _migrate_chat_message_sender_type():
     """给消息表补逐消息发送方字段（幂等）。
 
@@ -339,6 +403,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await _migrate_connector_multi_account()
         await _migrate_chat_thread_origin()
         await _migrate_chat_message_sender_type()
+        await _seed_builtin_app_catalog()
     else:
         # P1 版本化迁移（migrations/README.md）：生产滚动发布注入 MIGRATE_ON_STARTUP=false，
         # schema 由部署前的 `alembic upgrade head` 管理——启动期不再执行任何 DDL，规避大表

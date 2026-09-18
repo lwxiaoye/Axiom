@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
 import httpx
 from sqlalchemy import text
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.chat.turn_context_builder import (
     DELIVERY_ANSWER_STRUCTURE_NUDGE,
@@ -5343,7 +5344,7 @@ async def drive_model(
         return tags
 
     payload_tools = _stable_payload_tools(loop_tools)
-    base_url = settings.NEWAPI_BASE_URL.rstrip("/")
+    base_url = get_model_base_url().rstrip("/")
     from app.services.agents.agent_service import agent_service
     transport_aliases = agent_service.model_transport_aliases(model, api_key)
     catalog_responses_capability = agent_service.model_responses_capability(

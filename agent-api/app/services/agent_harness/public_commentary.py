@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.agent_harness import model_usage_audit
 from app.services.agent_harness.responses_protocol import response_output_text
@@ -98,7 +99,7 @@ async def generate_public_commentary(
         )
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
-                f"{settings.NEWAPI_BASE_URL.rstrip('/')}/responses",
+                f"{get_model_base_url().rstrip('/')}/responses",
                 json=request_body,
                 headers={"Authorization": f"Bearer {api_key}"},
             )

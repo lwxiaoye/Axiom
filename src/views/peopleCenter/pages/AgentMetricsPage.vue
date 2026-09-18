@@ -2,8 +2,8 @@
   <section class="agent-metrics-page">
     <header class="agent-metrics-header">
       <div>
-        <button type="button" class="back-link" @click="router.push('/center/my-agent')">
-          <ArrowLeftOutlined /> 返回我的智能体
+        <button type="button" class="back-link" @click="goBack">
+          <ArrowLeftOutlined /> {{ canGoBack ? '返回' : '返回我的智能体' }}
         </button>
         <h2>监测</h2>
         <p>{{ app?.name || '当前智能体' }}的使用数据</p>
@@ -48,7 +48,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
+import { usePageBack } from '/@/hooks/web/usePageBack';
 import { ArrowLeftOutlined, WarningOutlined } from '@ant-design/icons-vue';
 import AgentMetricsTrendChart from '../components/AgentMetricsTrendChart.vue';
 import {
@@ -62,7 +63,9 @@ import {
 defineOptions({ name: 'CenterAgentMetricsPage' });
 
 const route = useRoute();
-const router = useRouter();
+// 从「我的智能体」点进来时按真实历史回退（保留列表滚动位置）；
+// 直接贴地址栏打开时退回列表页。
+const { goBack, canGoBack } = usePageBack('/center/my-agent');
 const appId = computed(() => String(route.params.appId || ''));
 const app = ref<AiWorkflowApp | null>(null);
 const metrics = ref<WorkflowAppMetrics | null>(null);

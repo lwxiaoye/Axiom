@@ -146,6 +146,10 @@ async def update_config(
             )
             session.add(row)
 
+        # 新建时 row.id 此刻仍是 None，而 SQLAlchemy 会把 `id != None` 编译成
+        # `id IS NOT NULL`——那条「停用其它配置」的语句会连刚建的这行一起置 0，
+        # 导致新增的 Embedding 配置永远无法激活。先 flush 拿到主键再比较。
+        await session.flush()
         rows = (
             await session.execute(
                 select(EmbeddingModel).where(EmbeddingModel.id != row.id)

@@ -41,7 +41,10 @@ let dynamicViewsModules: Record<string, () => Promise<Recordable>>;
 // Dynamic introduction
 function asyncImportRoute(routes: AppRouteRecordRaw[] | undefined) {
   if (!dynamicViewsModules) {
-    dynamicViewsModules = import.meta.glob('../../views/**/*.{vue,tsx}');
+    // SLIM-BUILD: 原为 '../../views/**/*.{vue,tsx}'，会把 src/views 下全部 787 个
+    // 页面文件连同它们的依赖（bpmn/pdfjs/echarts/codemirror…）无条件打进包里。
+    // 现只吸入使用界面。要恢复某个模块，把目录名加进花括号即可 —— 文件都还在磁盘上。
+    dynamicViewsModules = import.meta.glob('../../views/{agent,sys,system,dashboard,peopleCenter}/**/*.{vue,tsx}');
     //合并online lib路由
     dynamicViewsModules = Object.assign({}, dynamicViewsModules, packageViews);
   }

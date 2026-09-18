@@ -48,3 +48,4 @@ agent-api/scripts/backups/
 deploy/**/data/
 deploy/**/logs/
 deploy/apisix/apisix_conf/config.yaml
+dev-server.log

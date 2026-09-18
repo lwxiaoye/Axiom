@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 
 
@@ -128,7 +129,7 @@ async def complete_prompt_experiment(
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
-                f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                f"{get_model_base_url().rstrip('/')}/chat/completions",
                 json=wire_payload,
                 headers={"Authorization": f"Bearer {api_key}"},
             )
