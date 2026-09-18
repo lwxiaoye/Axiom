@@ -24,6 +24,9 @@
 x-server-agent-env: &server-agent-env
   # ---- model gateway default (per-account cloud model is set in the UI) ----
   NEWAPI_BASE_URL: ${AXIOM_MODEL_BASE_URL}
+  # 对话模型走的是自建 grok 代理渠道，按渠道实际能吃下的上限而非模型原生 256K 设窗口；
+  # 这个值同时决定自动压缩触发线（窗口 − 16K 预留）。
+  MODEL_WINDOW_OVERRIDES: '${AXIOM_MODEL_WINDOW_OVERRIDES:-{"grok": 131072}}'
   DEFAULT_EMBEDDING_MODEL: ${AXIOM_EMBEDDING_MODEL:-text-embedding-v4}
   DEFAULT_EMBEDDING_DIMENSION: ${AXIOM_EMBEDDING_DIMENSION:-1024}
   # ---- web search: SearXNG on this host; scraper only when firecrawl profile is on ----
