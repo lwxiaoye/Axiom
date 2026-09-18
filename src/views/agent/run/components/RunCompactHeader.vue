@@ -1,5 +1,15 @@
 <template>
   <header class="run-compact-header" :class="{ 'has-close-action': showClose }">
+    <button
+      v-if="showBack"
+      type="button"
+      class="run-compact-back"
+      aria-label="返回上一页"
+      @click="emit('back')"
+    >
+      <ArrowLeftOutlined />
+    </button>
+
     <RunSidebarToggle
       class="run-compact-history-toggle"
       :collapsed="sidebarCollapsed"
@@ -34,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { BulbOutlined, CloseOutlined } from '@ant-design/icons-vue';
+import { ArrowLeftOutlined, BulbOutlined, CloseOutlined } from '@ant-design/icons-vue';
 import RunSidebarToggle from './RunSidebarToggle.vue';
 
 withDefaults(defineProps<{
@@ -43,16 +53,19 @@ withDefaults(defineProps<{
   inspirationCollapsed?: boolean;
   showInspiration?: boolean;
   showClose?: boolean;
+  showBack?: boolean;
 }>(), {
   inspirationCollapsed: true,
   showInspiration: false,
   showClose: false,
+  showBack: false,
 });
 
 const emit = defineEmits<{
   (event: 'toggle-sidebar'): void;
   (event: 'toggle-inspiration'): void;
   (event: 'close'): void;
+  (event: 'back'): void;
 }>();
 </script>
 
@@ -83,7 +96,7 @@ const emit = defineEmits<{
     left: 50%;
     display: flex;
     width: max-content;
-    max-width: calc(100% - 144px);
+    max-width: calc(100% - 194px);
     height: 44px;
     align-items: center;
     overflow: hidden;
@@ -97,10 +110,11 @@ const emit = defineEmits<{
   }
 
   .has-close-action .run-compact-title {
-    max-width: calc(100% - 210px);
+    max-width: calc(100% - 260px);
   }
 
   :deep(.run-compact-history-toggle),
+  .run-compact-back,
   .run-compact-inspiration-toggle,
   .run-compact-close {
     display: inline-flex;
@@ -119,6 +133,12 @@ const emit = defineEmits<{
 
   :deep(.run-compact-history-toggle) {
     width: 52px;
+  }
+
+  .run-compact-back {
+    width: 44px;
+    margin-right: 6px;
+    font-size: 16px;
   }
 
   :deep(.run-compact-history-toggle svg) {
@@ -155,6 +175,7 @@ const emit = defineEmits<{
   }
 
   :deep(.run-compact-history-toggle:hover),
+  .run-compact-back:hover,
   .run-compact-inspiration-toggle:hover,
   .run-compact-close:hover {
     border-color: var(--run-left-control-hover-border, #dcdee2);
@@ -162,6 +183,7 @@ const emit = defineEmits<{
   }
 
   :deep(.run-compact-history-toggle:focus-visible),
+  .run-compact-back:focus-visible,
   .run-compact-inspiration-toggle:focus-visible,
   .run-compact-close:focus-visible {
     outline: 2px solid var(--run-focus-ring, #4f46e5);
@@ -178,12 +200,12 @@ const emit = defineEmits<{
 
   .run-compact-title {
     top: calc(6px + env(safe-area-inset-top));
-    max-width: calc(100% - 132px);
+    max-width: calc(100% - 182px);
     font-size: 13.5px;
   }
 
   .has-close-action .run-compact-title {
-    max-width: calc(100% - 196px);
+    max-width: calc(100% - 246px);
   }
 
   :deep(.run-compact-history-toggle),
@@ -194,6 +216,7 @@ const emit = defineEmits<{
 
 @media (prefers-reduced-motion: reduce) {
   :deep(.run-compact-history-toggle),
+  .run-compact-back,
   .run-compact-inspiration-toggle,
   .run-compact-close {
     transition: none;

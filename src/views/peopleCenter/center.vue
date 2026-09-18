@@ -1020,7 +1020,9 @@ function handleProfileSaved() {
 
 function goToAdmin() {
   userMenuOpen.value = false;
-  window.open('/admin', '_blank');
+  // 同标签页跳转而非 window.open：新开标签页没有历史，管理页里的「返回」
+  // 就无处可回，用户只能手动关标签页。
+  void router.push('/admin');
 }
 
 function handleLogout() {

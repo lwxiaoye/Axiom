@@ -69,17 +69,42 @@ describe('resolveAgentRunHref / openAgentRunWindow', () => {
     expect(resolveAgentRunHref('https://ext.example/app?x=1', origin)).toBe('https://ext.example/app?x=1');
   });
 
-  it('opens a new tab to the run path', () => {
+  it('navigates in the same tab for same-origin run paths', () => {
+    // 新标签页没有历史，运行页里的「返回」就无处可回——同源一律站内跳转。
     const opened: Array<{ url: string; name: string }> = [];
-    const fake = { opener: {} as Window | null };
-    openAgentRunWindow(
+    const navigated: string[] = [];
+    const ok = openAgentRunWindow(
       { id: 'wf-1' },
       (url, name) => {
         opened.push({ url, name });
-        return fake as Window;
+        return {} as Window;
       },
+      (path) => navigated.push(path),
     );
-    expect(opened).toEqual([{ url: '/agent/run/wf-1', name: '_blank' }]);
+    expect(navigated).toEqual(['/agent/run/wf-1']);
+    expect(opened).toEqual([]);
+    expect(ok).toBe(true);
+  });
+
+  it('still opens external jump URLs in a new tab with the opener detached', () => {
+    const opened: Array<{ url: string; name: string }> = [];
+    const navigated: string[] = [];
+    const fake = { opener: {} as Window | null };
+    const ok = openAgentRunWindow(
+      'https://ext.example/app?x=1',
+      (url, name) => {
+        opened.push({ url, name });
+        return fake as unknown as Window;
+      },
+      (path) => navigated.push(path),
+    );
+    expect(opened).toEqual([{ url: 'https://ext.example/app?x=1', name: '_blank' }]);
+    expect(navigated).toEqual([]);
     expect(fake.opener).toBeNull();
+    expect(ok).toBe(true);
+  });
+
+  it('reports failure when there is nothing to open', () => {
+    expect(openAgentRunWindow('', () => null, () => undefined)).toBe(false);
   });
 });

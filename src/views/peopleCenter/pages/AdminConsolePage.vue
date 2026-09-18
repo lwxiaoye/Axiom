@@ -1,6 +1,10 @@
 <template>
   <main class="admin-page">
     <header class="page-heading">
+      <button type="button" class="back" @click="goBack">
+        <ArrowLeftOutlined />
+        <span>{{ canGoBack ? '返回' : '回到工作台' }}</span>
+      </button>
       <div>
         <h1>管理配置</h1>
         <p>仅管理员可见。这里只放平台级设置，个人偏好在各自页面里调整。</p>
@@ -177,9 +181,14 @@
 <script setup lang="ts">
   import { h, onMounted, reactive, ref, watch } from 'vue';
   import { useRouter } from 'vue-router';
+  import { ArrowLeftOutlined } from '@ant-design/icons-vue';
   import { requestAgentApi } from '../agentApi';
   import { defHttp } from '/@/utils/http/axios';
   import { usePermission } from '/@/hooks/web/usePermission';
+  import { usePageBack } from '/@/hooks/web/usePageBack';
+
+  // 从工作台右上角进来的常态是有上一页可回；直接贴地址栏打开时退回工作台。
+  const { goBack, canGoBack } = usePageBack('/center/chat');
 
   // 后端对这些接口本就要求管理员（403），这里只是让误入的普通用户体面地退出去。
   const router = useRouter();
@@ -469,6 +478,10 @@
 <style scoped>
   .admin-page { width: 100%; max-width: 860px; margin: 0 auto; padding: 38px 32px 64px; color: #18181b; }
   .page-heading { margin-bottom: 26px; }
+  .back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 18px; padding: 0;
+          font-size: 13px; color: #85858f; background: none; border: 0; cursor: pointer;
+          transition: color 0.15s; }
+  .back:hover { color: #18181b; }
   h1 { margin: 0 0 8px; font-size: 24px; font-weight: 650; letter-spacing: -0.6px; }
   p { margin: 0; color: #85858f; font-size: 13px; line-height: 1.7; }
   .tabs { display: flex; gap: 22px; margin-bottom: 22px; border-bottom: 1px solid #e5e5ea; overflow-x: auto; }

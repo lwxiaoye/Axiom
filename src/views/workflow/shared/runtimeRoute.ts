@@ -47,14 +47,44 @@ export function resolveAgentRunHref(target: string | RuntimeRouteRecord, origin 
 }
 
 type OpenFn = (url: string, target: string) => Window | null;
+type NavigateFn = (path: string) => void;
 
-/** 广场和「我的智能体」共用：新开 `/agent/run/:id`。 */
+/**
+ * 站内跳转的实现由应用启动时注入（见 router/guard）。
+ * 本模块被 jest.config.workflow 当作「无别名的纯函数模块」直接引入，顶层
+ * import 路由会把整个应用拉进 node 单测链路，所以不能直接依赖路由实例。
+ */
+let registeredNavigate: NavigateFn | null = null;
+
+export function setRuntimeNavigator(fn: NavigateFn | null) {
+  registeredNavigate = fn;
+}
+
+/**
+ * 广场、「我的智能体」等入口共用的「打开智能体运行页」。
+ *
+ * 同源地址走站内路由跳转，不再新开标签页：新标签页没有历史，运行页里的「返回」
+ * 无处可回，浏览器后退键也是灰的——用户只能手动关标签页，这不是合理的交互。
+ * 外部地址（第三方智能体的 pcUrl）仍然新开标签页并断开 opener。
+ *
+ * 返回是否成功发起跳转，调用方据此提示失败。
+ */
 export function openAgentRunWindow(
   target: string | RuntimeRouteRecord,
   openFn: OpenFn = (url, name) => window.open(url, name),
-): Window | null {
+  navigateFn?: NavigateFn,
+): boolean {
   const href = resolveAgentRunHref(target);
-  if (!href) return null;
+  if (!href) return false;
+
+  const internalPath = toInternalPath(href);
+  const navigate = navigateFn || registeredNavigate;
+  if (internalPath && navigate) {
+    navigate(internalPath);
+    return true;
+  }
+  // 没有注册导航器时退回新开标签页，宁可少一层体验也不要点了没反应。
+
   const child = openFn(href, '_blank');
   if (child) {
     try {
@@ -63,5 +93,17 @@ export function openAgentRunWindow(
       // 跨域或浏览器限制时忽略
     }
   }
-  return child;
+  return Boolean(child);
+}
+
+/** 同源地址 → 站内路径（含 query/hash）；外部地址 → null。 */
+function toInternalPath(href: string): string | null {
+  if (href.startsWith('/')) return href;
+  try {
+    const parsed = new URL(href, currentOrigin());
+    if (parsed.origin !== currentOrigin()) return null;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
 }

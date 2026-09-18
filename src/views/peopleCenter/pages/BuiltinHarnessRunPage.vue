@@ -8,7 +8,9 @@
       v-if="appMeta"
       :title="appMeta.appName"
       :sidebar-collapsed="sidebarCollapsed"
+      show-back
       @toggle-sidebar="toggleSidebar"
+      @back="goBack"
     />
     <Transition name="run-history-backdrop">
       <button
@@ -21,6 +23,16 @@
     </Transition>
 
     <aside v-if="appMeta" class="agent-run-sidebar">
+      <button
+        type="button"
+        class="run-back"
+        :title="canGoBack ? '返回上一页' : '返回智能体广场'"
+        :aria-label="canGoBack ? '返回上一页' : '返回智能体广场'"
+        @click="goBack"
+      >
+        <ArrowLeftOutlined />
+        <span class="run-back-label">{{ canGoBack ? '返回' : '智能体广场' }}</span>
+      </button>
       <div class="run-brand">
         <span class="run-brand-avatar" aria-hidden="true">
           <span>{{ brandInitial }}</span>
@@ -94,7 +106,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue';
 import { Modal, message } from 'ant-design-vue';
-import { SearchOutlined } from '@ant-design/icons-vue';
+import { ArrowLeftOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import ChatPage from './ChatPage.vue';
 import RunCompactHeader from '../../agent/run/components/RunCompactHeader.vue';
@@ -108,6 +120,7 @@ import { InterviewSessionKey, useInterviewSession } from '../builtinAssistants/i
 import { useCenterChat } from '../composables/useCenterChat';
 import type { CenterSectionKey } from '../composables/useAgentMarket';
 import { openAgentRunWindow } from '@/views/workflow/shared/runtimeRoute';
+import { usePageBack } from '/@/hooks/web/usePageBack';
 
 defineOptions({ name: 'BuiltinHarnessRunPage' });
 
@@ -117,6 +130,10 @@ const props = defineProps<{
 
 const route = useRoute();
 const router = useRouter();
+// 子智能体是从工作台点进来的独立页面，必须给一条明确的回头路；直接贴地址栏
+// 打开时没有上一页，退回智能体广场。
+const { goBack, canGoBack } = usePageBack('/center/agent');
+
 const appMeta = ref<BuiltinAppItem | null>(null);
 const mainRef = ref<HTMLElement | null>(null);
 const accessLoading = ref(true);
