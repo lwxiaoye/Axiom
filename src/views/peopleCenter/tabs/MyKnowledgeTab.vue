@@ -303,6 +303,18 @@
           <a-form-item label="名称"><a-input v-model:value="form.name" :maxlength="128" show-count placeholder="例如：产品帮助中心" /></a-form-item>
           <a-form-item label="描述"><a-textarea v-model:value="form.description" :rows="3" :maxlength="1000" show-count placeholder="说明知识库的内容和适用范围" /></a-form-item>
           <div class="knowledge-form-group">检索参数</div>
+          <a-form-item label="检索方式" extra="向量按语义相近召回；关键词按原文用词匹配（适合编号、专有名词）；混合两路召回后按权重融合。">
+            <a-select v-model:value="form.retrievalMode">
+              <a-select-option v-for="option in retrievalModeOptions" :key="option.value" :value="option.value">{{ option.label }}</a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item
+            v-if="form.retrievalMode === 'HYBRID'"
+            label="语义权重"
+            :extra="`语义 ${form.semanticWeight.toFixed(2)} / 关键词 ${(1 - form.semanticWeight).toFixed(2)}；两者之和恒为 1，往右更看重语义、往左更看重关键词。`"
+          >
+            <a-slider v-model:value="form.semanticWeight" :min="0" :max="1" :step="0.05" />
+          </a-form-item>
           <a-form-item label="返回数量" extra="每次检索返回的最相关分段数量；过大易引入噪声，一般 5–8。">
             <a-input-number v-model:value="form.topK" :min="1" :max="20" style="width: 100%" />
           </a-form-item>
@@ -435,11 +447,20 @@ const aclItems = ref<AclEditorItem<KnowledgePermission>[]>([]);
 const pagination = reactive({ current: 1, pageSize: 24, total: 0 });
 const documentPagination = reactive({ current: 1, pageSize: 20, total: 0 });
 const statusSaving = ref(false);
+// 检索方式取值对齐服务端 RETRIEVAL_MODES；混合模式只暴露一个「语义权重」滑块，
+// 关键词权重固定为 1 − 语义权重（saveSettings 里补齐后一起发），两者永不会不和为 1。
+const retrievalModeOptions = [
+  { label: '向量检索', value: 'VECTOR' },
+  { label: '关键词检索', value: 'KEYWORD' },
+  { label: '混合检索', value: 'HYBRID' },
+] as const;
 const form = reactive({
   id: '',
   name: '',
   description: '',
-  retrievalMode: '',
+  retrievalMode: 'VECTOR',
+  semanticWeight: 0.5,
+  keywordWeight: 0.5,
   topK: 5,
   scoreThreshold: 0.3,
 });
@@ -557,11 +578,14 @@ function changeKnowledgePage(delta: number) {
 }
 
 function resetForm(record?: KnowledgeBase) {
+  const semanticWeight = Number(record?.semanticWeight ?? 0.5);
   Object.assign(form, {
     id: record?.id || '',
     name: record?.name || '',
     description: record?.description || '',
-    retrievalMode: record?.retrievalMode || '',
+    retrievalMode: record?.retrievalMode || 'VECTOR',
+    semanticWeight,
+    keywordWeight: 1 - semanticWeight,
     topK: record?.topK || 5,
     scoreThreshold: Number(record?.scoreThreshold ?? 0.3),
   });
@@ -774,7 +798,12 @@ async function saveSettings() {
   if (!currentKnowledge.value || !canEditCurrent.value) return;
   saving.value = true;
   try {
-    const updated = await updateKnowledge({ ...form, id: currentKnowledge.value.id });
+    // 滑块只改语义权重，关键词权重在发出前按 1 − 语义补齐，保证服务端拿到的一对和为 1
+    const updated = await updateKnowledge({
+      ...form,
+      keywordWeight: Number((1 - form.semanticWeight).toFixed(2)),
+      id: currentKnowledge.value.id,
+    });
     currentKnowledge.value = {
       ...currentKnowledge.value,
       ...updated,
