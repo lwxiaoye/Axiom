@@ -80,7 +80,14 @@ export default ({ command, mode }: ConfigEnv): UserConfig => {
     },
     server: {
       watch: {
-        ignored: ['**/base-platform-*/**', '**/__MACOSX/**', '**/agent-api/.venv/**'],
+        ignored: [
+          '**/base-platform-*/**',
+          '**/__MACOSX/**',
+          '**/agent-api/.venv/**',
+          // 并行开发时子会话的 git worktree 放在 .claude/worktrees 下，里面每个
+          // 文件改动都会被当成本项目的改动触发整页 reload——它们不属于这个 dev server。
+          '**/.claude/**',
+        ],
       },
       // Listening on all local IPs
       host: true,
