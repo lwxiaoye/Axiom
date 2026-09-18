@@ -1139,3 +1139,46 @@ class KnowledgeAcl(Base):
     # VIEWER / EDITOR / OWNER —— 对齐 config_service.RETRIEVAL_PERMISSIONS
     permission = Column(String(16), nullable=False, default="VIEWER")
     create_time = Column(DateTime, server_default=func.now())
+
+
+class KnowledgeRetrievalLog(Base):
+    """知识库检索日志：每次检索、每个实际参与的知识库各一行，「运营统计」tab 由它聚合。
+
+    此前统计接口指向已下线的 Java（/api/ai/knowledge/base/{id}/analytics → 404），面板只能
+    报「请确认服务已完成统计迁移」。现在四条检索链路（对话 CHAT / 智能体 AGENT / 工作流
+    WORKFLOW / 页面召回测试 TEST）都落一条轻量日志，聚合在读时做、不另建汇总表：数据量是
+    「每次检索一行」的量级，按 knowledge_id + create_time 索引扫一个时间窗即可。
+
+    多库检索按库拆行：hit_count / top_score / hit_document_ids 只算落在本库的切片，latency_ms
+    是整次检索的耗时（各行相同）——面板的「多知识库检索按实际参与的知识库分别归属」就是这个意思。
+
+    hit_document_ids 是 JSON 数组，按返回顺序逐个切片记所属文档 id（同一文档重复出现表示命中
+    它多个切片）：去重就是「文件召回」，不去重就是「分片命中」，一列同时服务两个指标。
+
+    create_time 由服务层按平台业务时区（agent_time.agent_timezone）写入，而不是靠 MySQL 的
+    NOW()（容器与库都是 UTC）：面板按天分桶，日期得和用户看到的日历一致，否则晚上八点后的
+    检索会算到「明天」。
+    """
+    __tablename__ = "agent_knowledge_retrieval_log"
+    __table_args__ = (
+        Index("ix_agent_knowledge_retrieval_log_kid_time", "knowledge_id", "create_time"),
+        {"mysql_charset": "utf8mb4"},
+    )
+
+    id = Column(String(64), primary_key=True)
+    knowledge_id = Column(String(64), nullable=False)
+    user_id = Column(String(64), nullable=False, default="")
+    # CHAT / TEST / AGENT / WORKFLOW；TEST 是页面「召回测试」，运营统计默认不计入
+    source = Column(String(16), nullable=False, default="CHAT")
+    query = Column(String(512), nullable=False, default="")
+    hit_count = Column(Integer, nullable=False, default=0)
+    # 本库命中里最高的最终排序分（重排分 / 融合分 / 余弦），无命中为 NULL
+    top_score = Column(Float, nullable=True)
+    latency_ms = Column(Integer, nullable=False, default=0)
+    retrieval_mode = Column(String(16), nullable=False, default="VECTOR")
+    reranked = Column(Boolean, nullable=False, default=False)
+    hit_document_ids = Column(Text, nullable=True)
+    # 同一问答轮次（run_id）可能触发多次检索（前置检索双查询、模型工具补检），
+    # 「知识问答量」按它去重；召回测试没有轮次，为 NULL、按行计
+    turn_id = Column(String(64), nullable=True)
+    create_time = Column(DateTime, nullable=False, server_default=func.now())
