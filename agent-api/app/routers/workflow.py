@@ -499,7 +499,7 @@ async def _java_user_has_menu_path(access_token: str, menu_path: str) -> bool:
     token = str(access_token or "").strip()
     if not token:
         return False
-    url = f"{settings.JAVA_INTERNAL_BASE}/sys/permission/getUserPermissionByToken"
+    url = f"{settings.AUTH_API_BASE}/sys/permission/getUserPermissionByToken"
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(url, headers={"X-Access-Token": token})
@@ -511,7 +511,7 @@ async def _java_user_has_menu_path(access_token: str, menu_path: str) -> bool:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning("Java menu permission lookup failed", exc_info=True)
+        logger.warning("auth-api menu permission lookup failed", exc_info=True)
         raise HTTPException(503, "权限服务不可用") from exc
     if not data.get("success"):
         return False

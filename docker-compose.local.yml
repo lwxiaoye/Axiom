@@ -13,7 +13,7 @@ x-agent-environment: &agent-environment
   CHECKPOINT_DATABASE_URL: postgresql://axiom:${AXIOM_DB_PASSWORD}@postgres:5432/langgraph_checkpoints
   RUNTIME_DATABASE_URL: postgresql+psycopg://axiom:${AXIOM_DB_PASSWORD}@postgres:5432/agent_runtime
   QDRANT_URL: http://qdrant:6333
-  JAVA_INTERNAL_BASE: http://auth-api:9090
+  AUTH_API_BASE: http://auth-api:9090
   NEWAPI_BASE_URL: ${AXIOM_MODEL_BASE_URL:-http://host.docker.internal:3001/v1}
   # 空表时用于初始化 ai_chat_model（模型目录）。校园百事通等处的模型下拉读的是这张表，
   # 不设则目录为空、管理员无法为智能体选择模型。逗号分隔，第一个为默认。

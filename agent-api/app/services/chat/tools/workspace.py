@@ -102,7 +102,7 @@ def _pick_unreported(pkgs: list, seen: Optional[set]) -> list:
 def _unavailable_note(pkgs: list, seen: Optional[set] = None) -> str:
     """取包失败的技能**必须点名说清楚本轮不可用**（2026-07-28）。
 
-    此前这条路整个是哑的：Java `/ai/skill/files|file` 一抖动，`fetch_skill_packages` 静默
+    此前这条路整个是哑的：auth-api `/ai/skill/files|file` 一抖动，`fetch_skill_packages` 静默
     返回空列表，而系统提示词已经写着「它们已挂在沙箱内 /workspace/skills/ 下」、时间线也
     发了一对 use_skill 事件说「自带脚本已挂入沙箱」。模型于是去跑一个不存在的脚本，
     或者更糟——直接假装跑过了。ADR-043 对含脚本技能的要求是**不可降级、必须明确失败**，
@@ -133,7 +133,7 @@ def _unavailable_note(pkgs: list, seen: Optional[set] = None) -> str:
 def _unmounted_note(pkgs: list, seen: Optional[set] = None) -> str:
     """技能包里没挂上来的东西**必须告诉模型**（2026-07-27）。
 
-    取包通道走 Java 的 JSON 接口，二进制文件的字节在服务端就已经丢了（拿回来的是被解码过的
+    取包通道走 auth-api 的 JSON 接口，二进制文件的字节在服务端就已经丢了（拿回来的是被解码过的
     字符串），所以 png/字体/zip 一律不挂 —— 挂一个坏掉的比不挂更糟。文件数与字节预算的截断
     同理。不说的话，模型会按 SKILL.md 去引用一个不存在的文件，然后在"文件不存在"里反复打转，
     完全猜不到是平台没挂上来（12k 文件的包只挂前 200 个就是这个形态）。
@@ -195,11 +195,11 @@ def build_workspace_tools(*, user_id: str, token: str = "",
                           # 只有本模块持有 @ 选中 + use_skill 即时加载的合并清单，
                           # 不导出的话技能包不会被挂进沙箱 —— Skill 直接失效（实测踩到）。
                           exports: Optional[dict] = None) -> List[MainTool]:
-    # user_id 是本模块的注册前提（调用方按登录态开这一族工具），技能 ACL 由 Java 侧按
+    # user_id 是本模块的注册前提（调用方按登录态开这一族工具），技能 ACL 由 auth-api 侧按
     # token 校验，故此处不再直接用它取文件。
     tools: List[MainTool] = []
 
-    # 选中 skill 的文件包懒取一次、整轮缓存（provider 回源 Java /ai/skill/files|file，可能慢）
+    # 选中 skill 的文件包懒取一次、整轮缓存（provider 回源 auth-api /ai/skill/files|file，可能慢）
     _skill_pkg_cache: dict = {}
     # use_skill 即时加载的技能包（Phase 2）：模型自己从目录挑技能→本工具取包追加到这里，
     # bash 挂载时并入挂载集，无需用户手动 @ 选中。恢复得到的 model/use_skill 记录不能
@@ -261,7 +261,7 @@ def build_workspace_tools(*, user_id: str, token: str = "",
     def _normalized_skill_identity(value: Any) -> str:
         return re.sub(r"[\s_]+", "-", str(value or "").strip().lower())
 
-    # The Java Skill catalog may use an opaque record identity (for example
+    # The auth-api Skill catalog may use an opaque record identity (for example
     # ``extract_...``) while the first-party execution profile intentionally
     # refers to the stable product identity ``ppt-studio``.  Keep canonical
     # ids as the persistence authority, but register trusted semantic aliases
@@ -437,7 +437,7 @@ def build_workspace_tools(*, user_id: str, token: str = "",
                     "不要再用 read_file/glob 读取 skills 路径，也**不要再次 use_skill** 整包重取；"
                     "直接用 bash 按已加载说明执行即可。")
         selection_source = _selection_source(skill_id)
-        # 只用 id 回源 Java 校验（ACL+enabled），前端/模型给的名称一律不采信（防越权/注入）
+        # 只用 id 回源 auth-api 校验（ACL+enabled），前端/模型给的名称一律不采信（防越权/注入）
         from app.services.chat.turn_context_builder import _fetch_trusted_skills, _resolve_skill_id
         skills = await _fetch_trusted_skills([skill_id], token)
         if not skills:

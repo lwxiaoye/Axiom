@@ -220,7 +220,7 @@ def _ppt_skill_ids(records: list) -> set:
 
 
 def find_ppt_skill_id(records: list, *, tie_breaks: bool = True) -> Optional[str]:
-    """从 Java 权威技能目录中选择已启用的 PPT 专用 Skill，不依赖随机生成的 skill_id。
+    """从 auth-api 权威技能目录中选择已启用的 PPT 专用 Skill，不依赖随机生成的 skill_id。
 
     ``tie_breaks`` 保留给兼容的候选解析调用：同分时可稳定返回一个候选，或在模糊
     ``use_skill`` 解析中返回 None 让模型二选一。它不再驱动 preparation 阶段的静默 Skill

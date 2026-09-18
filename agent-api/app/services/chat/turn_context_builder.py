@@ -142,7 +142,7 @@ def _extract_readme(payload: Any) -> str:
 
 
 def _authoritative_skill_field(record: dict, *keys: str, limit: int = 256) -> Optional[str]:
-    """Pick a bounded version/package fact from the Java ACL record."""
+    """Pick a bounded version/package fact from the auth-api ACL record."""
     for key in keys:
         value = record.get(key)
         text = _bounded_skill_state_text(value, limit)
@@ -394,15 +394,15 @@ def format_skill_recovery_observation(
 
 
 async def _fetch_trusted_skills(skill_ids: Optional[List[str]], token: str) -> List[dict]:
-    """按 skill_id 回源 Java（`/ai/skill/list` 校验 ACL+enabled，`/ai/skill/readme` 取 SKILL.md），
+    """按 skill_id 回源 auth-api（`/ai/skill/list` 校验 ACL+enabled，`/ai/skill/readme` 取 SKILL.md），
     返回**可信**的 {id,name,description,instructions}。前端传入的名称/描述/正文一律不采信
-    （§4.4 风险 5 / §5.2 / §17.3 Prompt Injection 防护）：只用 id 匹配、用 Java 权威内容注入。
+    （§4.4 风险 5 / §5.2 / §17.3 Prompt Injection 防护）：只用 id 匹配、用 auth-api 权威内容注入。
     回源失败或停用技能一律不注入（降级安全）；readme 补取失败仅该技能缺正文，不影响其余。"""
     ids = [str(s).strip() for s in (skill_ids or []) if str(s).strip()]
     if not ids:
         return []
-    list_url = f"{settings.JAVA_INTERNAL_BASE}/ai/skill/list"
-    readme_url = f"{settings.JAVA_INTERNAL_BASE}/ai/skill/readme"
+    list_url = f"{settings.AUTH_API_BASE}/ai/skill/list"
+    readme_url = f"{settings.AUTH_API_BASE}/ai/skill/readme"
     headers = {"X-Access-Token": token or ""}
     trusted: List[dict] = []
     try:
@@ -469,22 +469,22 @@ async def _fetch_trusted_skills(skill_ids: Optional[List[str]], token: str) -> L
                     "is_ppt_skill": is_ppt_skill,
                 })
     except Exception as e:  # noqa: BLE001
-        logger.warning("技能回源 Java 失败，本轮不注入技能: %s", e)
+        logger.warning("技能回源 auth-api 失败，本轮不注入技能: %s", e)
         return []
     # v3.0：多技能总量预算分摊（顺序截断 + truncated 标注）
     return _apply_skill_instruction_budget(trusted)
 
 
 # Skill 目录短 TTL 缓存（按 token 隔离 ACL）：目录几乎不变，但注入发生在**每一轮**（含未选技能的
-# 普通轮），不缓存就等于给每轮加一次 Java 调用、Java 慢时拖累首字延迟。缓存 records 而非成品串——
-# selected 标注每轮不同。best-effort：Java 抖动时用上次缓存，彻底失败才空目录。
+# 普通轮），不缓存就等于给每轮加一次 auth-api 调用、auth-api 慢时拖累首字延迟。缓存 records 而非成品串——
+# selected 标注每轮不同。best-effort：auth-api 抖动时用上次缓存，彻底失败才空目录。
 _SKILL_CATALOG_TTL = 60.0
 _skill_catalog_cache: Dict[str, tuple] = {}  # token -> (monotonic_ts, records)
 
 
 async def _get_catalog_records(token: str) -> list:
-    """回源（或命中 TTL 缓存）Java `/ai/skill/list`（enabled=1，ACL 由 token 决定）拿技能记录。
-    best-effort：Java 抖动时退回上次缓存，彻底失败返回 []。目录注入块与 use_skill 兜底解析共用此源。"""
+    """回源（或命中 TTL 缓存）auth-api `/ai/skill/list`（enabled=1，ACL 由 token 决定）拿技能记录。
+    best-effort：auth-api 抖动时退回上次缓存，彻底失败返回 []。目录注入块与 use_skill 兜底解析共用此源。"""
     import time
     ckey = token or ""
     cached = _skill_catalog_cache.get(ckey)
@@ -494,7 +494,7 @@ async def _get_catalog_records(token: str) -> list:
         headers = {"X-Access-Token": token or ""}
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.get(
-                f"{settings.JAVA_INTERNAL_BASE}/ai/skill/list",
+                f"{settings.AUTH_API_BASE}/ai/skill/list",
                 params={"pageNo": 1, "pageSize": 1000, "enabled": 1}, headers=headers,
             )
             data = resp.json()
@@ -511,7 +511,7 @@ async def _get_catalog_records(token: str) -> list:
         return records
     except Exception as e:  # noqa: BLE001
         logger.warning("Skill 目录回源失败: %s", e)
-        # 有旧缓存就用旧的（Java 抖动不至于让目录忽隐忽现），否则空
+        # 有旧缓存就用旧的（auth-api 抖动不至于让目录忽隐忽现），否则空
         return cached[1] if cached else []
 
 
@@ -521,7 +521,7 @@ async def _fetch_skill_catalog_block(token: str, selected_skill_ids: Optional[Li
     与 _fetch_trusted_skills 同源（`/ai/skill/list` enabled=1，ACL 由 token 决定），但这里列**全部**
     可用技能而非只列已选中的——只注入名称/描述（不含 SKILL.md 正文，省 token），供发现与判断。
     真正执行仍走：已 @ 选中的技能加载完整 SKILL.md + 脚本；未选中的用自身工具直接做或提示用户选中。
-    best-effort：失败/为空返回 ""，绝不阻断对话；命中 TTL 缓存则不打 Java。"""
+    best-effort：失败/为空返回 ""，绝不阻断对话；命中 TTL 缓存则不打 auth-api。"""
     selected = {str(s).strip() for s in (selected_skill_ids or []) if str(s).strip()}
     records = await _get_catalog_records(token)
     return _format_catalog(records, selected)
@@ -529,15 +529,15 @@ async def _fetch_skill_catalog_block(token: str, selected_skill_ids: Optional[Li
 
 def _match_skill_records(records: list, query: str) -> tuple:
     """模型常把 skill_id 猜成短名/关键词（如把《SVG转PPTX工作流》调成 "pptx"），精确 id 查不到就
-    报「未找到」。这里在 Java 权威技能列表里按 id/名称模糊解析真实 id：精确 id（大小写不敏感）或唯一
+    报「未找到」。这里在 auth-api 权威技能列表里按 id/名称模糊解析真实 id：精确 id（大小写不敏感）或唯一
     模糊命中→直接返回该 id；多命中→返回候选串供报错提示模型二选一；无命中→(None, [])。
 
-    仅用于 use_skill 兜底——@ 选中路径仍走精确 id，不受影响。匹配只读 Java 权威名称，不采信前端内容。"""
+    仅用于 use_skill 兜底——@ 选中路径仍走精确 id，不受影响。匹配只读 auth-api 权威名称，不采信前端内容。"""
     q = (query or "").strip().lower()
     if not q:
         return None, []
     # 模型可能把真实随机 id 猜成 ppt_skill / ppt / PPT大师。仅对这组受控别名
-    # 使用候选解析，并仍只从 Java 权威 enabled 目录中选择，不放宽 ACL。
+    # 使用候选解析，并仍只从 auth-api 权威 enabled 目录中选择，不放宽 ACL。
     from app.services.skills.ppt_policy import find_ppt_skill_id, is_ppt_skill_alias
     if is_ppt_skill_alias(q):
         # tie_breaks=False：这里是模型自己拿含糊名来找，同分时把候选列给它二选一，
@@ -569,7 +569,7 @@ def _match_skill_records(records: list, query: str) -> tuple:
 
 
 async def _resolve_skill_id(query: str, token: str) -> tuple:
-    """回源（或命中缓存）Java 技能目录，对 query 做模糊解析。返回 (真实 id | None, 候选展示串列表)。"""
+    """回源（或命中缓存）auth-api 技能目录，对 query 做模糊解析。返回 (真实 id | None, 候选展示串列表)。"""
     records = await _get_catalog_records(token)
     return _match_skill_records(records, query)
 
@@ -1281,7 +1281,7 @@ def _tool_env_snapshot(
     - turn_intent + attachments 文件名 + user_message：resolve_tool_scope 的输入
       （PPT Skill 判定 / 空白模板放行 / 产物类型识别都看它们）。附件只留文件名，
       正是 _attachment_names 需要的最小面，不把整份附件元数据塞进 Run state。
-    - skill_ids：@ 选中的技能 id。续接时按 id 回源 Java 重新校验 ACL+enabled，
+    - skill_ids：@ 选中的技能 id。续接时按 id 回源 auth-api 重新校验 ACL+enabled，
       **不缓存技能正文**——快照不是权限凭证，权限一律实时重查（同候选快照口径）。
     - plan_mode：这一轮是不是计划轮。续接轮要据此**改写 messages[0]**——计划轮的
       system prompt 里写着「本轮到此为止，不要创建、编辑、覆盖任何文件」，而挂起游标

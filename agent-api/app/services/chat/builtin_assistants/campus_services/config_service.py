@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session
 from app.models import CampusAssistantConfig, CampusAssistantRelease, CampusAssistantReleaseKb, ChatModel
-from . import java_knowledge
+from . import knowledge_access
 from .domain_policy import (
     DomainPolicyError,
     normalize_official_domains,
@@ -444,7 +444,7 @@ async def validate_payload(
         categories: list[str] = []
         for item in enabled_bindings:
             kid = str(item.get("knowledge_id") or "").strip()
-            kb = await java_knowledge.fetch_knowledge_base(token, tenant_id, kid)
+            kb = await knowledge_access.fetch_knowledge_base(token, tenant_id, kid)
             if not kb:
                 errors.append(f"知识库不存在或不可访问：{kid}")
                 continue
@@ -457,15 +457,15 @@ async def validate_payload(
             kb_tenant = str(kb.get("tenantId") or kb.get("tenant_id") or "") or await _kb_tenant(session, kid)
             if kb_tenant and str(kb_tenant) != str(tenant_id):
                 errors.append(f"知识库不属于当前租户：{kb.get('name') or kid}")
-            permission = java_knowledge.permission_of(kb)
+            permission = knowledge_access.permission_of(kb)
             if permission and permission not in RETRIEVAL_PERMISSIONS:
                 errors.append(f"管理员对知识库 {kb.get('name') or kid} 没有查看权限")
-            docs = await java_knowledge.fetch_documents(token, tenant_id, kid)
+            docs = await knowledge_access.fetch_documents(token, tenant_id, kid)
             if any(str(doc.get("status") or "").upper() in DOC_WARNING_STATUSES for doc in docs):
                 warnings.append(f"知识库存在处理中或失败文档：{kb.get('name') or kid}")
-            acls = await java_knowledge.fetch_acl(token, tenant_id, kid)
+            acls = await knowledge_access.fetch_acl(token, tenant_id, kid)
             has_retrieval_acl = any(
-                java_knowledge.permission_of(acl) in RETRIEVAL_PERMISSIONS
+                knowledge_access.permission_of(acl) in RETRIEVAL_PERMISSIONS
                 for acl in acls
             )
             if not has_retrieval_acl:

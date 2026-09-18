@@ -37,7 +37,7 @@ def test_java_auth_bypasses_environment_proxy(monkeypatch):
             monkeypatch.setenv(key, "http://127.0.0.1:1")
         for key in ("NO_PROXY", "no_proxy"):
             monkeypatch.setenv(key, "")
-        monkeypatch.setattr(auth.settings, "JAVA_INTERNAL_BASE", f"http://127.0.0.1:{server.server_port}")
+        monkeypatch.setattr(auth.settings, "AUTH_API_BASE", f"http://127.0.0.1:{server.server_port}")
         user = asyncio.run(auth._verify_token_with_java("test-token"))
         assert user.user_id == "test-user"
         assert received == [("/sys/user/getUserInfo", "test-token")]

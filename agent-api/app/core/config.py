@@ -1,6 +1,10 @@
+import logging
 from typing import Dict, Optional
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -14,8 +18,26 @@ class Settings(BaseSettings):
     # New API Gateway
     NEWAPI_BASE_URL: str = "http://127.0.0.1:9080/new-api/v1"
     
-    # Java Backend
-    JAVA_INTERNAL_BASE: str = "http://127.0.0.1:9090"
+    # auth-api 内网地址：登录 / token 校验 / 用户信息 / 菜单权限的回源目标
+    # （原 JeecgBoot Java 后端下线后由 auth-api 接管同一套 /sys/* 契约）。
+    AUTH_API_BASE: str = "http://127.0.0.1:9090"
+    # 旧名兼容：JAVA_INTERNAL_BASE 已改名为 AUTH_API_BASE。仅当新名未设置而环境 /.env 里仍有旧名时
+    # 沿用旧值并告警；校验后旧属性始终镜像新值，尚未改完的旧读法在过渡期内不会拿到 None。
+    # 过渡期结束后连同下方 validator 一起删除。
+    JAVA_INTERNAL_BASE: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _compat_java_internal_base(self) -> "Settings":
+        """新名 AUTH_API_BASE 未显式设置时兜底读取旧名 JAVA_INTERNAL_BASE，避免集成瞬间线上鉴权断掉。"""
+        legacy = (self.JAVA_INTERNAL_BASE or "").strip()
+        if legacy and "AUTH_API_BASE" not in self.model_fields_set:
+            logger.warning(
+                "JAVA_INTERNAL_BASE 已改名为 AUTH_API_BASE，请更新环境变量；本次沿用旧值 %s", legacy,
+            )
+            self.AUTH_API_BASE = legacy
+        self.JAVA_INTERNAL_BASE = self.AUTH_API_BASE
+        return self
+
     # Default to revalidation so logout/password rotation revokes API access immediately.
     # Nonzero values explicitly accept a revocation delay of that many seconds.
     AUTH_TOKEN_CACHE_TTL_SECONDS: int = 0
@@ -250,7 +272,7 @@ class Settings(BaseSettings):
 
     # 发布审批（WS2，强制审批）：所有工作流/对话 Agent 发布须提交审核，审核员通过后上线。
     PUBLISH_APPROVAL_REQUIRED: bool = True
-    # 审核员 / 平台管理员角色白名单（逗号分隔的 Java role_id）。命中即拥有审核 / 跨用户管理权限。
+    # 审核员 / 平台管理员角色白名单（逗号分隔的 auth-api 返回的 role_id）。命中即拥有审核 / 跨用户管理权限。
     # role_id↔权限码映射是跨团队 seam；username==admin 或 role 含 "admin" 亦视为平台管理员（沿用 is_admin）。
     AGENT_REVIEWER_ROLE_IDS: str = ""
     AGENT_ADMIN_ROLE_IDS: str = ""
