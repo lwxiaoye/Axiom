@@ -30,6 +30,7 @@
     <section v-show="tab === 'model'" class="card">
       <div v-if="model.loading" class="muted">正在加载…</div>
       <template v-else>
+        <p class="hint">此配置为平台默认，对所有登录用户生效；用户可在工作台「模型配置」页用自己的 API Key 覆盖。</p>
         <label for="m-base">请求地址</label>
         <input id="m-base" v-model="model.form.base_url" type="url" placeholder="https://api.example.com/v1" :disabled="model.busy" />
         <label for="m-key">API Key <span v-if="model.hasKey" class="ok">已配置</span></label>

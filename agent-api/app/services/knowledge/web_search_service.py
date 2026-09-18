@@ -1135,7 +1135,7 @@ async def _stage_search(
         for row in (c.get("providerPool") or [])
     )
     if failures and fallback_enabled and not str(c.get("deepseekApiKey") or "").strip():
-        failures.append("deepseek-official: 当前用户未分配模型 API Key，付费兜底不可用")
+        failures.append("deepseek-official: 未配置可用的模型 API Key，付费兜底不可用")
     return [], "; ".join(failures or ([] if healthy_empty else skipped))[:800]
 
 
