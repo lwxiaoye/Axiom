@@ -62,6 +62,14 @@ logger = logging.getLogger(__name__)
 
 
 # Chat endpoints
+@api_router.get("/chat/builtin-apps")
+async def list_builtin_apps_route(user: UserContext = Depends(current_user)):
+    """智能体广场里的内置智能体列表（校园百事通 / 面试助手 / 演示文稿助手）。"""
+    from app.services.chat.builtin_app_access import list_builtin_apps
+
+    return await list_builtin_apps(user)
+
+
 @api_router.get("/chat/builtin-apps/{preset}")
 async def get_builtin_app(preset: str, user: UserContext = Depends(current_user)):
     """Resolve one administrator-configured Harness page and enforce its current ACL."""

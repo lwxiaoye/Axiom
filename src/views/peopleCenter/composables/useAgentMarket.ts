@@ -1,6 +1,6 @@
 import { computed, ref, watch, type Ref } from 'vue';
 import { myAppList } from '../../flow/app/AppInfo.api';
-import { getMarketplaceModelOptions, type AgentItem } from '../agentApi';
+import { getMarketplaceModelOptions, listBuiltinApps, type AgentItem } from '../agentApi';
 import { resolveAppJumpUrl } from '/@/utils/jump';
 import { openAgentRunWindow } from '../../workflow/shared/runtimeRoute';
 import { decorateAppsWithModelAvailability } from './agentModelRequirements';
@@ -91,12 +91,21 @@ export function useAgentMarket(options: UseAgentMarketOptions) {
     if (catalogLoaded && options.activeSection.value !== 'agent') return;
     appLoading.value = true;
     try {
-      const [appResult, modelResult] = await Promise.allSettled([
+      // 内置智能体的上架记录归 agent-api（app_info），用户自建应用仍走 myAppList。
+      // 两路独立取，任一失败不影响另一路。
+      const [appResult, modelResult, builtinResult] = await Promise.allSettled([
         myAppList({ column: 'createTime', order: 'desc' }),
         getMarketplaceModelOptions(),
+        listBuiltinApps(),
       ]);
+      const builtinApps: MarketplaceApp[] =
+        builtinResult.status === 'fulfilled' ? (builtinResult.value as MarketplaceApp[]) : [];
+      if (builtinResult.status === 'rejected') {
+        console.warn('load builtin assistants failed', builtinResult.reason);
+      }
       if (appResult.status === 'rejected') {
-        rawAppList.value = [];
+        // 自建应用目录挂了不该连带内置智能体一起消失
+        rawAppList.value = builtinApps;
         const status = catalogHttpStatus(appResult.reason);
         catalogUnavailable = status === 404 || status === 501 || status === 503;
         if (options.activeSection.value === 'agent' && !catalogUnavailable) {
@@ -108,7 +117,7 @@ export function useAgentMarket(options: UseAgentMarketOptions) {
       }
 
       catalogUnavailable = false;
-      const apps = normalizeAppListResponse(appResult.value);
+      const apps = [...builtinApps, ...normalizeAppListResponse(appResult.value)];
       // 模型目录失败时不做本地预警；运行端仍会以当前授权做最终校验。
       const availableModels = modelResult.status === 'fulfilled'
         ? modelResult.value.filter((model) => model.available !== false).map((model) => model.value)
