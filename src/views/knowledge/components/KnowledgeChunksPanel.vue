@@ -81,7 +81,7 @@
 import { onMounted, reactive, ref, watch } from 'vue';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { useMessage } from '/@/hooks/web/useMessage';
-import { deleteChunk, deleteManagedChunk, getChunkList, getDocumentList, getManagedChunkList, getManagedDocumentList, setChunkEnabled, setManagedChunkEnabled } from '../knowledge.api';
+import { deleteChunk, deleteManagedChunk, getChunkList, getDocumentList, getManagedChunkList, getManagedDocumentList, knowledgeErrorMessage, setChunkEnabled, setManagedChunkEnabled } from '../knowledge.api';
 import type { KnowledgeChunk, KnowledgeDocument } from '../knowledge.types';
 
 const props = withDefaults(defineProps<{
@@ -173,15 +173,24 @@ function openChunk(record: KnowledgeChunk) {
   emit('edit', record);
 }
 
+// 用户侧请求关掉了自动报错提示（见 knowledge.api.ts 的 KB_OPTS），停用/删除失败时
+// 开关会弹回原位、列表纹丝不动，必须把原因显示出来，否则用户只看到「点了没反应」。
 async function toggleChunk(record: KnowledgeChunk, enabled: boolean) {
   if (!props.canEdit) return;
-  await (props.management ? setManagedChunkEnabled : setChunkEnabled)(record.id, enabled);
-  record.enabled = enabled ? 1 : 0;
+  await (props.management ? setManagedChunkEnabled : setChunkEnabled)(record.id, enabled).then(
+    () => { record.enabled = enabled ? 1 : 0; },
+    (error) => createMessage.error(knowledgeErrorMessage(error, enabled ? '启用分段失败' : '停用分段失败')),
+  );
 }
 
 async function removeChunk(record: KnowledgeChunk) {
   if (!props.canEdit) return;
-  await (props.management ? deleteManagedChunk : deleteChunk)(record.id);
+  try {
+    await (props.management ? deleteManagedChunk : deleteChunk)(record.id);
+  } catch (error) {
+    createMessage.error(knowledgeErrorMessage(error, '删除分段失败'));
+    return;
+  }
   createMessage.success('分段已删除');
   await loadChunks();
   emit('changed');

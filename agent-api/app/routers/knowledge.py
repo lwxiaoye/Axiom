@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, 
 from fastapi.responses import Response
 
 from app.core.auth import UserContext, current_user, is_admin
+from app.services.knowledge import chunk_service
 from app.services.knowledge import knowledge_base_service as kb
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,38 @@ async def add_document(
         raise HTTPException(400, str(exc)) from exc
 
 
+async def _read_text_upload(file: UploadFile) -> tuple[bytes, str]:
+    """读上传文件并解码成文本；上传与「预览分段」共用，两边看到的必须是同一份文本。"""
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"文件超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB 上限")
+    try:
+        return raw, raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            return raw, raw.decode("gbk")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(400, "暂仅支持 UTF-8 / GBK 编码的纯文本") from exc
+
+
+@router.post("/bases/{knowledge_id}/documents/preview")
+async def preview_document(
+    knowledge_id: str,
+    file: UploadFile = File(...),
+    user: UserContext = Depends(current_user),
+):
+    """上传向导的「预览分段」：只切不入库。
+
+    用与入库相同的切法，用户在向导里看到的分段就是上传后的分段。向导表单里的
+    splitStrategy / chunkSize 等参数是老 Java 的口径，agent-api 入库时并不读它们
+    （切法固定为 knowledge_base_service.split_text），这里同样不读，免得预览和实际
+    入库两套结果。
+    """
+    await _require_edit(knowledge_id, user)
+    _, text = await _read_text_upload(file)
+    return chunk_service.preview_split(file.filename or "未命名", text)
+
+
 @router.post("/bases/{knowledge_id}/documents/upload")
 async def upload_document(
     knowledge_id: str,
@@ -128,16 +161,7 @@ async def upload_document(
     user: UserContext = Depends(current_user),
 ):
     await _require_edit(knowledge_id, user)
-    raw = await file.read()
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, f"文件超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB 上限")
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            text = raw.decode("gbk")
-        except UnicodeDecodeError as exc:
-            raise HTTPException(400, "暂仅支持 UTF-8 / GBK 编码的纯文本") from exc
+    raw, text = await _read_text_upload(file)
     try:
         return await kb.add_document(
             knowledge_id=knowledge_id,
@@ -352,6 +376,94 @@ async def download_documents_zip(
         media_type="application/zip",
         headers=_attachment_headers("知识库原始文档.zip"),
     )
+
+
+# ---- 分段 ----
+
+async def _require_chunk_edit(chunk_id: str, user: UserContext) -> dict[str, Any]:
+    chunk = await chunk_service.get_chunk(chunk_id)
+    if chunk is None:
+        raise HTTPException(404, "分段不存在")
+    await _require_edit(chunk["knowledgeId"], user)
+    return chunk
+
+
+def _chunk_error(exc: Exception) -> HTTPException:
+    """向量侧失败给 502：不是用户请求有问题，而是嵌入服务 / Qdrant 那边没成，提示语要区分。"""
+    if isinstance(exc, chunk_service.ChunkVectorError):
+        return HTTPException(502, str(exc))
+    return HTTPException(400, str(exc))
+
+
+@router.get("/chunks")
+async def list_chunks(
+    knowledgeId: str = Query(...),
+    documentId: Optional[str] = Query(None),
+    keyword: str = Query(""),
+    pageNo: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=chunk_service.MAX_PAGE_SIZE),
+    user: UserContext = Depends(current_user),
+):
+    """分段列表。查询参数名沿用前端 getChunkList 传的 camelCase，不做翻译层。"""
+    await _require_access(knowledgeId, user)
+    return await chunk_service.list_chunks(
+        knowledgeId, document_id=documentId, keyword=keyword, page=pageNo, page_size=pageSize,
+    )
+
+
+@router.put("/chunks/{chunk_id}")
+async def update_chunk(
+    chunk_id: str,
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    """改正文并重嵌入。前端还会带 contentWithImages / images（老 Java 的图文分段），
+    agent-api 的分段没有图片存储，这两个字段忽略。"""
+    await _require_chunk_edit(chunk_id, user)
+    try:
+        return await chunk_service.update_chunk(chunk_id, str(body.get("content") or ""))
+    except (ValueError, chunk_service.ChunkVectorError) as exc:
+        raise _chunk_error(exc) from exc
+
+
+@router.post("/chunks/{chunk_id}/enabled")
+async def set_chunk_enabled(
+    chunk_id: str,
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    await _require_chunk_edit(chunk_id, user)
+    try:
+        return await chunk_service.set_chunk_enabled(chunk_id, bool(body.get("enabled", True)))
+    except (ValueError, chunk_service.ChunkVectorError) as exc:
+        raise _chunk_error(exc) from exc
+
+
+@router.delete("/chunks/{chunk_id}")
+async def delete_chunk(chunk_id: str, user: UserContext = Depends(current_user)):
+    await _require_chunk_edit(chunk_id, user)
+    try:
+        return await chunk_service.delete_chunk(chunk_id)
+    except (ValueError, chunk_service.ChunkVectorError) as exc:
+        raise _chunk_error(exc) from exc
+
+
+@router.post("/bases/{knowledge_id}/chunks/rebuild")
+async def rebuild_chunks(knowledge_id: str, user: UserContext = Depends(current_user)):
+    """从 Qdrant 回填 agent_knowledge_chunk（幂等）。
+
+    回填函数 rebuild_chunk_rows 由「入库双写 + 老数据回填」那条线提供；它还没合进来
+    时这个入口返回 501 说明原因，而不是在这里另写一份回填逻辑。
+    """
+    await _require_edit(knowledge_id, user)
+    rebuild = getattr(kb, "rebuild_chunk_rows", None)
+    if rebuild is None:
+        raise HTTPException(501, "切片回填尚未部署：knowledge_base_service.rebuild_chunk_rows 不存在")
+    try:
+        count = await rebuild(knowledge_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"rebuilt": int(count or 0)}
 
 
 @router.post("/retrieval")
