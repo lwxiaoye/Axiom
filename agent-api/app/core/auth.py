@@ -166,7 +166,7 @@ def _resolve_tenant_id(info: dict, result: dict) -> str:
 
 
 async def _verify_token_with_java(token: str) -> UserContext:
-    url = f"{settings.JAVA_INTERNAL_BASE}/sys/user/getUserInfo"
+    url = f"{settings.AUTH_API_BASE}/sys/user/getUserInfo"
     logger.info("回源 Java 校验 token: %s -> %s", _mask_token(token), url)
     try:
         # 内部身份校验直连配置的 Java 服务，避免继承桌面代理并转发登录凭据。

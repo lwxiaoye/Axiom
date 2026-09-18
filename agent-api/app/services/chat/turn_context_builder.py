@@ -401,8 +401,8 @@ async def _fetch_trusted_skills(skill_ids: Optional[List[str]], token: str) -> L
     ids = [str(s).strip() for s in (skill_ids or []) if str(s).strip()]
     if not ids:
         return []
-    list_url = f"{settings.JAVA_INTERNAL_BASE}/ai/skill/list"
-    readme_url = f"{settings.JAVA_INTERNAL_BASE}/ai/skill/readme"
+    list_url = f"{settings.AUTH_API_BASE}/ai/skill/list"
+    readme_url = f"{settings.AUTH_API_BASE}/ai/skill/readme"
     headers = {"X-Access-Token": token or ""}
     trusted: List[dict] = []
     try:
@@ -494,7 +494,7 @@ async def _get_catalog_records(token: str) -> list:
         headers = {"X-Access-Token": token or ""}
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.get(
-                f"{settings.JAVA_INTERNAL_BASE}/ai/skill/list",
+                f"{settings.AUTH_API_BASE}/ai/skill/list",
                 params={"pageNo": 1, "pageSize": 1000, "enabled": 1}, headers=headers,
             )
             data = resp.json()

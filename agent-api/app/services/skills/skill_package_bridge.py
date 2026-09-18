@@ -848,7 +848,7 @@ async def fetch_skill_packages(skills: List[dict], token: str) -> List[dict]:
     wanted = [s for s in (skills or []) if str(s.get("record_id") or "").strip()]
     if not wanted:
         return []
-    base = settings.JAVA_INTERNAL_BASE
+    base = settings.AUTH_API_BASE
     headers = {"X-Access-Token": token or ""}
     packages: List[dict] = []
     try:

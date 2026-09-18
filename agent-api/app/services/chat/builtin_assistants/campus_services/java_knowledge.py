@@ -48,7 +48,7 @@ async def _java_get(
     headers = {"X-Access-Token": token or ""}
     if tenant_id:
         headers["X-Tenant-Id"] = str(tenant_id)
-    url = f"{settings.JAVA_INTERNAL_BASE}{path}"
+    url = f"{settings.AUTH_API_BASE}{path}"
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(url, params=params or {}, headers=headers)
