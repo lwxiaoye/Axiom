@@ -7,7 +7,11 @@ const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'u
 describe('knowledge analytics frontend contract', () => {
   it('keeps manual retrieval separate from formal analytics routes', () => {
     const api = read('src/views/knowledge/knowledge.api.ts');
-    expect(api).toContain("retrievalManualTest: '/ai/knowledge/retrieval/manual-test'");
+    // 原 Java 时代靠一条独立的 manual-test 路由避免「检索测试」被计入运营统计；
+    // 现在检索测试与真实检索共用 agent-api 的 /knowledge/retrieval，该接口本身不写
+    // 任何统计，所以这里钉的是：测试面板不再指向已下线的 Java 路径。
+    expect(api).toContain('`${KB}/retrieval`');
+    expect(api).not.toContain('/ai/knowledge/retrieval/manual-test');
     expect(api).toContain('getManagedKnowledgeAnalyticsOverview');
     expect(api).toContain('getManagedKnowledgeBaseAnalytics');
     expect(api).toContain('getOwnedKnowledgeBaseAnalytics');
