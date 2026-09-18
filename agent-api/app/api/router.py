@@ -27,6 +27,7 @@ from app.services.chat.builtin_assistants.registry import origin_for_preset
 from app.routers.connectors import router as connectors_router
 from app.routers.embedding_config import router as embedding_config_router
 from app.routers.platform_config import router as platform_config_router
+from app.routers.knowledge import router as knowledge_router
 from app.routers.workflow import router as workflow_router
 from app.routers.agent_skill import router as agent_skill_router
 from app.routers.files import router as files_router
@@ -44,6 +45,7 @@ from app.routers.model_connection import router as model_connection_router
 api_router.include_router(model_connection_router)
 api_router.include_router(embedding_config_router)
 api_router.include_router(platform_config_router)
+api_router.include_router(knowledge_router)
 api_router.include_router(workflow_router)
 api_router.include_router(agent_skill_router)
 api_router.include_router(files_router)

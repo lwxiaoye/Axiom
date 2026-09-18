@@ -1036,3 +1036,63 @@ class SysUserDepart(Base):
     id = Column(String(64), primary_key=True)
     user_id = Column(String(64), nullable=False, index=True)
     dep_id = Column(String(64), nullable=False, index=True)
+
+
+# ─── 知识库 ───────────────────────────────────────────────────────────────
+# 原先整块归 JeecgBoot(Java)，Java 下线后 auth-api 只留了一个统一返回 503 的桩
+# （「知识库业务服务尚未接入」），导致：知识库页面空转、校园百事通因「至少绑定一个
+# 可用知识库」永远无法发布、RAG 检索完全不可用。现由 agent-api 自持——它本来就握着
+# Qdrant 与 Embedding 配置，是唯一合理的归属方。
+
+class KnowledgeBase(Base):
+    """知识库。chunk_count 由入库流程维护，校园百事通发布校验会读它判断是否可用。"""
+    __tablename__ = "agent_knowledge_base"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(32), nullable=False, default="0", index=True)
+    name = Column(String(128), nullable=False)
+    description = Column(String(512), default="")
+    owner_user_id = Column(String(64), nullable=False, index=True)
+    owner_username = Column(String(128), default="")
+    # ENABLED / DISABLED，与校园百事通校验里的状态判定对齐
+    status = Column(String(16), nullable=False, default="ENABLED")
+    chunk_count = Column(Integer, nullable=False, default=0)
+    doc_count = Column(Integer, nullable=False, default=0)
+    # 入库时所用的向量模型与维度：换模型后旧集合失效，据此判断是否需要重建
+    embedding_model = Column(String(128), default="")
+    embedding_dimension = Column(Integer, nullable=True)
+    create_time = Column(DateTime, server_default=func.now())
+    update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class KnowledgeDocument(Base):
+    """知识库中的一篇文档。切片本身在 Qdrant，这里只存元信息与处理状态。"""
+    __tablename__ = "agent_knowledge_document"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    knowledge_id = Column(String(64), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    content_type = Column(String(64), default="text/plain")
+    size_bytes = Column(Integer, nullable=False, default=0)
+    # PENDING / PROCESSING / COMPLETED / FAILED，对齐校验里的 DOC_WARNING_STATUSES
+    status = Column(String(16), nullable=False, default="PENDING")
+    chunk_count = Column(Integer, nullable=False, default=0)
+    error_message = Column(String(512), default="")
+    create_time = Column(DateTime, server_default=func.now())
+    update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class KnowledgeAcl(Base):
+    """知识库授权。无行表示仅所有者可见；permission 取值对齐 RETRIEVAL_PERMISSIONS。"""
+    __tablename__ = "agent_knowledge_acl"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    knowledge_id = Column(String(64), nullable=False, index=True)
+    subject_type = Column(String(16), nullable=False, default="user")  # user / role / dept
+    subject_id = Column(String(64), nullable=False, index=True)
+    # VIEWER / EDITOR / OWNER —— 对齐 config_service.RETRIEVAL_PERMISSIONS
+    permission = Column(String(16), nullable=False, default="VIEWER")
+    create_time = Column(DateTime, server_default=func.now())
