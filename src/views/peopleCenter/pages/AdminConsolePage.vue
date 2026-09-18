@@ -170,10 +170,18 @@
                   placeholder="每行一个域名，例如 www.example.edu.cn" :disabled="campus.busy"></textarea>
         <p class="hint">官网检索与配图只允许来自该白名单，用于保证回答「有据可查」。至少填一个。</p>
 
-        <label>已绑定知识库</label>
-        <p class="hint">
-          {{ campus.bindings.length ? campus.bindings.join('、') : '未绑定。发布要求至少绑定一个可用知识库。' }}
-        </p>
+        <label>绑定知识库</label>
+        <div v-if="!campus.knowledgeBases.length" class="hint">
+          还没有可绑定的知识库。先到工作台「我的知识库」建库并上传文档，发布要求至少绑定一个可用知识库。
+        </div>
+        <div v-else class="check-list">
+          <label v-for="kb in campus.knowledgeBases" :key="kb.id" class="check-item">
+            <input type="checkbox" :value="kb.id" v-model="campus.bindings" :disabled="campus.busy" />
+            <span>{{ kb.name }}</span>
+            <small>{{ kb.documentCount }} 个文档 · {{ kb.chunkCount }} 个分段{{ kb.status === 'ACTIVE' ? '' : ' · 已停用' }}</small>
+          </label>
+        </div>
+        <p class="hint">回答校园问题时只在勾选的知识库里检索。</p>
 
         <label for="c-note">变更说明</label>
         <input id="c-note" v-model="campus.note" placeholder="本次修改的简要说明" :disabled="campus.busy" />
@@ -430,7 +438,9 @@
   const campus = reactive({
     loading: true, saving: false, publishing: false, checking: false, busy: false,
     error: '', enabled: false, revision: 0, draftStatus: '',
-    modelId: '', models: [] as any[], bindings: [] as string[],
+    modelId: '', models: [] as any[],
+    // bindings 存知识库 id；knowledgeBases 是可勾选的候选（当前管理员名下的库）
+    bindings: [] as string[], knowledgeBases: [] as any[],
     domains: '', note: '', issues: [] as string[],
     feedback: null as Result | null,
   });
@@ -457,22 +467,38 @@
       const draft = d.draft || {};
       campus.draftStatus = draft.status || '';
       campus.modelId = String(draft.model_id || '');
+      // 服务端存的是 {host, include_subdomains} 对象，页面上按「每行一个域名」展示
       const domains = draft.official_domains;
-      campus.domains = Array.isArray(domains) ? domains.join('\n') : String(domains || '');
+      campus.domains = Array.isArray(domains)
+        ? domains.map((d: any) => String(typeof d === 'string' ? d : d?.host ?? '')).filter(Boolean).join('\n')
+        : '';
       const bindings = draft.knowledge_bindings;
       campus.bindings = Array.isArray(bindings)
-        ? bindings.map((b: any) => String(b?.name ?? b?.knowledge_id ?? b))
+        ? bindings.map((b: any) => String(b?.knowledge_id ?? b)).filter(Boolean)
         : [];
       campus.note = draft.change_note || '';
+      const kbs = await requestAgentApi<any[]>('/knowledge/bases?scope=owned');
+      campus.knowledgeBases = Array.isArray(kbs) ? kbs : [];
     } catch (e: any) { campus.error = e?.message || '配置加载失败'; }
     finally { campus.loading = false; }
   }
 
   function draftPayload() {
+    const byId = new Map(campus.knowledgeBases.map((kb: any) => [String(kb.id), kb]));
     return {
       expected_revision: campus.revision,
       model_id: campus.modelId,
-      official_domains: campus.domains.split('\n').map((x) => x.trim()).filter(Boolean),
+      // 接口要的是 {host, include_subdomains}，且拒绝多余字段；用户只关心域名本身，
+      // 子域名默认放行（学校各院系站点几乎都是子域名）
+      official_domains: campus.domains
+        .split('\n')
+        .map((x) => x.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+        .filter(Boolean)
+        .map((host) => ({ host, include_subdomains: true })),
+      knowledge_bindings: campus.bindings.map((id) => ({
+        knowledge_id: id,
+        knowledge_name_snapshot: byId.get(id)?.name ?? null,
+      })),
       change_note: campus.note,
     };
   }
@@ -565,6 +591,10 @@
 <style scoped>
   .admin-page { width: 100%; max-width: 860px; margin: 0 auto; padding: 38px 32px 64px; color: #18181b; }
   .page-heading { margin-bottom: 26px; }
+  .check-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 450; cursor: pointer; }
+  .check-item input { width: auto; margin: 0; }
+  .check-item small { color: #85858f; font-size: 12px; }
   .back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 18px; padding: 0;
           font-size: 13px; color: #85858f; background: none; border: 0; cursor: pointer;
           transition: color 0.15s; }
