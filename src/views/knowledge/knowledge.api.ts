@@ -42,7 +42,6 @@ const Api = {
   chunkDisable: '/ai/knowledge/chunk/disable',
   chunkDelete: '/ai/knowledge/chunk/delete',
   retrievalTest: '/ai/knowledge/retrieval/test',
-  retrievalManualTest: '/ai/knowledge/retrieval/manual-test',
   aclList: '/ai/knowledge/acl/list',
   aclSave: '/ai/knowledge/acl/save',
 };
@@ -202,8 +201,10 @@ export const setChunkEnabled = (id: string, enabled: boolean) =>
 export const deleteChunk = (id: string) =>
   defHttp.delete({ url: `${KB}/chunks/${id}` }, KB_OPTS);
 
+// 检索测试与真实检索是同一个接口：测试面板里试出来的检索方式和权重，
+// 就是对话里会用到的那套，不另做一条只为演示的路径。
 export const testRetrieval = (params: Recordable) =>
-  defHttp.post<RetrievalResponse>({ url: Api.retrievalManualTest, params });
+  defHttp.post<RetrievalResponse>({ url: `${KB}/retrieval`, params }, KB_OPTS);
 
 export const getKnowledgeAcl = (knowledgeId: string) =>
   defHttp.get<KnowledgeAcl[]>({ url: `${KB}/bases/${knowledgeId}/acl` }, KB_OPTS);

@@ -5,6 +5,7 @@
 """
 import io
 import logging
+import time
 import zipfile
 from typing import Any, Optional
 from urllib.parse import quote
@@ -188,6 +189,9 @@ async def update_base(
             description=body.get("description"),
             top_k=body.get("topK", body.get("top_k")),
             score_threshold=body.get("scoreThreshold", body.get("score_threshold")),
+            retrieval_mode=body.get("retrievalMode", body.get("retrieval_mode")),
+            semantic_weight=body.get("semanticWeight", body.get("semantic_weight")),
+            keyword_weight=body.get("keywordWeight", body.get("keyword_weight")),
             user_id=str(user.user_id),
             is_admin=is_admin(user),
         )
@@ -471,15 +475,45 @@ async def retrieval(
     body: dict = Body(...),
     user: UserContext = Depends(current_user),
 ):
+    """检索。页面上的「检索测试」也走这里：它想临时试不同的检索方式和权重，
+    所以这些参数都可选传，不传就用知识库自己保存的设置。返回结构同时给出
+    页面契约需要的 items / latencyMs（RetrievalResponse）和原始 chunks。"""
     ids = body.get("knowledgeIds") or body.get("knowledge_ids") or []
     for kid in ids:
         await _require_access(str(kid), user)
+
+    def _num(key: str, alt: str):
+        value = body.get(key, body.get(alt))
+        return None if value in (None, "") else float(value)
+
+    started = time.monotonic()
     try:
         chunks = await kb.search_chunks(
             knowledge_ids=[str(x) for x in ids],
             query=str(body.get("query") or ""),
             top_k=int(body.get("topK") or body.get("top_k") or 5),
+            score_threshold=_num("scoreThreshold", "score_threshold"),
+            retrieval_mode=body.get("retrievalMode", body.get("retrieval_mode")) or None,
+            semantic_weight=_num("semanticWeight", "semantic_weight"),
+            keyword_weight=_num("keywordWeight", "keyword_weight"),
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"ok": True, "chunks": chunks}
+    items = [{
+        "knowledgeId": c.get("knowledgeId", ""),
+        "documentId": c.get("documentId", ""),
+        "chunkId": c.get("pointId") or f"{c.get('documentId')}#{c.get('chunkIndex')}",
+        "documentName": c.get("source", ""),
+        "content": c.get("content", ""),
+        "sourceType": "DOCUMENT_CHUNK",
+        "score": c.get("score"),
+        "vectorScore": c.get("vectorScore"),
+        "keywordScore": c.get("keywordScore"),
+    } for c in chunks]
+    return {
+        "ok": True,
+        "query": str(body.get("query") or ""),
+        "latencyMs": round((time.monotonic() - started) * 1000),
+        "items": items,
+        "chunks": chunks,
+    }
