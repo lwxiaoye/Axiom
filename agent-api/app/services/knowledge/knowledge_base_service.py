@@ -4,12 +4,16 @@
 空转、校园百事通因「至少绑定一个可用知识库」无法发布、RAG 完全不可用。现由 agent-api
 自持——Qdrant 与 Embedding 配置本来就在这里。
 
-切片存 Qdrant（集合按 模型+维度 命名，换模型不会读到旧向量），元信息存 MySQL。
+切片双写：向量进 Qdrant（集合按 模型+维度 命名，换模型不会读到旧向量），正文进 MySQL
+的 agent_knowledge_chunk（ngram 全文索引，供关键词/混合检索与分段管理），point_id 把两边
+连起来；文档/知识库元信息存 MySQL。
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -21,14 +25,15 @@ from qdrant_client.models import (
     Filter,
     MatchAny,
     MatchValue,
+    PointIdsList,
     PointStruct,
     VectorParams,
 )
-from sqlalchemy import delete, func, select
+from sqlalchemy import bindparam, delete, func, select, text
 
 from app.core.config import settings
 from app.core.database import async_session
-from app.models import KnowledgeAcl, KnowledgeBase, KnowledgeDocument
+from app.models import KnowledgeAcl, KnowledgeBase, KnowledgeChunk, KnowledgeDocument
 from app.services.knowledge import embedding_service, rerank_service
 from app.services.knowledge.vector_service import _get_client
 
@@ -37,6 +42,58 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 80
 KB_INDEX_VERSION = 1
+
+# 检索方式。VECTOR = 纯向量；KEYWORD = 纯 MySQL 全文；HYBRID = 两路召回后加权融合。
+RETRIEVAL_MODES = ("VECTOR", "KEYWORD", "HYBRID")
+DEFAULT_RETRIEVAL_MODE = "VECTOR"
+DEFAULT_SEMANTIC_WEIGHT = 0.5
+DEFAULT_KEYWORD_WEIGHT = 0.5
+# 工作流节点、前端旧契约与 FastGPT 风格的取值各有一套拼写，统一收敛到 RETRIEVAL_MODES。
+# 键是去掉空白/下划线/连字符再大写后的形式，见 normalize_retrieval_mode。
+_RETRIEVAL_MODE_ALIASES = {
+    "VECTOR": "VECTOR", "SEMANTIC": "VECTOR", "EMBEDDING": "VECTOR",
+    "KEYWORD": "KEYWORD", "FULLTEXT": "KEYWORD", "FULLTEXTRECALL": "KEYWORD", "BM25": "KEYWORD",
+    "HYBRID": "HYBRID", "MIXED": "HYBRID", "MIXEDRECALL": "HYBRID",
+}
+# Qdrant scroll 一页的点数：回填只读 payload 不读向量，一页 256 条既不会撑爆内存也不会太碎。
+_SCROLL_PAGE_SIZE = 256
+
+
+def normalize_retrieval_mode(value: Any, *, strict: bool = False) -> Optional[str]:
+    """把各处拼写归一到 VECTOR / KEYWORD / HYBRID。
+
+    空值返回 None（由调用方决定取知识库设置还是默认值）。不认识的值：strict 时抛
+    ValueError（保存设置这种用户输入必须拒绝），否则 warning 后按 VECTOR——检索路径上
+    宁可退化成能用的向量召回，也不能因为一个拼写把整次对话打挂，但要留痕。
+    """
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    key = re.sub(r"[\s_\-]", "", raw).upper()
+    mode = _RETRIEVAL_MODE_ALIASES.get(key)
+    if mode is None:
+        if strict:
+            raise ValueError(f"检索方式取值无效：{raw}（可选 VECTOR / KEYWORD / HYBRID）")
+        logger.warning("检索方式取值不认识：%r，本次按 VECTOR 处理", raw)
+        return DEFAULT_RETRIEVAL_MODE
+    return mode
+
+
+def _canonical_point_id(value: Any) -> str:
+    """Qdrant 会把 uuid4().hex 这种无连字符的 id 规范成带连字符的形式再返回。
+
+    MySQL 里 point_id 与 Qdrant 返回的 id 要能直接相等比较（回填去重、两路召回按
+    point_id 合并），所以两边统一走这里：能解析成 UUID 的一律转成带连字符的规范写法，
+    其它（例如整数 id）原样转字符串。
+    """
+    raw = str(value or "").strip()
+    try:
+        return str(uuid.UUID(raw))
+    except (ValueError, AttributeError):
+        return raw
+
 
 # 上传的原始文件按 知识库/文档 落盘留存。切片进 Qdrant 后原文本身还有用：
 # 页面上的「下载原文」要它，文档处理失败后重传也要它。放 USER_FILES_DIR 下的
@@ -228,6 +285,8 @@ async def delete_base(knowledge_id: str) -> None:
         except Exception:  # noqa: BLE001 - 向量清理失败不应阻塞元数据删除
             logger.exception("删除知识库向量失败：%s", kid)
     async with async_session() as session:
+        # 切片正本与向量同生共死：留下来会让关键词检索继续命中已删库的内容
+        await session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.knowledge_id == kid))
         await session.execute(delete(KnowledgeDocument).where(KnowledgeDocument.knowledge_id == kid))
         await session.execute(delete(KnowledgeAcl).where(KnowledgeAcl.knowledge_id == kid))
         await session.execute(delete(KnowledgeBase).where(KnowledgeBase.id == kid))
@@ -259,6 +318,12 @@ DEFAULT_SCORE_THRESHOLD = 0.3
 RERANK_CANDIDATE_MIN = 20
 
 
+def _candidate_limit(top_k: int) -> int:
+    """粗召回候选数。重排与混合检索共用一个口径：混合两路各取这么多再融合，
+    否则某一路只取 top_k 条，融合后能进前 top_k 的基本只剩交集。"""
+    return max(int(top_k) * 4, RERANK_CANDIDATE_MIN)
+
+
 def _serialize_base(
     row: KnowledgeBase, *, permission: Optional[str] = None
 ) -> dict[str, Any]:
@@ -285,7 +350,13 @@ def _serialize_base(
         "currentPermission": permission,
         "chunkCount": int(row.chunk_count or 0),
         "documentCount": int(row.doc_count or 0),
-        "retrievalMode": "VECTOR",
+        "retrievalMode": normalize_retrieval_mode(row.retrieval_mode) or DEFAULT_RETRIEVAL_MODE,
+        "semanticWeight": float(
+            row.semantic_weight if row.semantic_weight is not None else DEFAULT_SEMANTIC_WEIGHT
+        ),
+        "keywordWeight": float(
+            row.keyword_weight if row.keyword_weight is not None else DEFAULT_KEYWORD_WEIGHT
+        ),
         "topK": int(row.top_k or DEFAULT_TOP_K),
         "scoreThreshold": float(row.score_threshold if row.score_threshold is not None else DEFAULT_SCORE_THRESHOLD),
         "chunkSize": CHUNK_SIZE,
@@ -346,10 +417,13 @@ async def add_document(
     content_type: str = "text/plain",
     raw: Optional[bytes] = None,
 ) -> dict[str, Any]:
-    """同步入库：切片 → 向量化 → 写 Qdrant → 回写计数。
+    """同步入库：切片 → 向量化 → 写 Qdrant → 写 agent_knowledge_chunk → 回写计数。
 
     失败时把原因写进文档的 error_message 并置 FAILED，不静默吞掉——
     「用不了却无报错」是此前 RAG 的主要投诉来源。
+
+    双写顺序是先 Qdrant 后 MySQL：反过来的话 Qdrant 失败会留下一批属于 FAILED 文档的
+    正文行，关键词检索照样命中它们。MySQL 这步失败则回收刚写的点，两边不留半套。
     """
     kid = str(knowledge_id)
     base = await get_base(kid)
@@ -389,26 +463,115 @@ async def add_document(
         dimension = len(valid[0][1])
         collection = kb_collection_name(config.model, dimension)
         await ensure_kb_collection(collection, dimension)
-        await _get_client().upsert(
-            collection_name=collection,
-            points=[
-                PointStruct(
-                    id=uuid.uuid4().hex,
-                    vector=vector,
-                    payload={
-                        "knowledge_id": kid, "document_id": doc.id,
-                        "document_name": doc.name, "content": chunk, "chunk_index": index,
-                    },
+        # 点 id 直接生成带连字符的规范 UUID：Qdrant 返回的就是这个形式，MySQL 存同一个字符串，
+        # 两边比对不用再转换。
+        points = [
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=vector,
+                payload={
+                    "knowledge_id": kid, "document_id": doc.id,
+                    "document_name": doc.name, "content": chunk, "chunk_index": index,
+                    # 停用分段时改成 false；检索用 must_not enabled==false 过滤
+                    "enabled": True,
+                },
+            )
+            for index, (chunk, vector) in enumerate(valid)
+        ]
+        client = _get_client()
+        await client.upsert(collection_name=collection, points=points)
+        try:
+            await _insert_chunk_rows([
+                KnowledgeChunk(
+                    id=_new_id(), knowledge_id=kid, document_id=doc.id,
+                    chunk_index=index, content=chunk, char_count=len(chunk),
+                    point_id=str(point.id), enabled=1,
                 )
-                for index, (chunk, vector) in enumerate(valid)
-            ],
-        )
+                for index, ((chunk, _vector), point) in enumerate(zip(valid, points))
+            ])
+        except Exception:
+            # 正本没落下就把向量也撤掉，否则向量检索能命中、关键词检索查不到，分段页也是空的
+            try:
+                await client.delete(
+                    collection_name=collection,
+                    points_selector=PointIdsList(points=[point.id for point in points]),
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("切片正本写入失败后回收向量也失败，文档 %s 可能残留向量", doc.id)
+            raise
         await _mark_document(doc.id, "COMPLETED", chunk_count=len(valid))
         await _refresh_base_counts(kid, config.model, dimension)
     except Exception as exc:  # noqa: BLE001
         await _mark_document(doc.id, "FAILED", error=str(exc)[:500])
         raise
     return await get_document(doc.id)
+
+
+async def _insert_chunk_rows(rows: list[KnowledgeChunk]) -> int:
+    if not rows:
+        return 0
+    async with async_session() as session:
+        session.add_all(rows)
+        await session.commit()
+    return len(rows)
+
+
+async def rebuild_chunk_rows(knowledge_id: str) -> int:
+    """老数据回填：把 Qdrant 里该库的全部点按 payload 写回 agent_knowledge_chunk，返回新写入条数。
+
+    切片正本表晚于向量库出现，早先入库的文档只在 Qdrant 里有切片。幂等：MySQL 已有的
+    point_id 跳过，重复调用不会翻倍。以 Qdrant 为准而不是重新切片原文——重切结果未必和
+    当年一致，point_id 也对不上。payload 里 enabled=false 的点照样回填，但行也置为停用。
+    """
+    kid = str(knowledge_id)
+    config = await embedding_service.get_active_embedding_config()
+    if config is None or not config.dimension:
+        raise ValueError("尚未配置向量模型，无法定位知识库所在的向量集合")
+    collection = kb_collection_name(config.model, int(config.dimension))
+    client = _get_client()
+    if not await client.collection_exists(collection):
+        logger.info("回填切片正本：向量集合 %s 不存在，知识库 %s 无可回填数据", collection, kid)
+        return 0
+    async with async_session() as session:
+        existing = {
+            _canonical_point_id(pid)
+            for pid in (await session.execute(
+                select(KnowledgeChunk.point_id).where(KnowledgeChunk.knowledge_id == kid)
+            )).scalars().all()
+        }
+    written = 0
+    offset = None
+    while True:
+        points, offset = await client.scroll(
+            collection_name=collection,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="knowledge_id", match=MatchValue(value=kid))
+            ]),
+            limit=_SCROLL_PAGE_SIZE,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        rows: list[KnowledgeChunk] = []
+        for point in points:
+            pid = _canonical_point_id(point.id)
+            payload = point.payload or {}
+            content = str(payload.get("content") or "")
+            if pid in existing or not content:
+                continue
+            existing.add(pid)
+            rows.append(KnowledgeChunk(
+                id=_new_id(), knowledge_id=kid,
+                document_id=str(payload.get("document_id") or ""),
+                chunk_index=int(payload.get("chunk_index") or 0),
+                content=content, char_count=len(content), point_id=pid,
+                enabled=0 if payload.get("enabled") is False else 1,
+            ))
+        written += await _insert_chunk_rows(rows)
+        if offset is None:
+            break
+    logger.info("回填切片正本：知识库 %s 新写入 %d 行", kid, written)
+    return written
 
 
 async def _mark_document(doc_id: str, status: str, *, chunk_count: int = 0, error: str = "") -> None:
@@ -425,14 +588,25 @@ async def _mark_document(doc_id: str, status: str, *, chunk_count: int = 0, erro
 
 
 async def _refresh_base_counts(knowledge_id: str, model: str, dimension: int) -> None:
+    """回写知识库的切片数/文档数。
+
+    切片数以 agent_knowledge_chunk 为准（分段级增删改只动这张表，不用再逐个文档改计数）；
+    该库一行都没有时退回按文档 chunk_count 求和——那是还没跑 rebuild_chunk_rows 的老数据，
+    此时算成 0 会让校园百事通的「至少一个可用知识库」校验把它判成空库。
+    """
     async with async_session() as session:
         total_chunks = (await session.execute(
-            select(func.coalesce(func.sum(KnowledgeDocument.chunk_count), 0))
-            .where(
-                KnowledgeDocument.knowledge_id == knowledge_id,
-                KnowledgeDocument.status == "COMPLETED",
-            )
+            select(func.count(KnowledgeChunk.id))
+            .where(KnowledgeChunk.knowledge_id == knowledge_id)
         )).scalar() or 0
+        if not total_chunks:
+            total_chunks = (await session.execute(
+                select(func.coalesce(func.sum(KnowledgeDocument.chunk_count), 0))
+                .where(
+                    KnowledgeDocument.knowledge_id == knowledge_id,
+                    KnowledgeDocument.status == "COMPLETED",
+                )
+            )).scalar() or 0
         total_docs = (await session.execute(
             select(func.count(KnowledgeDocument.id))
             .where(KnowledgeDocument.knowledge_id == knowledge_id)
@@ -450,46 +624,84 @@ async def _refresh_base_counts(knowledge_id: str, model: str, dimension: int) ->
 
 # ---- 检索 ----
 
-async def search_chunks(
-    *,
-    knowledge_ids: list[str],
-    query: str,
-    top_k: Optional[int] = None,
-    score_threshold: Optional[float] = None,
-    rerank: Optional[bool] = None,
-) -> list[dict[str, Any]]:
-    """检索。top_k / 阈值未显式传入时，取知识库设置里保存的值。
+async def _load_base_settings(ids: list[str]) -> dict[str, Any]:
+    """多库检索时合并各库保存的检索设置。
 
-    此前两者都是写死的默认值，于是「知识库设置」里改完保存、检索行为却纹丝不动。
-    多库检索取各库中最宽松的一组，否则严格的那个库会把宽松库的结果一起砍掉。
-
-    rerank：None = 配置并启用了重排模型就用；True = 要求重排（未配置则记日志、按向量序）；
-    False = 只按向量排序（工作流节点没勾重排时传的就是它）。启用时先从 Qdrant 多取候选、
-    重排、再截到 top_k。每条结果的 `score` 是最终排序依据（重排后就是重排分），`vectorScore`
-    永远是向量分。两者量纲不同——余弦相似度 vs 交叉编码器相关度——所以 score_threshold
-    只作用在向量分上，在 Qdrant 粗召回阶段就生效，不拿它去卡重排分。
+    top_k 取最大、阈值取最小（宽松者胜，否则严格的库把宽松库的结果一起砍掉）；检索方式
+    各库一致就用它，不一致取 HYBRID（两路都跑才覆盖得住每个库的意图）；权重取平均。
+    没查到任何行（库不存在）时全部回落默认值。
     """
-    ids = [str(x).strip() for x in (knowledge_ids or []) if str(x).strip()]
-    if not ids or not (query or "").strip():
-        return []
-    if top_k is None or score_threshold is None:
-        async with async_session() as session:
-            rows = (await session.execute(
-                select(KnowledgeBase.top_k, KnowledgeBase.score_threshold)
-                .where(KnowledgeBase.id.in_(ids))
-            )).all()
-        if top_k is None:
-            top_k = max([int(r[0] or DEFAULT_TOP_K) for r in rows], default=DEFAULT_TOP_K)
-        if score_threshold is None:
-            score_threshold = min(
-                [float(r[1] if r[1] is not None else DEFAULT_SCORE_THRESHOLD) for r in rows],
-                default=DEFAULT_SCORE_THRESHOLD,
-            )
-    rerank_config = None
-    if rerank is not False:
-        rerank_config = await rerank_service.get_active_rerank_config()
-        if rerank and rerank_config is None:
-            logger.info("检索方要求重排，但重排模型未配置或未启用，按向量相似度排序返回")
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(
+                KnowledgeBase.top_k, KnowledgeBase.score_threshold, KnowledgeBase.retrieval_mode,
+                KnowledgeBase.semantic_weight, KnowledgeBase.keyword_weight,
+            ).where(KnowledgeBase.id.in_(ids))
+        )).all()
+    modes = {normalize_retrieval_mode(r[2]) or DEFAULT_RETRIEVAL_MODE for r in rows}
+    if not modes:
+        mode = DEFAULT_RETRIEVAL_MODE
+    elif len(modes) == 1:
+        mode = modes.pop()
+    else:
+        mode = "HYBRID"
+    semantic = [float(r[3]) for r in rows if r[3] is not None]
+    keyword = [float(r[4]) for r in rows if r[4] is not None]
+    return {
+        "top_k": max([int(r[0] or DEFAULT_TOP_K) for r in rows], default=DEFAULT_TOP_K),
+        "score_threshold": min(
+            [float(r[1] if r[1] is not None else DEFAULT_SCORE_THRESHOLD) for r in rows],
+            default=DEFAULT_SCORE_THRESHOLD,
+        ),
+        "retrieval_mode": mode,
+        "semantic_weight": sum(semantic) / len(semantic) if semantic else DEFAULT_SEMANTIC_WEIGHT,
+        "keyword_weight": sum(keyword) / len(keyword) if keyword else DEFAULT_KEYWORD_WEIGHT,
+    }
+
+
+def resolve_weights(
+    semantic_weight: Optional[float], keyword_weight: Optional[float]
+) -> tuple[float, float]:
+    """混合检索两路权重。都缺省 0.5/0.5；只给一个则另一个取 1−它；都给了各自夹到 0–1，
+    再按比例缩放到和为 1——融合分是两路归一分的加权和，权重和为 1 时它才落在 0–1，
+    前端只放一个滑块也正是为了保证这一点，这里对直接调接口的调用方补同样的约束。
+    """
+    if semantic_weight is None and keyword_weight is None:
+        return DEFAULT_SEMANTIC_WEIGHT, DEFAULT_KEYWORD_WEIGHT
+    if semantic_weight is None:
+        kw = max(0.0, min(1.0, float(keyword_weight)))
+        return 1.0 - kw, kw
+    if keyword_weight is None:
+        sw = max(0.0, min(1.0, float(semantic_weight)))
+        return sw, 1.0 - sw
+    sw = max(0.0, min(1.0, float(semantic_weight)))
+    kw = max(0.0, min(1.0, float(keyword_weight)))
+    total = sw + kw
+    if total <= 0:
+        logger.warning("混合检索两路权重都是 0，本次按 0.5/0.5 融合")
+        return DEFAULT_SEMANTIC_WEIGHT, DEFAULT_KEYWORD_WEIGHT
+    return sw / total, kw / total
+
+
+def _hit_from_payload(payload: dict[str, Any], point_id: Any) -> dict[str, Any]:
+    return {
+        "content": payload.get("content", ""),
+        "source": payload.get("document_name", ""),
+        "knowledgeId": payload.get("knowledge_id", ""),
+        "documentId": payload.get("document_id", ""),
+        "chunkIndex": payload.get("chunk_index"),
+        "pointId": _canonical_point_id(point_id) if point_id is not None else "",
+    }
+
+
+async def _vector_search(
+    ids: list[str], query: str, limit: int, score_threshold: float,
+) -> list[dict[str, Any]]:
+    """Qdrant 向量召回。score / vectorScore 都是余弦相似度；score_threshold 在这里生效。
+
+    停用的分段在 payload 上标 enabled=false，用 must_not 排除：老点没有这个键，
+    must_not 对缺键不成立，照常命中——用 must enabled==true 就会把老点全部漏掉。
+    """
     config = await _active_embedding()
     vector = await embedding_service.embed_query(
         query, config=config, audit_purpose_detail="knowledge_search",
@@ -500,34 +712,194 @@ async def search_chunks(
     client = _get_client()
     if not await client.collection_exists(collection):
         return []
-    k = max(1, int(top_k))
     hits = await client.search(
         collection_name=collection,
         query_vector=vector,
-        limit=max(k * 4, RERANK_CANDIDATE_MIN) if rerank_config else k,
-        query_filter=Filter(must=[
-            FieldCondition(key="knowledge_id", match=MatchAny(any=ids))
-        ]),
+        limit=limit,
+        query_filter=Filter(
+            must=[FieldCondition(key="knowledge_id", match=MatchAny(any=ids))],
+            must_not=[FieldCondition(key="enabled", match=MatchValue(value=False))],
+        ),
         score_threshold=float(score_threshold) or None,
         with_payload=True,
     )
-    results = [{
-        "content": (h.payload or {}).get("content", ""),
-        "source": (h.payload or {}).get("document_name", ""),
-        "knowledgeId": (h.payload or {}).get("knowledge_id", ""),
-        "documentId": (h.payload or {}).get("document_id", ""),
-        "score": float(h.score),
-        "vectorScore": float(h.score),
-    } for h in hits]
+    results = []
+    for h in hits:
+        item = _hit_from_payload(h.payload or {}, getattr(h, "id", None))
+        item["vectorScore"] = float(h.score)
+        item["keywordScore"] = None
+        item["score"] = float(h.score)
+        results.append(item)
+    return results
+
+
+# MySQL 自然语言全文检索。MATCH 出现两次是有意的：WHERE 里那次借全文索引筛掉相关度为 0 的行，
+# SELECT 里那次拿分数排序；优化器会把它们识别成同一次求值，不会多算。document_name 不在
+# 切片表上，LEFT JOIN 文档表补——文档行没了（不该发生）也让切片带空名回来，别把结果吞掉。
+_KEYWORD_SQL = text(
+    "SELECT c.point_id, c.knowledge_id, c.document_id, c.chunk_index, c.content, "
+    "       d.name AS document_name, "
+    "       MATCH(c.content) AGAINST(:q IN NATURAL LANGUAGE MODE) AS relevance "
+    "FROM agent_knowledge_chunk c "
+    "LEFT JOIN agent_knowledge_document d ON d.id = c.document_id "
+    "WHERE c.knowledge_id IN :ids AND c.enabled = 1 "
+    "  AND MATCH(c.content) AGAINST(:q IN NATURAL LANGUAGE MODE) "
+    "ORDER BY relevance DESC, c.document_id, c.chunk_index "
+    "LIMIT :limit"
+).bindparams(bindparam("ids", expanding=True))
+
+
+async def _keyword_search(ids: list[str], query: str, limit: int) -> list[dict[str, Any]]:
+    """MySQL ngram 全文召回。score / keywordScore 是 MATCH…AGAINST 的相关度。
+
+    量纲说明：InnoDB 的相关度是 TF-IDF 风格的非负实数，没有上界、随语料变化，和余弦
+    相似度（0–1）完全不可比，所以 score_threshold 不作用于这一路；混合检索也必须先各自
+    归一再融合。查询词同样会被 ngram 切成 2-gram（"借书期限" → 借书/书期/期限），单字查询
+    切不出 token、必然空结果——空结果不是错误。
+    """
+    async with async_session() as session:
+        rows = (await session.execute(
+            _KEYWORD_SQL, {"q": query, "ids": ids, "limit": int(limit)},
+        )).mappings().all()
+    results = []
+    for r in rows:
+        item = _hit_from_payload({
+            "content": r["content"], "document_name": r["document_name"] or "",
+            "knowledge_id": r["knowledge_id"], "document_id": r["document_id"],
+            "chunk_index": r["chunk_index"],
+        }, r["point_id"])
+        score = float(r["relevance"] or 0.0)
+        item["vectorScore"] = None
+        item["keywordScore"] = score
+        item["score"] = score
+        results.append(item)
+    return results
+
+
+def _min_max(values: list[float]) -> list[float]:
+    """min-max 归一到 0–1。只有一条或全部相等时给 1.0：那是这一路的最佳命中，不能因为
+    没有参照物就算成 0，否则单命中的一路在融合里毫无贡献。"""
+    if not values:
+        return []
+    lo, hi = min(values), max(values)
+    if hi - lo <= 1e-12:
+        return [1.0 for _ in values]
+    return [(v - lo) / (hi - lo) for v in values]
+
+
+def fuse_hits(
+    vector_hits: list[dict[str, Any]], keyword_hits: list[dict[str, Any]],
+    semantic_weight: float, keyword_weight: float,
+) -> list[dict[str, Any]]:
+    """混合检索融合：两路分数各自 min-max 归一，按权重加权求和，按 point_id 去重。
+
+    为什么不直接加原始分：余弦相似度在 0–1，MySQL 相关度无上界，直接相加等于只看关键词。
+    归一是相对本次候选集的——同一条切片在不同查询里的融合分不可横向比较，这也是
+    score_threshold 不卡融合分的原因。只在一路出现的切片，另一路按 0 计。
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for hits, key in ((vector_hits, "vectorScore"), (keyword_hits, "keywordScore")):
+        normalized = _min_max([float(h[key]) for h in hits])
+        for hit, norm in zip(hits, normalized):
+            pid = hit.get("pointId") or f"{hit.get('documentId')}#{hit.get('chunkIndex')}"
+            item = merged.get(pid)
+            if item is None:
+                item = dict(hit)
+                item["vectorScore"] = None
+                item["keywordScore"] = None
+                item["_vector_norm"] = 0.0
+                item["_keyword_norm"] = 0.0
+                merged[pid] = item
+                order.append(pid)
+            item[key] = hit[key]
+            item["_vector_norm" if key == "vectorScore" else "_keyword_norm"] = norm
+    fused = []
+    for pid in order:
+        item = merged[pid]
+        item["score"] = (
+            semantic_weight * item.pop("_vector_norm") + keyword_weight * item.pop("_keyword_norm")
+        )
+        fused.append(item)
+    fused.sort(key=lambda x: x["score"], reverse=True)
+    return fused
+
+
+async def search_chunks(
+    *,
+    knowledge_ids: list[str],
+    query: str,
+    top_k: Optional[int] = None,
+    score_threshold: Optional[float] = None,
+    rerank: Optional[bool] = None,
+    retrieval_mode: Optional[str] = None,
+    semantic_weight: Optional[float] = None,
+    keyword_weight: Optional[float] = None,
+) -> list[dict[str, Any]]:
+    """检索。top_k / 阈值 / 检索方式 / 权重未显式传入时，取知识库设置里保存的值。
+
+    此前两者都是写死的默认值，于是「知识库设置」里改完保存、检索行为却纹丝不动。
+    多库检索的合并规则见 _load_base_settings。
+
+    retrieval_mode：VECTOR 纯向量；KEYWORD 纯 MySQL 全文，不走向量、不受 score_threshold
+    约束（阈值是余弦相似度的量纲，套在全文相关度上没有意义）；HYBRID 两路各取
+    _candidate_limit(top_k) 条候选，见 fuse_hits 融合后再截 top_k。取值拼写在入口归一化，
+    不认识的按 VECTOR 并 warning。
+
+    rerank：None = 配置并启用了重排模型就用；True = 要求重排（未配置则记日志、按召回序）；
+    False = 不重排（工作流节点没勾重排时传的就是它）。启用时先多取候选、重排、再截到 top_k。
+
+    每条结果：`score` 是最终排序依据（重排后就是重排分，混合模式下是融合分，否则等于本路
+    召回分）；`vectorScore` 是余弦相似度、`keywordScore` 是 MySQL 全文相关度，没走那一路的
+    为 None。三者量纲互不相同，只有 vectorScore 能和 score_threshold 比。
+    """
+    ids = [str(x).strip() for x in (knowledge_ids or []) if str(x).strip()]
+    if not ids or not (query or "").strip():
+        return []
+    mode = normalize_retrieval_mode(retrieval_mode)
+    if top_k is None or score_threshold is None or mode is None \
+            or (mode == "HYBRID" and semantic_weight is None and keyword_weight is None):
+        saved = await _load_base_settings(ids)
+        if top_k is None:
+            top_k = saved["top_k"]
+        if score_threshold is None:
+            score_threshold = saved["score_threshold"]
+        if mode is None:
+            mode = saved["retrieval_mode"]
+        if mode == "HYBRID" and semantic_weight is None and keyword_weight is None:
+            semantic_weight, keyword_weight = saved["semantic_weight"], saved["keyword_weight"]
+    rerank_config = None
+    if rerank is not False:
+        rerank_config = await rerank_service.get_active_rerank_config()
+        if rerank and rerank_config is None:
+            logger.info("检索方要求重排，但重排模型未配置或未启用，按召回顺序返回")
+    k = max(1, int(top_k))
+    # 混合检索与重排都需要比 top_k 宽的候选；纯向量/纯关键词且不重排时取 top_k 就够
+    limit = _candidate_limit(k) if (rerank_config or mode == "HYBRID") else k
+
+    if mode == "KEYWORD":
+        results = await _keyword_search(ids, query, limit)
+    elif mode == "HYBRID":
+        sw, kw = resolve_weights(semantic_weight, keyword_weight)
+        vector_hits, keyword_hits = await asyncio.gather(
+            _vector_search(ids, query, limit, float(score_threshold)),
+            _keyword_search(ids, query, limit),
+        )
+        results = fuse_hits(vector_hits, keyword_hits, sw, kw)
+    else:
+        results = await _vector_search(ids, query, limit, float(score_threshold))
     if rerank_config is None or not results:
-        return results
+        return results[:k]
     return await _rerank_hits(query, results, k, rerank_config)
 
 
 async def _rerank_hits(
     query: str, results: list[dict[str, Any]], top_k: int, config: rerank_service.RerankConfig,
 ) -> list[dict[str, Any]]:
-    """向量候选 -> 重排 -> 截 top_k。重排失败退回向量排序，但 warning 留痕，不能静默降级。"""
+    """召回候选 -> 重排 -> 截 top_k。重排失败退回召回排序，但 warning 留痕，不能静默降级。
+
+    vectorScore / keywordScore 原样保留，只覆盖 score——调用方仍能看到这条是怎么被召回的。
+    """
     candidates = [r for r in results if str(r.get("content") or "").strip()]
     if not candidates:
         return results[:top_k]
@@ -537,7 +909,7 @@ async def _rerank_hits(
             audit_purpose_detail="knowledge_rerank",
         )
     except rerank_service.RerankError as exc:
-        logger.warning("知识库重排失败，本次退回向量排序：%s", exc)
+        logger.warning("知识库重排失败，本次退回召回排序：%s", exc)
         return results[:top_k]
     reranked = []
     for index, score in ranked[:top_k]:
@@ -573,9 +945,28 @@ async def update_base(
     description: Optional[str] = None,
     top_k: Optional[int] = None,
     score_threshold: Optional[float] = None,
+    retrieval_mode: Optional[str] = None,
+    semantic_weight: Optional[float] = None,
+    keyword_weight: Optional[float] = None,
     user_id: Optional[str] = None,
     is_admin: bool = False,
 ) -> dict[str, Any]:
+    # 先校验再开事务：取值无效直接 400，不留半截更新
+    mode = normalize_retrieval_mode(retrieval_mode, strict=True)
+    weights: Optional[tuple[float, float]] = None
+    if semantic_weight is not None or keyword_weight is not None:
+        for label, value in (("语义权重", semantic_weight), ("关键词权重", keyword_weight)):
+            if value is None:
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{label}必须是 0–1 之间的数字") from exc
+            if not 0.0 <= number <= 1.0:
+                raise ValueError(f"{label}必须在 0–1 之间")
+        # 只给一个时另一个取 1−它（前端只有一个滑块）；两个都给则按比例缩到和为 1 再存，
+        # 存下来的永远是检索时真正生效的那对值，页面回显不会和实际行为对不上
+        weights = resolve_weights(semantic_weight, keyword_weight)
     async with async_session() as session:
         row = (await session.execute(
             select(KnowledgeBase).where(KnowledgeBase.id == str(knowledge_id))
@@ -595,6 +986,10 @@ async def update_base(
             row.top_k = max(1, min(20, int(top_k)))
         if score_threshold is not None:
             row.score_threshold = max(0.0, min(1.0, float(score_threshold)))
+        if mode is not None:
+            row.retrieval_mode = mode
+        if weights is not None:
+            row.semantic_weight, row.keyword_weight = weights
         await session.commit()
     return await get_base(knowledge_id, user_id=user_id, is_admin=is_admin)
 
@@ -635,6 +1030,13 @@ async def delete_documents(knowledge_id: str, document_ids: list[str]) -> int:
         except Exception:  # noqa: BLE001
             logger.exception("删除文档向量失败：%s", ids)
     async with async_session() as session:
+        # 切片正本随文档一起删：留着会让关键词检索继续命中已删文档
+        await session.execute(
+            delete(KnowledgeChunk).where(
+                KnowledgeChunk.knowledge_id == kid,
+                KnowledgeChunk.document_id.in_(ids),
+            )
+        )
         await session.execute(
             delete(KnowledgeDocument).where(
                 KnowledgeDocument.knowledge_id == kid,

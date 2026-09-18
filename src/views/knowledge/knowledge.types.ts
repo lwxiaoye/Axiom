@@ -20,6 +20,9 @@ export interface KnowledgeBase {
   sharePermission?: KnowledgePermission;
   status: 'ACTIVE' | 'DISABLED';
   retrievalMode: string;
+  // 混合检索两路权重（0–1，和为 1）；旧接口没有这两个字段，读时按 0.5 兜底
+  semanticWeight?: number;
+  keywordWeight?: number;
   topK: number;
   scoreThreshold: number;
   chunkSize: number;

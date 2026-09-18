@@ -199,9 +199,8 @@ async def retrieve_knowledge(
     命中片段按内容前缀去重（多查询/重叠切片场景），并回填 citation_sink。
 
     retrieval_mode / semantic_weight / keyword_weight / rerank_enabled 是工作流
-    知识检索节点传下来的混合检索配置。rerank_enabled 透传给 search_chunks（None =
-    配置了重排模型就用）；关键词/混合检索进程内仍只做向量召回，收到非默认配置时
-    记一条日志说明未生效，而不是假装已按配置执行。
+    知识检索节点传下来的检索配置，原样透传给 search_chunks：None 表示取知识库自己保存的
+    设置（主对话走这条路），拼写归一化与不认识取值的降级都在 search_chunks 入口做。
     """
     q = (query or "").strip()
     if not q:
@@ -231,20 +230,15 @@ async def retrieve_knowledge(
     if not allowed_ids:
         return {"ok": False, "chunks": [], "error": "没有可检索的知识库（无权访问或已停用）"}
 
-    if (retrieval_mode and str(retrieval_mode).upper() not in {"", "VECTOR", "SEMANTIC"}) \
-            or keyword_weight:
-        # 说清楚而不是默默降级：工作流节点上勾了关键词/混合检索，这里只做了向量召回（重排除外，已支持）。
-        logger.info(
-            "知识检索收到混合检索配置但当前仅支持向量召回：mode=%s keywordWeight=%s",
-            retrieval_mode, keyword_weight,
-        )
-
     k = int(top_k or settings.KNOWLEDGE_TOP_K)
     th = settings.KNOWLEDGE_THRESHOLD if threshold is None else threshold
     try:
         hits = await kb.search_chunks(
             knowledge_ids=allowed_ids, query=q[:512], top_k=k, score_threshold=th,
             rerank=rerank_enabled,
+            retrieval_mode=retrieval_mode,
+            semantic_weight=semantic_weight,
+            keyword_weight=keyword_weight,
         )
     except ValueError as exc:
         # 向量模型未配置等可读原因，原样透出而不是假装没找到
@@ -258,6 +252,8 @@ async def retrieve_knowledge(
         "content": hit.get("content"),
         "documentName": hit.get("source"),
         "score": hit.get("score"),
+        "vectorScore": hit.get("vectorScore"),
+        "keywordScore": hit.get("keywordScore"),
         "knowledgeId": hit.get("knowledgeId"),
         "documentId": hit.get("documentId"),
     } for hit in hits]
@@ -291,6 +287,9 @@ async def retrieve_knowledge(
             "textContent": text_content,
             "source": source,
             "score": c.get("score") or c.get("similarity"),
+            # 两路召回分各自保留（没走那一路的为 None），排障时能看出一条是靠什么召回的
+            "vectorScore": c.get("vectorScore"),
+            "keywordScore": c.get("keywordScore"),
             "imageUrls": image_urls,
             "chunkId": c.get("chunkId") or c.get("id"),
             "knowledgeId": c.get("knowledgeId") or c.get("knowledge_id"),
