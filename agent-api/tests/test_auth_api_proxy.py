@@ -10,7 +10,7 @@ from fastapi import HTTPException
 import pytest
 
 
-def test_java_auth_bypasses_environment_proxy(monkeypatch):
+def test_auth_api_bypasses_environment_proxy(monkeypatch):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -38,7 +38,7 @@ def test_java_auth_bypasses_environment_proxy(monkeypatch):
         for key in ("NO_PROXY", "no_proxy"):
             monkeypatch.setenv(key, "")
         monkeypatch.setattr(auth.settings, "AUTH_API_BASE", f"http://127.0.0.1:{server.server_port}")
-        user = asyncio.run(auth._verify_token_with_java("test-token"))
+        user = asyncio.run(auth._verify_token_with_auth_api("test-token"))
         assert user.user_id == "test-user"
         assert received == [("/sys/user/getUserInfo", "test-token")]
     finally:
@@ -56,7 +56,7 @@ def test_revoked_token_is_revalidated_instead_of_using_stale_cache(monkeypatch):
     async def rejected(_token):
         raise HTTPException(401, "revoked")
 
-    monkeypatch.setattr(auth, "_verify_token_with_java", rejected)
+    monkeypatch.setattr(auth, "_verify_token_with_auth_api", rejected)
     with pytest.raises(HTTPException) as error:
         asyncio.run(auth.current_user(x_access_token="revoked-token", authorization=None))
     assert error.value.status_code == 401

@@ -165,7 +165,7 @@ def _resolve_tenant_id(info: dict, result: dict) -> str:
     return "0"
 
 
-async def _verify_token_with_java(token: str) -> UserContext:
+async def _verify_token_with_auth_api(token: str) -> UserContext:
     url = f"{settings.AUTH_API_BASE}/sys/user/getUserInfo"
     logger.info("回源 auth-api 校验 token: %s -> %s", _mask_token(token), url)
     try:
@@ -264,7 +264,7 @@ async def current_user(
             # 网关签名保障了代理传入的主体，但签名协议没有 tenant 字段。浏览器请求
             # 同时携带 token 时，以 auth-api 回源的已验证租户、角色和部门为准，并校验
             # 两个可信身份来源的 user_id 一致，避免原本固定 tenant=0 误拒绝应用权限。
-            verified = _get_cached(token) or await _verify_token_with_java(token)
+            verified = _get_cached(token) or await _verify_token_with_auth_api(token)
             if verified.user_id != user_id:
                 raise HTTPException(401, "Gateway identity does not match access token")
             verified.access_token = token
@@ -293,7 +293,7 @@ async def current_user(
     if cached:
         cached.access_token = token
         return cached
-    user = await _verify_token_with_java(token)
+    user = await _verify_token_with_auth_api(token)
     user.access_token = token
     _cache_verified(token, user)
     return user
@@ -309,7 +309,7 @@ async def user_from_token(token: str) -> Optional[UserContext]:
     if cached:
         return cached
     try:
-        user = await _verify_token_with_java(cleaned)
+        user = await _verify_token_with_auth_api(cleaned)
     except Exception:  # noqa: BLE001 - 含 HTTPException(401)
         return None
     _cache_verified(cleaned, user)

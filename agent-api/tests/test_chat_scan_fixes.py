@@ -13,7 +13,7 @@ def test_unsigned_identity_headers_fall_back_to_token_validation():
     with (
         patch.object(auth.settings, "GATEWAY_IDENTITY_SECRET", ""),
         patch.object(auth.settings, "GATEWAY_IDENTITY_SIGNATURE_REQUIRED", False),
-        patch.object(auth, "_verify_token_with_java", fake_verify),
+        patch.object(auth, "_verify_token_with_auth_api", fake_verify),
     ):
         user = asyncio.run(auth.current_user(
             x_user_id="forged-user",
@@ -36,7 +36,7 @@ def test_unsigned_identity_with_secret_falls_back_to_token():
     with (
         patch.object(auth.settings, "GATEWAY_IDENTITY_SECRET", "local-live-test-secret"),
         patch.object(auth.settings, "GATEWAY_IDENTITY_SIGNATURE_REQUIRED", False),
-        patch.object(auth, "_verify_token_with_java", fake_verify),
+        patch.object(auth, "_verify_token_with_auth_api", fake_verify),
     ):
         user = asyncio.run(auth.current_user(
             x_user_id="forged-user",
@@ -82,7 +82,7 @@ def test_signed_identity_with_token_uses_verified_access_scope():
     with (
         patch.object(auth.settings, "GATEWAY_IDENTITY_SECRET", "gateway-secret"),
         patch.object(auth, "_verify_gateway_signature"),
-        patch.object(auth, "_verify_token_with_java", fake_verify),
+        patch.object(auth, "_verify_token_with_auth_api", fake_verify),
     ):
         user = asyncio.run(auth.current_user(
             x_user_id="user-1",
@@ -110,7 +110,7 @@ def test_signed_identity_rejects_token_for_another_user():
     with (
         patch.object(auth.settings, "GATEWAY_IDENTITY_SECRET", "gateway-secret"),
         patch.object(auth, "_verify_gateway_signature"),
-        patch.object(auth, "_verify_token_with_java", fake_verify),
+        patch.object(auth, "_verify_token_with_auth_api", fake_verify),
     ):
         try:
             asyncio.run(auth.current_user(
