@@ -123,10 +123,126 @@ async def upload_document(
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.put("/bases/{knowledge_id}")
+async def update_base(
+    knowledge_id: str,
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    await _require_access(knowledge_id, user)
+    try:
+        return await kb.update_base(
+            knowledge_id,
+            name=body.get("name"),
+            description=body.get("description"),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/bases/{knowledge_id}/enabled")
+async def set_enabled(
+    knowledge_id: str,
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    await _require_access(knowledge_id, user)
+    try:
+        return await kb.set_base_enabled(knowledge_id, bool(body.get("enabled", True)))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/bases/{knowledge_id}/documents/delete")
+async def delete_documents(
+    knowledge_id: str,
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    await _require_access(knowledge_id, user)
+    ids = body.get("ids") or body.get("documentIds") or []
+    if isinstance(ids, str):
+        ids = [x for x in ids.split(",") if x]
+    removed = await kb.delete_documents(knowledge_id, [str(x) for x in ids])
+    return {"success": True, "removed": removed}
+
+
+@router.post("/bases/{knowledge_id}/acl")
+async def save_acl(
+    knowledge_id: str,
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    base = await _require_access(knowledge_id, user)
+    if base["ownerUserId"] != str(user.user_id) and not is_admin(user):
+        raise HTTPException(403, "只有所有者可以修改授权")
+    entries = body.get("acls") or body.get("entries") or []
+    try:
+        return await kb.save_acl(knowledge_id, list(entries))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/bases/{knowledge_id}/acl")
 async def list_acl(knowledge_id: str, user: UserContext = Depends(current_user)):
     await _require_access(knowledge_id, user)
     return await kb.list_acl(knowledge_id)
+
+
+async def _require_doc_access(document_id: str, user: UserContext) -> dict[str, Any]:
+    doc = await kb.get_document(document_id)
+    if doc is None:
+        raise HTTPException(404, "文档不存在")
+    await _require_access(doc["knowledgeId"], user)
+    return doc
+
+
+@router.post("/documents/delete")
+async def delete_documents_flat(
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    """按文档 id 删除，内部定位所属知识库——前端只持有文档 id。"""
+    ids = body.get("ids") or body.get("documentIds") or []
+    if isinstance(ids, str):
+        ids = [x for x in ids.split(",") if x]
+    ids = [str(x).strip() for x in ids if str(x).strip()]
+    if not ids:
+        return {"success": True, "removed": 0}
+    grouped: dict[str, list[str]] = {}
+    for did in ids:
+        doc = await _require_doc_access(did, user)
+        grouped.setdefault(doc["knowledgeId"], []).append(did)
+    removed = 0
+    for kid, items in grouped.items():
+        removed += await kb.delete_documents(kid, items)
+    return {"success": True, "removed": removed}
+
+
+@router.post("/documents/enabled")
+async def set_document_enabled_flat(
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    document_id = str(body.get("id") or "")
+    await _require_doc_access(document_id, user)
+    try:
+        return await kb.set_document_enabled(document_id, bool(body.get("enabled", True)))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/documents/retry")
+async def retry_document(
+    body: dict = Body(...),
+    user: UserContext = Depends(current_user),
+):
+    """入库是同步的，失败即已知原因；重试等于重新上传，这里明确告知而不是假装排队。"""
+    doc = await _require_doc_access(str(body.get("id") or ""), user)
+    raise HTTPException(
+        400,
+        f"「{doc['name']}」需要重新上传：失败原因 {doc['errorMessage'] or '未知'}",
+    )
 
 
 @router.post("/retrieval")

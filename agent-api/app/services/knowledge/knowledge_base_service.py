@@ -336,6 +336,126 @@ async def search_chunks(
     } for h in hits]
 
 
+async def get_document(document_id: str) -> Optional[dict[str, Any]]:
+    async with async_session() as session:
+        row = (await session.execute(
+            select(KnowledgeDocument).where(KnowledgeDocument.id == str(document_id))
+        )).scalars().first()
+    if row is None:
+        return None
+    return {
+        "id": row.id, "knowledgeId": row.knowledge_id, "name": row.name,
+        "status": row.status, "chunkCount": int(row.chunk_count or 0),
+        "errorMessage": row.error_message or "",
+    }
+
+
+async def set_document_enabled(document_id: str, enabled: bool) -> dict[str, Any]:
+    """停用文档＝移除其向量但保留元信息；重新启用需要重新入库原文。"""
+    doc = await get_document(document_id)
+    if doc is None:
+        raise ValueError("文档不存在")
+    if enabled:
+        raise ValueError("重新启用需重新上传原文：知识库只保存切片，未保留原始文件")
+    await delete_documents(doc["knowledgeId"], [document_id])
+    return {"id": document_id, "status": "DISABLED"}
+
+
+async def update_base(
+    knowledge_id: str, *, name: Optional[str] = None, description: Optional[str] = None
+) -> dict[str, Any]:
+    async with async_session() as session:
+        row = (await session.execute(
+            select(KnowledgeBase).where(KnowledgeBase.id == str(knowledge_id))
+        )).scalars().first()
+        if row is None:
+            raise ValueError("知识库不存在")
+        if name is not None:
+            cleaned = name.strip()
+            if not cleaned:
+                raise ValueError("知识库名称不能为空")
+            row.name = cleaned
+        if description is not None:
+            row.description = description.strip()
+        await session.commit()
+    return await get_base(knowledge_id)
+
+
+async def set_base_enabled(knowledge_id: str, enabled: bool) -> dict[str, Any]:
+    async with async_session() as session:
+        row = (await session.execute(
+            select(KnowledgeBase).where(KnowledgeBase.id == str(knowledge_id))
+        )).scalars().first()
+        if row is None:
+            raise ValueError("知识库不存在")
+        row.status = "ENABLED" if enabled else "DISABLED"
+        await session.commit()
+    return await get_base(knowledge_id)
+
+
+async def delete_documents(knowledge_id: str, document_ids: list[str]) -> int:
+    """删文档同时清掉它的向量，否则检索仍会命中已删内容。"""
+    kid = str(knowledge_id)
+    ids = [str(x).strip() for x in (document_ids or []) if str(x).strip()]
+    if not ids:
+        return 0
+    config = await embedding_service.get_active_embedding_config()
+    if config and config.dimension:
+        collection = kb_collection_name(config.model, int(config.dimension))
+        try:
+            client = _get_client()
+            if await client.collection_exists(collection):
+                await client.delete(
+                    collection_name=collection,
+                    points_selector=Filter(must=[
+                        FieldCondition(key="knowledge_id", match=MatchValue(value=kid)),
+                        FieldCondition(key="document_id", match=MatchAny(any=ids)),
+                    ]),
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception("删除文档向量失败：%s", ids)
+    async with async_session() as session:
+        await session.execute(
+            delete(KnowledgeDocument).where(
+                KnowledgeDocument.knowledge_id == kid,
+                KnowledgeDocument.id.in_(ids),
+            )
+        )
+        await session.commit()
+    model = config.model if config else ""
+    dimension = int(config.dimension) if config and config.dimension else 0
+    await _refresh_base_counts(kid, model, dimension)
+    return len(ids)
+
+
+async def save_acl(knowledge_id: str, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """整表替换，但始终保留所有者的 OWNER——否则会把自己锁在外面。"""
+    kid = str(knowledge_id)
+    base = await get_base(kid)
+    if base is None:
+        raise ValueError("知识库不存在")
+    owner = str(base["ownerUserId"])
+    async with async_session() as session:
+        await session.execute(delete(KnowledgeAcl).where(KnowledgeAcl.knowledge_id == kid))
+        session.add(KnowledgeAcl(
+            id=_new_id(), knowledge_id=kid,
+            subject_type="user", subject_id=owner, permission="OWNER",
+        ))
+        for item in entries or []:
+            subject_id = str(item.get("subjectId") or item.get("subject_id") or "").strip()
+            if not subject_id or subject_id == owner:
+                continue
+            permission = str(item.get("permission") or "VIEWER").strip().upper()
+            session.add(KnowledgeAcl(
+                id=_new_id(), knowledge_id=kid,
+                subject_type=str(item.get("subjectType") or item.get("subject_type") or "user"),
+                subject_id=subject_id,
+                permission=permission if permission in {"VIEWER", "EDITOR", "OWNER"} else "VIEWER",
+            ))
+        await session.commit()
+    return await list_acl(kid)
+
+
 async def list_acl(knowledge_id: str) -> list[dict[str, Any]]:
     async with async_session() as session:
         rows = (await session.execute(
