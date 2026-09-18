@@ -3,6 +3,7 @@ import { myAppList } from '../../flow/app/AppInfo.api';
 import { getMarketplaceModelOptions, listBuiltinApps, type AgentItem } from '../agentApi';
 import { resolveAppJumpUrl } from '/@/utils/jump';
 import { openAgentRunWindow } from '../../workflow/shared/runtimeRoute';
+import { queryMarketplaceWorkflowApps } from '../../workflow/api/workflow.api';
 import { decorateAppsWithModelAvailability } from './agentModelRequirements';
 import { pickPinnedRecommendedAgents } from '../utils/pinnedRecommendedAgents';
 import { excludeOwnedDeletedRuntimeApps } from '../utils/marketplaceCatalog';
@@ -85,27 +86,51 @@ export function useAgentMarket(options: UseAgentMarketOptions) {
     return [];
   }
 
-  async function reloadApps() {
+  /** 多路目录按 id 去重，先到先得：app_info 里若还有同一应用的老记录，以前面一路为准，不出现两张卡 */
+  function mergeMarketplaceApps(...groups: MarketplaceApp[][]): MarketplaceApp[] {
+    const seen = new Set<string>();
+    const merged: MarketplaceApp[] = [];
+    for (const group of groups) {
+      for (const item of group) {
+        const key = String(item?.id ?? '').trim();
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+        merged.push(item);
+      }
+    }
+    return merged;
+  }
+
+  async function reloadApps(reloadOptions?: { force?: boolean }) {
     if (appLoading.value) return;
     // 主对话发送/切会话会在空目录时重试。目录一旦拉过（含 404 空结果）就不要再打断对话。
-    if (catalogLoaded && options.activeSection.value !== 'agent') return;
+    // 发布/审核/删除之后目录确实变了，这类调用方显式 force 绕过这条守卫。
+    if (!reloadOptions?.force && catalogLoaded && options.activeSection.value !== 'agent') return;
     appLoading.value = true;
     try {
       // 内置智能体的上架记录归 agent-api（app_info），用户自建应用仍走 myAppList。
-      // 两路独立取，任一失败不影响另一路。
-      const [appResult, modelResult, builtinResult] = await Promise.allSettled([
+      // 本地 auth-api 的 myAppList 固定返回空，所以审核通过的自建智能体另从 agent-api 的
+      // 发布事实源取（queryMarketplaceWorkflowApps，可见性与运行页同一判定）。
+      // 各路独立取，任一失败不影响其他路。
+      const [appResult, modelResult, builtinResult, workflowResult] = await Promise.allSettled([
         myAppList({ column: 'createTime', order: 'desc' }),
         getMarketplaceModelOptions(),
         listBuiltinApps(),
+        queryMarketplaceWorkflowApps(),
       ]);
       const builtinApps: MarketplaceApp[] =
         builtinResult.status === 'fulfilled' ? (builtinResult.value as MarketplaceApp[]) : [];
       if (builtinResult.status === 'rejected') {
         console.warn('load builtin assistants failed', builtinResult.reason);
       }
+      const workflowApps: MarketplaceApp[] =
+        workflowResult.status === 'fulfilled' ? normalizeAppListResponse(workflowResult.value) : [];
+      if (workflowResult.status === 'rejected') {
+        console.warn('load published workflow apps failed', workflowResult.reason);
+      }
       if (appResult.status === 'rejected') {
         // 自建应用目录挂了不该连带内置智能体一起消失
-        rawAppList.value = builtinApps;
+        rawAppList.value = mergeMarketplaceApps(builtinApps, workflowApps);
         const status = catalogHttpStatus(appResult.reason);
         catalogUnavailable = status === 404 || status === 501 || status === 503;
         if (options.activeSection.value === 'agent' && !catalogUnavailable) {
@@ -117,7 +142,7 @@ export function useAgentMarket(options: UseAgentMarketOptions) {
       }
 
       catalogUnavailable = false;
-      const apps = [...builtinApps, ...normalizeAppListResponse(appResult.value)];
+      const apps = mergeMarketplaceApps(builtinApps, normalizeAppListResponse(appResult.value), workflowApps);
       // 模型目录失败时不做本地预警；运行端仍会以当前授权做最终校验。
       const availableModels = modelResult.status === 'fulfilled'
         ? modelResult.value.filter((model) => model.available !== false).map((model) => model.value)

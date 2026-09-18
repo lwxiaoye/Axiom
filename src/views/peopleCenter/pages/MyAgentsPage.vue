@@ -86,7 +86,7 @@ function openConversationLogs(item: AiWorkflowApp) {
 
 async function handleDeleteMyAgent(record: any) {
   await deleteMyAgent(record);
-  await reloadApps();
+  await reloadApps({ force: true });
 }
 
 /** 弹发布窗之前先看草稿能不能发：没保存过配置/没选模型的直接指到配置页，别让用户填完弹窗才吃 400 */
@@ -135,13 +135,13 @@ function openApiDrawer(item: Partial<AiWorkflowApp>) {
 
 async function handleRolledBack() {
   await loadMyAgents();
-  await reloadApps();
+  await reloadApps({ force: true });
 }
 
 /** 审核台通过/驳回后：我的智能体状态和广场目录都要跟着刷新 */
 async function handleReviewChanged() {
   await loadMyAgents();
-  await reloadApps();
+  await reloadApps({ force: true });
 }
 
 async function submitPublish(payload: {
@@ -171,7 +171,7 @@ async function submitPublish(payload: {
     });
     publishModalRef.value?.close();
     await loadMyAgents();
-    await reloadApps();
+    await reloadApps({ force: true });
     const updating = payload.app.status === 'published';
     if (result?.autoApproved) {
       // 审核员本人提交：后端直接上线，不进待审队列

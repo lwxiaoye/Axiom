@@ -39,6 +39,7 @@ from app.services.agent_api.publish_policy import validate_api_workflow_capabili
 from app.services.agents.published_visibility import load_published_visibility_version, user_can_run_published_app
 from app.services.platform.user_display_name import load_user_display_names
 from app.services.workflows.workflow_model_requirements import missing_required_models
+from app.services.workflows import marketplace_catalog_service
 from app.services.workflows import presentation_service
 from app.services.workflows import sub_agent_skin_service
 from app.services.workflows.agent_metrics_service import collect_app_metrics
@@ -883,6 +884,16 @@ async def page_apps(
                 )
             )
         return {"records": records, "total": total, "size": pageSize, "current": pageNo}
+
+
+@router.get("/app/marketplace")
+async def marketplace_apps(user: UserContext = Depends(current_user)):
+    """智能体广场：当前用户可运行的自建已发布智能体（内置智能体仍走 /chat/builtin-apps）。
+
+    本地 auth-api 的 /app/appInfo/my/all/list 固定返回空，审核通过的智能体此前
+    只写进 app_info 却没有任何界面能读到；广场现在直接从发布事实源取目录。
+    """
+    return await marketplace_catalog_service.list_published_marketplace_apps(user)
 
 
 @router.post("/app/marketplace-creators")
