@@ -49,3 +49,4 @@ deploy/**/data/
 deploy/**/logs/
 deploy/apisix/apisix_conf/config.yaml
 dev-server.log
+auth-api/data/

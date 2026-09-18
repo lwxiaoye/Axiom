@@ -13,9 +13,10 @@ services:
     ports: !override
       - "127.0.0.1:9090:9090"
     volumes:
-      # 与 docker-compose.local.yml 的 axiom_auth_data 卷合并，不替换
-      - ./auth-api/app.py:/app/app.py:ro
-      - ./auth-api/store.py:/app/store.py:ro
+      # 挂整个目录而不是单个文件：git merge/checkout 会用新 inode 替换文件，单文件
+      # bind mount 仍指向旧 inode，容器里永远是旧代码且 --reload 毫无察觉。
+      # 与 docker-compose.local.yml 的 axiom_auth_data 卷（/app/data）嵌套共存。
+      - ./auth-api:/app:ro
     command:
       ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9090", "--no-proxy-headers", "--reload"]
 
