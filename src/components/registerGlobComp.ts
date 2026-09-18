@@ -1,8 +1,9 @@
 import type { App } from 'vue';
 import { Icon } from './Icon';
 import AIcon from '/@/components/jeecg/AIcon.vue';
-//Tinymce富文本
- import Editor from '/@/components/Tinymce/src/Editor.vue'
+// SLIM-BUILD: Tinymce 原为急加载（注释称仪表盘依赖），实测 views/dashboard
+// 并未引用。改回异步注册，需要时按需拉取。
+import { createAsyncComponent } from '/@/utils/factory/createAsyncComponent';
 
 import { Button, JUploadButton } from './Button';
 
@@ -67,15 +68,13 @@ export function registerGlobComp(app: App) {
     app.component(comp.name || comp.displayName, comp);
   });
   
-  //仪表盘依赖Tinymce，需要提前加载（没办法按需加载了）
-  app.component(Editor.name, Editor);
-  // 代码逻辑说明: Tinymce异步加载
-  // app.component(
-  //   'Tinymce',
-  //   createAsyncComponent(() => import('./Tinymce/src/Editor.vue'), {
-  //     loading: true,
-  //   })
-  // );
+  // SLIM-BUILD: Tinymce 异步注册
+  app.component(
+    'Tinymce',
+    createAsyncComponent(() => import('./Tinymce/src/Editor.vue'), {
+      loading: true,
+    })
+  );
   app.use(Select)
     .use(Alert)
     .use(Button)
