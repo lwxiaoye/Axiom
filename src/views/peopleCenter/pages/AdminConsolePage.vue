@@ -104,17 +104,44 @@
       <template v-else>
         <dl class="status">
           <div><dt>状态</dt><dd>{{ campus.enabled ? '已启用' : '未启用' }}</dd></div>
-          <div><dt>已发布版本</dt><dd>{{ campus.revision ?? '—' }}</dd></div>
+          <div><dt>已发布版本</dt><dd>{{ campus.revision === 0 ? '尚未发布' : campus.revision }}</dd></div>
           <div><dt>草稿状态</dt><dd>{{ campus.draftStatus || '无草稿' }}</dd></div>
         </dl>
-        <label for="c-domains">官方来源域名</label>
+
+        <label for="c-model">对话模型</label>
+        <select id="c-model" v-model="campus.modelId" :disabled="campus.busy || !campus.models.length">
+          <option value="">{{ campus.models.length ? '请选择模型' : '暂无可用模型' }}</option>
+          <option v-for="m in campus.models" :key="modelValue(m)" :value="modelValue(m)">
+            {{ modelLabel(m) }}
+          </option>
+        </select>
+        <p v-if="!campus.models.length" class="hint">
+          先在「对话模型」里配置并启用一个模型，这里才会出现可选项。
+        </p>
+
+        <label for="c-domains">学校官方域名</label>
         <textarea id="c-domains" v-model="campus.domains" rows="4"
                   placeholder="每行一个域名，例如 www.example.edu.cn" :disabled="campus.busy"></textarea>
-        <p class="hint">回答会优先引用这些域名下的内容，用于保证「有据可查」。</p>
+        <p class="hint">官网检索与配图只允许来自该白名单，用于保证回答「有据可查」。至少填一个。</p>
+
+        <label>已绑定知识库</label>
+        <p class="hint">
+          {{ campus.bindings.length ? campus.bindings.join('、') : '未绑定。发布要求至少绑定一个可用知识库。' }}
+        </p>
+
         <label for="c-note">变更说明</label>
         <input id="c-note" v-model="campus.note" placeholder="本次修改的简要说明" :disabled="campus.busy" />
+
+        <div v-if="campus.issues.length" class="feedback error" role="alert">
+          <strong>发布前需要解决：</strong>
+          <ul class="issue-list"><li v-for="(it, i) in campus.issues" :key="i">{{ it }}</li></ul>
+        </div>
         <Feedback :state="campus.feedback" />
+
         <div class="actions">
+          <button type="button" class="secondary" :disabled="campus.busy" @click="checkCampus">
+            {{ campus.checking ? '检查中…' : '检查配置' }}
+          </button>
           <button type="button" class="secondary" :disabled="campus.busy" @click="saveCampusDraft">
             {{ campus.saving ? '保存中…' : '保存草稿' }}
           </button>
@@ -303,13 +330,26 @@
   }
 
   // ---- 校园百事通 ----
+  // 后端契约：PUT /draft 必填 expected_revision + model_id；POST /draft/publish 必填
+  // expected_revision（乐观并发：与服务端当前版本不一致即拒绝，避免覆盖他人改动）。
   const campus = reactive({
-    loading: true, saving: false, publishing: false, busy: false,
-    error: '', enabled: false, revision: null as number | null, draftStatus: '',
-    domains: '', note: '',
+    loading: true, saving: false, publishing: false, checking: false, busy: false,
+    error: '', enabled: false, revision: 0, draftStatus: '',
+    modelId: '', models: [] as any[], bindings: [] as string[],
+    domains: '', note: '', issues: [] as string[],
     feedback: null as Result | null,
   });
-  watch(() => [campus.saving, campus.publishing], () => { campus.busy = campus.saving || campus.publishing; });
+  watch(
+    () => [campus.saving, campus.publishing, campus.checking],
+    () => { campus.busy = campus.saving || campus.publishing || campus.checking; }
+  );
+
+  function modelValue(m: any): string {
+    return String(typeof m === 'string' ? m : m?.value ?? m?.id ?? m?.model ?? '');
+  }
+  function modelLabel(m: any): string {
+    return String(typeof m === 'string' ? m : m?.label ?? m?.name ?? modelValue(m));
+  }
 
   async function loadCampus() {
     campus.loading = true;
@@ -317,39 +357,86 @@
     try {
       const d = await requestAgentApi<any>('/campus-assistant/admin/config');
       campus.enabled = !!d.enabled;
-      campus.revision = d.revision ?? null;
+      campus.revision = Number(d.revision ?? 0);
+      campus.models = Array.isArray(d.available_models) ? d.available_models : [];
       const draft = d.draft || {};
       campus.draftStatus = draft.status || '';
+      campus.modelId = String(draft.model_id || '');
       const domains = draft.official_domains;
       campus.domains = Array.isArray(domains) ? domains.join('\n') : String(domains || '');
+      const bindings = draft.knowledge_bindings;
+      campus.bindings = Array.isArray(bindings)
+        ? bindings.map((b: any) => String(b?.name ?? b?.knowledge_id ?? b))
+        : [];
       campus.note = draft.change_note || '';
     } catch (e: any) { campus.error = e?.message || '配置加载失败'; }
     finally { campus.loading = false; }
   }
-  function campusPayload() {
+
+  function draftPayload() {
     return {
-      official_domains: campus.domains.split('\n').map((s) => s.trim()).filter(Boolean),
+      expected_revision: campus.revision,
+      model_id: campus.modelId,
+      official_domains: campus.domains.split('\n').map((x) => x.trim()).filter(Boolean),
       change_note: campus.note,
     };
   }
+
+  /** 把 /draft/validate 的结果转成界面上的待办清单。 */
+  async function checkCampus(silent = false): Promise<boolean> {
+    if (!silent) campus.checking = true;
+    try {
+      const r = await requestAgentApi<any>('/campus-assistant/admin/draft/validate', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      campus.issues = Array.isArray(r?.errors) ? r.errors : [];
+      if (!silent) {
+        campus.feedback = campus.issues.length
+          ? { success: false, message: `还有 ${campus.issues.length} 项未满足，见下方清单` }
+          : { success: true, message: '配置完整，可以发布' };
+      }
+      return campus.issues.length === 0;
+    } catch (e: any) {
+      if (!silent) campus.feedback = fail(e, '检查失败');
+      return false;
+    } finally { campus.checking = false; }
+  }
+
   async function saveCampusDraft() {
+    if (!campus.modelId) {
+      campus.feedback = { success: false, message: '请先选择对话模型' };
+      return;
+    }
     campus.saving = true;
     campus.feedback = null;
     try {
-      await requestAgentApi('/campus-assistant/admin/draft', { method: 'PUT', body: JSON.stringify(campusPayload()) });
+      await requestAgentApi('/campus-assistant/admin/draft', {
+        method: 'PUT',
+        body: JSON.stringify(draftPayload()),
+      });
       campus.feedback = { success: true, message: '草稿已保存，发布后对用户生效' };
       await loadCampus();
+      await checkCampus(true);
     } catch (e: any) { campus.feedback = fail(e, '保存失败'); }
     finally { campus.saving = false; }
   }
+
   async function publishCampus() {
     campus.publishing = true;
     campus.feedback = null;
     try {
-      await requestAgentApi('/campus-assistant/admin/draft/publish', { method: 'POST', body: JSON.stringify({}) });
-      campus.feedback = { success: true, message: '已发布' };
+      await requestAgentApi('/campus-assistant/admin/draft/publish', {
+        method: 'POST',
+        body: JSON.stringify({ expected_revision: campus.revision, change_note: campus.note }),
+      });
+      campus.feedback = { success: true, message: '已发布，用户侧即刻生效' };
+      campus.issues = [];
       await loadCampus();
-    } catch (e: any) { campus.feedback = fail(e, '发布失败'); }
+    } catch (e: any) {
+      campus.feedback = fail(e, '发布失败');
+      await checkCampus(true);
+    }
     finally { campus.publishing = false; }
   }
 
@@ -373,7 +460,8 @@
     loadModel();
     loadEmbedding();
     loadSearch();
-    loadCampus();
+    // 打开即显示校园百事通还差哪些配置，不用等到点发布才知道
+    loadCampus().then(() => checkCampus(true));
     loadUsers();
   });
 </script>
@@ -407,6 +495,11 @@
   .status div { margin: 0; }
   dt { font-size: 12px; color: #85858f; }
   dd { margin: 4px 0 0; font-size: 14px; font-weight: 550; }
+  select { width: 100%; height: 44px; padding: 0 11px; font: inherit; color: #27272a;
+           background: #fff; border: 1px solid #dedee5; border-radius: 9px; outline: none; }
+  select:focus { border-color: #71717a; box-shadow: 0 0 0 3px #18181b08; }
+  .issue-list { margin: 8px 0 0; padding-left: 18px; }
+  .issue-list li { margin-top: 4px; }
   .user-table { width: 100%; margin-top: 16px; border-collapse: collapse; font-size: 13px; }
   .user-table th { padding: 9px 8px; color: #85858f; font-weight: 500; text-align: left; border-bottom: 1px solid #e5e5ea; }
   .user-table td { padding: 11px 8px; border-bottom: 1px solid #f2f2f5; }
