@@ -1,59 +1,17 @@
-"""skill_package_bridge._flatten_tree 回归（2026-07-14 二轮评审补测）。
+"""skill_package_bridge 回归：一方 ppt-studio 包适配、取包缓存、zip 解包与完整性事实。
 
-守护的行为：Java `/ai/skill/files` 文件树的两种形态都必须还原出正确的相对路径——
-① 子节点携带完整 `path`（直接采用）；② 子节点只有 `name`（拼父级 prefix 还原层级，
-不拼会把 scripts/gen.py 拍平成 gen.py：同名互相覆盖、脚本相对路径失效）。
+2026-09-18 起取包在进程内完成（skill_catalog：内置包读磁盘 / 导入包解 zip），Java
+`/ai/skill/files|file|package` 通道连同 `_flatten_tree`、文本/二进制通道判定一起删除，
+对应的用例也一并移除；这里只保留与通道无关的行为。
 """
 import unittest
 from unittest.mock import patch
 
 from app.services.skills import skill_package_bridge as bridge
 from app.services.skills.skill_package_bridge import (
-    _flatten_tree,
     adapt_first_party_skill_package,
     normalize_skill_instructions,
 )
-
-
-class FlattenTreeTests(unittest.TestCase):
-    def test_full_path_children(self):
-        tree = [
-            {"name": "SKILL.md", "path": "SKILL.md", "directory": False},
-            {"name": "scripts", "path": "scripts", "directory": True, "children": [
-                {"name": "gen.py", "path": "scripts/gen.py", "directory": False},
-            ]},
-        ]
-        self.assertEqual(set(_flatten_tree(tree)), {"SKILL.md", "scripts/gen.py"})
-
-    def test_name_only_children_rebuild_hierarchy(self):
-        tree = [
-            {"name": "SKILL.md", "directory": False},
-            {"name": "scripts", "directory": True, "children": [
-                {"name": "gen.py", "directory": False},
-                {"name": "sub", "directory": True, "children": [
-                    {"name": "deep.py", "directory": False},
-                ]},
-            ]},
-        ]
-        self.assertEqual(
-            set(_flatten_tree(tree)),
-            {"SKILL.md", "scripts/gen.py", "scripts/sub/deep.py"},
-        )
-
-    def test_path_takes_priority_over_prefix(self):
-        # 同时给 path 与 name 时以 path 为准（视为完整相对路径），不重复拼 prefix
-        tree = [
-            {"name": "scripts", "directory": True, "children": [
-                {"name": "gen.py", "path": "scripts/gen.py", "directory": False},
-            ]},
-        ]
-        self.assertEqual(_flatten_tree(tree), ["scripts/gen.py"])
-
-    def test_dir_without_name_and_non_dict_nodes(self):
-        # 无名目录不产生悬空前缀；非 dict 节点与非 list 输入安全忽略
-        self.assertEqual(_flatten_tree([{"children": [{"name": "x.py"}]}]), ["x.py"])
-        self.assertEqual(_flatten_tree([None, "junk", {"name": ""}]), [])
-        self.assertEqual(_flatten_tree({"name": "not-a-list"}), [])
 
 
 class FirstPartyPackageAdaptationTests(unittest.TestCase):
@@ -228,7 +186,7 @@ class PackageFetchCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_user_and_record_reuses_successful_package_without_shared_mutation(self):
         calls = 0
 
-        async def fake_fetch(_client, _base, _headers, _record_id):
+        async def fake_fetch(_record_id, _token):
             nonlocal calls
             calls += 1
             return {
@@ -240,10 +198,10 @@ class PackageFetchCacheTests(unittest.IsolatedAsyncioTestCase):
             }
 
         with patch.object(bridge, "_fetch_one_skill", fake_fetch):
-            first = await bridge._fetch_one_skill_cached(object(), "http://java", {}, "rec-1", "token-a")
+            first = await bridge._fetch_one_skill_cached("rec-1", "token-a")
             first["files"].clear()
-            second = await bridge._fetch_one_skill_cached(object(), "http://java", {}, "rec-1", "token-a")
-            await bridge._fetch_one_skill_cached(object(), "http://java", {}, "rec-1", "token-b")
+            second = await bridge._fetch_one_skill_cached("rec-1", "token-a")
+            await bridge._fetch_one_skill_cached("rec-1", "token-b")
 
         self.assertEqual(calls, 2, "同一 ACL 复用缓存，不同 token 必须重新取包")
         self.assertEqual(second["files"], {"SKILL.md": b"content"})
@@ -251,7 +209,7 @@ class PackageFetchCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_partial_fetch_failure_is_not_cached_and_retries(self):
         calls = 0
 
-        async def fake_fetch(_client, _base, _headers, _record_id):
+        async def fake_fetch(_record_id, _token):
             nonlocal calls
             calls += 1
             if calls == 1:
@@ -271,15 +229,9 @@ class PackageFetchCacheTests(unittest.IsolatedAsyncioTestCase):
             }
 
         with patch.object(bridge, "_fetch_one_skill", fake_fetch):
-            first = await bridge._fetch_one_skill_cached(
-                object(), "http://java", {}, "rec-1", "token-a",
-            )
-            second = await bridge._fetch_one_skill_cached(
-                object(), "http://java", {}, "rec-1", "token-a",
-            )
-            third = await bridge._fetch_one_skill_cached(
-                object(), "http://java", {}, "rec-1", "token-a",
-            )
+            first = await bridge._fetch_one_skill_cached("rec-1", "token-a")
+            second = await bridge._fetch_one_skill_cached("rec-1", "token-a")
+            third = await bridge._fetch_one_skill_cached("rec-1", "token-a")
 
         self.assertEqual(first["unmounted"]["fetch_failed"], ["scripts/build.py"])
         self.assertEqual(second["files"]["scripts/build.py"], b"print('ok')")
@@ -296,34 +248,6 @@ def _zip_bytes(files: dict[str, bytes]) -> bytes:
         for name, data in files.items():
             archive.writestr(name, data)
     return buf.getvalue()
-
-
-class _HttpResp:
-    def __init__(self, *, status=200, content=b"", json_data=None, content_type=""):
-        self.status_code = status
-        self.content = content
-        self.headers = {"content-type": content_type} if content_type else {}
-        self._json = json_data
-        self.is_success = 200 <= status < 300
-
-    def json(self):
-        if self._json is None:
-            raise ValueError("not json")
-        return self._json
-
-
-class _SkillHttp:
-    def __init__(self, routes):
-        self.routes = routes
-        self.calls = []
-
-    async def get(self, url, params=None, headers=None):
-        self.calls.append((url, dict(params or {}), dict(headers or {})))
-        path = str(url).split("?", 1)[0]
-        for suffix, response in self.routes:
-            if path.endswith(suffix):
-                return response
-        return _HttpResp(status=404)
 
 
 class PackageIntegrityAndZipTests(unittest.IsolatedAsyncioTestCase):
@@ -358,101 +282,45 @@ class PackageIntegrityAndZipTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extracted["files"]["templates/notice.docx"], b"PK\x03\x04DOCX")
         self.assertEqual(extracted["unmounted"]["binary"], [])
 
-    async def test_zip_channel_is_preferred_over_per_file_json(self):
+    async def test_in_process_source_is_attached_with_integrity(self):
+        """进程内取包：skill_catalog 给出的文件树原样挂载并附完整性事实。"""
         png = b"\x89PNG\r\n\x1a\n" + b"x" * 24
-        client = _SkillHttp([
-            ("/ai/skill/package", _HttpResp(
-                content=_zip_bytes({"SKILL.md": b"# zip", "cover.png": png}),
-                content_type="application/zip",
-            )),
-            ("/ai/skill/files", _HttpResp(json_data={"result": [{"name": "SKILL.md"}]}, content_type="application/json")),
-        ])
-        fetched = await bridge._fetch_one_skill(client, "http://java", {}, "rec-1")
-        self.assertEqual(fetched["channel"], "zip")
-        self.assertEqual(fetched["files"]["cover.png"], png)
-        self.assertEqual(fetched["integrity"]["status"], "complete")
-        self.assertFalse(any(url.endswith("/ai/skill/files") for url, _params, _headers in client.calls))
 
-    async def test_missing_zip_falls_back_to_text_and_does_not_corrupt_png(self):
-        tree = [
-            {"name": "SKILL.md", "path": "SKILL.md"},
-            {"name": "cover.png", "path": "cover.png"},
-        ]
-        client = _SkillHttp([
-            ("/ai/skill/package", _HttpResp(status=404)),
-            ("/ai/skill/files", _HttpResp(json_data={"result": tree}, content_type="application/json")),
-            ("/ai/skill/file", _HttpResp(json_data={"result": "# md"}, content_type="application/json")),
-        ])
-        fetched = await bridge._fetch_one_skill(client, "http://java", {}, "rec-1")
-        self.assertEqual(fetched["channel"], "text_json")
-        self.assertNotIn("cover.png", fetched["files"])
-        self.assertIn("cover.png", fetched["unmounted"]["binary"])
-        self.assertEqual(fetched["integrity"]["status"], "incomplete")
+        async def fake_source(_record_id, _token):
+            return {
+                "files": {"SKILL.md": b"# builtin", "cover.png": png},
+                "entrypoint": None, "error": None, "declared_scripts": False,
+                "unmounted": {"binary": [], "over_file_limit": [], "over_byte_budget": [], "fetch_failed": []},
+                "channel": "builtin",
+            }
 
-    async def test_base64_binary_channel_mounts_png(self):
-        import base64
-
-        png = b"\x89PNG\r\n\x1a\n" + b"y" * 16
-        tree = [
-            {"name": "SKILL.md", "path": "SKILL.md"},
-            {"name": "cover.png", "path": "cover.png"},
-        ]
-
-        class DualFile:
-            async def get(self, url, params=None, headers=None):
-                path = str(url)
-                if path.endswith("/ai/skill/package"):
-                    return _HttpResp(status=404)
-                if path.endswith("/ai/skill/files"):
-                    return _HttpResp(json_data={"result": tree}, content_type="application/json")
-                if path.endswith("/ai/skill/file"):
-                    rel = str((params or {}).get("path") or "")
-                    if rel.endswith(".png") and (params or {}).get("encoding") == "base64":
-                        return _HttpResp(
-                            json_data={"result": {"content": base64.b64encode(png).decode("ascii")}},
-                            content_type="application/json",
-                            status=200,
-                        )
-                    if rel.endswith(".md"):
-                        return _HttpResp(json_data={"result": "# md"}, content_type="application/json")
-                return _HttpResp(status=404)
-
-        fetched = await bridge._fetch_one_skill(DualFile(), "http://java", {}, "rec-1")
-        self.assertEqual(fetched["channel"], "bytes")
-        self.assertEqual(fetched["files"]["cover.png"], png)
-        self.assertEqual(fetched["unmounted"]["binary"], [])
+        with patch("app.services.skills.skill_catalog.load_skill_package_source", fake_source):
+            fetched = await bridge._fetch_one_skill("rec-1", "tok")
+        self.assertEqual(fetched["channel"], "builtin")
+        self.assertEqual(fetched["files"]["cover.png"], png)  # 二进制字节不再经 JSON 通道，原样保留
         self.assertEqual(fetched["integrity"]["status"], "complete")
 
-    async def test_html_login_page_is_not_mounted_as_png(self):
-        html = b"<!DOCTYPE html><html><body>login</body></html>"
-        tree = [
-            {"name": "SKILL.md", "path": "SKILL.md"},
-            {"name": "cover.png", "path": "cover.png"},
-        ]
+    async def test_missing_record_is_an_error_result_not_an_exception(self):
+        """目录里没有这条记录：返回带 error 的结果（调用方据此占位），declared_scripts 未知。"""
+        async def fake_source(_record_id, _token):
+            return None
 
-        class HtmlFile:
-            async def get(self, url, params=None, headers=None):
-                path = str(url)
-                if path.endswith("/ai/skill/package"):
-                    return _HttpResp(status=404)
-                if path.endswith("/ai/skill/files"):
-                    return _HttpResp(json_data={"result": tree}, content_type="application/json")
-                if path.endswith("/ai/skill/file"):
-                    rel = str((params or {}).get("path") or "")
-                    if rel.endswith(".png"):
-                        return _HttpResp(
-                            content=html,
-                            content_type="text/html; charset=utf-8",
-                            status=200,
-                        )
-                    if rel.endswith(".md"):
-                        return _HttpResp(json_data={"result": "# md"}, content_type="application/json")
-                return _HttpResp(status=404)
+        with patch("app.services.skills.skill_catalog.load_skill_package_source", fake_source):
+            fetched = await bridge._fetch_one_skill("gone", "tok")
+        self.assertEqual(fetched["files"], {})
+        self.assertIn("没有这条记录", fetched["error"])
+        self.assertIsNone(fetched["declared_scripts"])
+        self.assertEqual(fetched["integrity"]["status"], "unavailable")
 
-        fetched = await bridge._fetch_one_skill(HtmlFile(), "http://java", {}, "rec-1")
-        self.assertNotIn("cover.png", fetched["files"])
-        self.assertIn("cover.png", fetched["unmounted"]["binary"])
-        self.assertEqual(fetched["integrity"]["status"], "incomplete")
+    async def test_source_exception_is_reported_not_raised(self):
+        async def fake_source(_record_id, _token):
+            raise RuntimeError("mysql gone away")
+
+        with patch("app.services.skills.skill_catalog.load_skill_package_source", fake_source):
+            fetched = await bridge._fetch_one_skill("rec-1", "tok")
+        self.assertEqual(fetched["files"], {})
+        self.assertIn("mysql gone away", fetched["error"])
+        self.assertIsNone(fetched["declared_scripts"])
 
 
 if __name__ == "__main__":

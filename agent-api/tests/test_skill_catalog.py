@@ -1,63 +1,48 @@
 """Skill 广场目录注入（让模型看得见有哪些技能）回归。
 
-用假 httpx 客户端喂 /ai/skill/list 返回，验证 _fetch_skill_catalog_block：
+用假的进程内目录读取（替换 turn_context_builder._load_catalog_records，2026-09-18 起目录由
+agent-api 自持，不再回源 auth-api）验证 _fetch_skill_catalog_block：
 列出全部 enabled 技能、标注已选中、空/失败降级为 ""（不阻断对话）。
 """
-import json
 import unittest
 from unittest.mock import patch
 
 from app.services.chat import turn_context_builder as tcb
 
 
-class FakeResp:
-    def __init__(self, payload):
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
-
-class FakeClient:
-    payload = {}
+class FakeCatalog:
+    """_load_catalog_records 替身：records 直接给记录列表；raise_exc 模拟 DB 抖动。"""
+    records: list = []
     raise_exc = False
     calls = 0
 
-    def __init__(self, *a, **k):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        return False
-
-    async def get(self, url, params=None, headers=None):
-        FakeClient.calls += 1
-        if FakeClient.raise_exc:
-            raise RuntimeError("java down")
-        return FakeResp(FakeClient.payload)
+    @classmethod
+    async def load(cls, _token):
+        cls.calls += 1
+        if cls.raise_exc:
+            raise RuntimeError("db down")
+        return list(cls.records)
 
 
-LIST_PAYLOAD = {"result": {"records": [
+LIST_RECORDS = [
     {"skillId": "ppt-master", "name": "PPT大师", "description": "SVG手写转原生可编辑PPTX", "enabled": 1},
     {"skillId": "frontend-design", "name": "前端设计", "description": "distinctive UI 设计指导", "enabled": 1},
     {"skillId": "disabled-one", "name": "停用的", "description": "x", "enabled": 0},
-]}}
+]
 
 
 class SkillCatalogTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         tcb._skill_catalog_cache.clear()  # 模块级 TTL 缓存跨用例，逐例清空防串台
-        FakeClient.calls = 0
+        FakeCatalog.calls = 0
 
     async def _run(self, selected=None, token="tok"):
-        with patch("app.services.chat.turn_context_builder.httpx.AsyncClient", FakeClient):
+        with patch("app.services.chat.turn_context_builder._load_catalog_records", FakeCatalog.load):
             return await tcb._fetch_skill_catalog_block(token, selected)
 
     async def test_lists_enabled_skills_and_guidance(self):
-        FakeClient.raise_exc = False
-        FakeClient.payload = LIST_PAYLOAD
+        FakeCatalog.raise_exc = False
+        FakeCatalog.records = LIST_RECORDS
         block = await self._run()
         self.assertIn("PPT大师", block)
         self.assertIn("SVG手写转原生可编辑PPTX", block)
@@ -68,8 +53,8 @@ class SkillCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("use_skill", block)  # 指引模型用 use_skill 自主启用
 
     async def test_marks_selected_skill(self):
-        FakeClient.raise_exc = False
-        FakeClient.payload = LIST_PAYLOAD
+        FakeCatalog.raise_exc = False
+        FakeCatalog.records = LIST_RECORDS
         block = await self._run(selected=["ppt-master"])
         # 已选中的那行带「已选中」标注，未选中的不带
         ppt_line = next(ln for ln in block.splitlines() if "PPT大师" in ln)
@@ -78,18 +63,18 @@ class SkillCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("已选中", design_line)
 
     async def test_empty_and_failure_degrade_to_blank(self):
-        FakeClient.raise_exc = False
-        FakeClient.payload = {"result": {"records": []}}
+        FakeCatalog.raise_exc = False
+        FakeCatalog.records = []
         self.assertEqual(await self._run(token="empty-tok"), "")
-        FakeClient.raise_exc = True
+        FakeCatalog.raise_exc = True
         self.assertEqual(await self._run(token="fail-tok"), "")
 
-    async def test_ttl_cache_avoids_repeat_java_call(self):
-        FakeClient.raise_exc = False
-        FakeClient.payload = LIST_PAYLOAD
+    async def test_ttl_cache_avoids_repeat_catalog_read(self):
+        FakeCatalog.raise_exc = False
+        FakeCatalog.records = LIST_RECORDS
         await self._run()
-        await self._run()  # 60s 内二次调用应命中缓存、不再打 Java
-        self.assertEqual(FakeClient.calls, 1)
+        await self._run()  # 60s 内二次调用应命中缓存、不再查库
+        self.assertEqual(FakeCatalog.calls, 1)
 
 
 class SkillIdMatchTests(unittest.TestCase):
@@ -142,32 +127,58 @@ class SkillIdMatchTests(unittest.TestCase):
 
 
 class SkillResolveTests(unittest.IsolatedAsyncioTestCase):
-    """_resolve_skill_id：回源目录后走 _match_skill_records，命中 TTL 缓存不重复打 Java。"""
+    """_resolve_skill_id：读目录后走 _match_skill_records，命中 TTL 缓存不重复查库。"""
 
     def setUp(self):
         tcb._skill_catalog_cache.clear()
-        FakeClient.calls = 0
+        FakeCatalog.calls = 0
 
     # 复刻用户截图场景：技能名《SVG转PPTX工作流》含 PPTX，模型却把 id 猜成 "pptx"
-    RESOLVE_PAYLOAD = {"result": {"records": [
+    RESOLVE_RECORDS = [
         {"skillId": "svg-to-pptx", "name": "SVG转PPTX工作流", "description": "SVG手写转原生可编辑PPTX", "enabled": 1},
         {"skillId": "frontend-design", "name": "前端设计", "description": "UI 设计指导", "enabled": 1},
-    ]}}
+    ]
 
     async def test_resolve_via_fetch(self):
-        FakeClient.raise_exc = False
-        FakeClient.payload = self.RESOLVE_PAYLOAD
-        with patch("app.services.chat.turn_context_builder.httpx.AsyncClient", FakeClient):
+        FakeCatalog.raise_exc = False
+        FakeCatalog.records = self.RESOLVE_RECORDS
+        with patch("app.services.chat.turn_context_builder._load_catalog_records", FakeCatalog.load):
             rid, _ = await tcb._resolve_skill_id("pptx", "tok")
         self.assertEqual(rid, "svg-to-pptx")  # 名含 PPTX，唯一 enabled 命中，自动解析真实 id
 
     async def test_resolve_shares_catalog_cache(self):
-        FakeClient.raise_exc = False
-        FakeClient.payload = self.RESOLVE_PAYLOAD
-        with patch("app.services.chat.turn_context_builder.httpx.AsyncClient", FakeClient):
-            await tcb._fetch_skill_catalog_block("tok")   # 目录注入先打一次 Java
+        FakeCatalog.raise_exc = False
+        FakeCatalog.records = self.RESOLVE_RECORDS
+        with patch("app.services.chat.turn_context_builder._load_catalog_records", FakeCatalog.load):
+            await tcb._fetch_skill_catalog_block("tok")   # 目录注入先读一次
             await tcb._resolve_skill_id("pptx", "tok")     # 兜底解析复用同一缓存
-        self.assertEqual(FakeClient.calls, 1)
+        self.assertEqual(FakeCatalog.calls, 1)
+
+
+class TrustedSkillsInProcessTests(unittest.IsolatedAsyncioTestCase):
+    """_fetch_trusted_skills：按 id 在自持目录里校验 enabled，并从目录取 SKILL.md 正文。"""
+
+    async def test_trusted_skill_uses_catalog_and_readme(self):
+        async def load_records(_token):
+            return [
+                {"id": "ppt-studio", "skillId": "ppt-studio", "name": "ppt-studio",
+                 "description": "做 PPT", "enabled": 1, "version": "3.0.7"},
+                {"id": "off", "skillId": "off", "name": "停用", "enabled": 0},
+            ]
+
+        async def load_readme(record_id, _token):
+            return "---\nname: ppt-studio\n---\n# 正文" if record_id == "ppt-studio" else ""
+
+        with patch("app.services.chat.turn_context_builder._load_catalog_records", load_records), \
+             patch("app.services.skills.skill_catalog.load_skill_readme", load_readme):
+            trusted = await tcb._fetch_trusted_skills(["ppt-studio", "off", "missing"], "tok")
+
+        self.assertEqual([s["id"] for s in trusted], ["ppt-studio"])
+        self.assertEqual(trusted[0]["record_id"], "ppt-studio")
+        self.assertEqual(trusted[0]["version"], "3.0.7")
+        self.assertTrue(trusted[0]["is_ppt_skill"])
+        self.assertIn("# 正文", trusted[0]["instructions"])
+        self.assertNotIn("name: ppt-studio", trusted[0]["instructions"])  # frontmatter 已剥
 
 
 if __name__ == "__main__":

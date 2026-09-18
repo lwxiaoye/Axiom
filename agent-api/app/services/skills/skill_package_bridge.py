@@ -1,14 +1,16 @@
-"""Skill 广场（`ai_skill`，经 auth-api 回源）→ 主对话沙箱的取包桥接（ADR-047 §6.6）。
+"""Skill 目录（agent-api 自持，见 skill_catalog）→ 主对话沙箱的取包桥接（ADR-047 §6.6）。
 
-广场 skill 把整包解压成文件目录存在 auth-api 侧，暴露 `/ai/skill/files`（文件树）+
-`/ai/skill/file`（单文件内容）。这里逐文件回源重建 `{相对路径: bytes}`，供
+技能包文件树由 `skill_catalog.load_skill_package_source` 在进程内给出（内置包读磁盘、导入包解
+zip、内容型技能物化单个 SKILL.md），这里把它整理成 `{相对路径: bytes}`，供
 `sandbox_executor.execute_in_sandbox(skill_packages=...)` 挂进 `/workspace/skills/<slug>/`。
 
+2026-09-18 之前这里逐文件回源 auth-api `/ai/skill/files|file|package`——Java 下线后那些接口
+只剩 404，取包永远失败。改为进程内后没有「文本通道/二进制通道」之分：字节从磁盘或 zip 直接来。
+
 约束：
-- `/ai/skill/file` 是文本读取器——二进制资源可能取不到（返回非文本/报错），跳过即可；
-  脚本型 skill（.py/.sh/.md/.json/.yaml）都是文本，执行脚本这个目标不受影响。
 - 上限对齐工作台沙箱（200 文件 / 20MB / 每 skill），防超大包撑爆沙箱。
-- ACL：只对已由 `_fetch_trusted_skills` 校验过 enabled 的 skill 取包（调用方传可信 record_id）。
+- ACL：只对已由 `_fetch_trusted_skills` 校验过 enabled 的 skill 取包（调用方传可信 record_id），
+  取包本身再按 token 做一次可见性校验。
 - **取包失败不静默**：失败的技能以 `unavailable=True` 占位记录返回（见 `_unavailable_pkg`），
   因为系统提示词与时间线事件此时已经声称"脚本已挂在沙箱里"，丢弃 = 平台替模型撒谎。
 - `entrypoint.sh` 主对话侧**不执行**，只当作"含脚本"的信号（见 `_has_scripts`）。
@@ -16,7 +18,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import io
 import logging
@@ -26,16 +27,11 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import httpx
-
-from app.core.config import settings
-
 logger = logging.getLogger(__name__)
 
 _MAX_FILES = 200
 _MAX_BYTES = 20 * 1024 * 1024
 _SCRIPT_SUFFIXES = (".sh", ".py", ".js", ".ts")
-_FETCH_CONCURRENCY = 8
 _MAX_SLUG_LEN = 64
 _PPT_ENGINE_WASM_REL = "scripts/local-export/pptd_wasm_bg.wasm"
 _PPT_EXPORT_OVERLAYS = (
@@ -84,7 +80,7 @@ def is_first_party_ppt_studio(name: object) -> bool:
 
 
 def _ppt_engine_wasm_bytes() -> Optional[bytes]:
-    """Host copy of the PPTD WASM engine. auth-api skill fetch cannot carry ``.wasm``."""
+    """Host copy of the PPTD WASM engine（内置包目录里不带 wasm，历史导入包也没有）."""
     here = Path(__file__).resolve()
     candidates = (
         here.parents[3] / "deploy" / "sandbox" / "pptd_wasm_bg.wasm",
@@ -164,49 +160,6 @@ def validate_harness_skill_package(files: dict[str, bytes]) -> tuple[str, ...]:
                 violations.add(token)
     return tuple(sorted(violations))
 
-# 取包通道只过文本（2026-07-27）。
-#
-# `/ai/skill/file` 返回 JSON，字节经服务端解码成字符串再回来 —— 二进制文件的原始字节
-# **在服务端就已经丢了**，这边 `str(content).encode("utf-8")` 只是把损坏固定下来。
-# 挂一个坏掉的 png/ttf 比不挂更糟：模型会当它可用，引用后产物里是一块空白或乱码字形，
-# 而且没有任何报错。所以这些后缀**直接不挂**，并如实记下告诉模型与运维。
-# 真正支持二进制要 auth-api 侧提供 base64 或裸字节通道（与 zip 上传大小限制同属那边的事）。
-_BINARY_SUFFIXES = (
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff",
-    ".ttf", ".otf", ".woff", ".woff2", ".eot",
-    ".zip", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tar",
-    ".pdf", ".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt",
-    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm",
-    ".so", ".dylib", ".dll", ".pyc", ".class", ".wasm",
-)
-_ZIP_MAGIC = b"PK\x03\x04"
-_HTML_HEADS = (b"<!doctype", b"<html", b"<head", b"<body", b"<!--")
-_BINARY_MAGIC: dict[str, tuple[bytes, ...]] = {
-    ".png": (b"\x89PNG\r\n\x1a\n",),
-    ".jpg": (b"\xff\xd8\xff",),
-    ".jpeg": (b"\xff\xd8\xff",),
-    ".gif": (b"GIF87a", b"GIF89a"),
-    ".webp": (b"RIFF",),
-    ".bmp": (b"BM",),
-    ".ico": (b"\x00\x00\x01\x00",),
-    ".pdf": (b"%PDF",),
-    ".zip": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
-    ".gz": (b"\x1f\x8b",),
-    ".docx": (b"PK\x03\x04",),
-    ".xlsx": (b"PK\x03\x04",),
-    ".pptx": (b"PK\x03\x04",),
-    ".doc": (b"\xd0\xcf\x11\xe0",),
-    ".xls": (b"\xd0\xcf\x11\xe0",),
-    ".ppt": (b"\xd0\xcf\x11\xe0",),
-    ".ttf": (b"\x00\x01\x00\x00", b"true"),
-    ".otf": (b"OTTO",),
-    ".woff": (b"wOFF",),
-    ".woff2": (b"wOF2",),
-    ".wasm": (b"\x00asm",),
-    ".7z": (b"7z\xbc\xaf\x27\x1c",),
-    ".rar": (b"Rar!",),
-}
-_PACKAGE_ZIP_PATH = "/ai/skill/package"
 _ZIP_BOMB_TOTAL = 200 * 1024 * 1024
 _ZIP_BOMB_ENTRY = 50 * 1024 * 1024
 _ZIP_BOMB_ENTRIES = 5_000
@@ -253,42 +206,6 @@ def package_integrity(
     }
 
 
-def _looks_like_zip(raw: bytes) -> bool:
-    return isinstance(raw, (bytes, bytearray)) and bytes(raw[:4]) == _ZIP_MAGIC
-
-
-def _looks_like_html(raw: bytes) -> bool:
-    head = bytes(raw or b"").lstrip()[:80].lower()
-    return head.startswith(_HTML_HEADS) or b"<html" in head
-
-
-def binary_payload_ok(rel: str, raw: Optional[bytes], content_type: str = "") -> bool:
-    """Reject login pages, JSON envelopes, and other non-file bodies.
-
-    Suffix is not proof: a 200 HTML error page named cover.png must not be mounted.
-    """
-    if not isinstance(raw, (bytes, bytearray)) or not raw:
-        return False
-    body = bytes(raw)
-    ctype = str(content_type or "").lower()
-    if any(token in ctype for token in ("text/html", "text/xml", "application/json", "text/plain")):
-        return False
-    if _looks_like_html(body) or body.lstrip()[:1] in {b"{", b"["}:
-        return False
-    ext = ""
-    name = str(rel or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
-    if "." in name:
-        ext = "." + name.rsplit(".", 1)[-1]
-    magics = _BINARY_MAGIC.get(ext)
-    if magics:
-        if ext == ".webp":
-            return body.startswith(b"RIFF") and b"WEBP" in body[8:16]
-        return any(body.startswith(magic) for magic in magics)
-    sample = body[:256]
-    printable = sum(1 for byte in sample if 32 <= byte < 127 or byte in (9, 10, 13))
-    return (printable / max(len(sample), 1)) <= 0.85
-
-
 def _strip_zip_prefix(names: list[str]) -> str:
     files = [name for name in names if name and not str(name).endswith("/")]
     tops = {name.split("/", 1)[0] for name in files if "/" in name}
@@ -297,22 +214,8 @@ def _strip_zip_prefix(names: list[str]) -> str:
     return ""
 
 
-def _decode_possible_base64(value: Any) -> Optional[bytes]:
-    if isinstance(value, (bytes, bytearray)):
-        raw = bytes(value)
-        return raw if raw else None
-    if not isinstance(value, str) or not value.strip():
-        return None
-    text = value.strip()
-    try:
-        raw = base64.b64decode(text, validate=False)
-    except Exception:  # noqa: BLE001
-        return None
-    return raw or None
-
-
 def _extract_zip_package(raw: bytes) -> dict:
-    """Turn a Skill ZIP into the same shape as the per-file auth-api fetch."""
+    """Skill ZIP（导入包的 package_b64 解码后）→ 与 skill_catalog 取包结果同形的字典。"""
     from app.services.platform import zip_guard
 
     files: dict[str, bytes] = {}
@@ -417,97 +320,10 @@ def _attach_integrity(fetched: dict) -> dict:
     copied["integrity"] = package_integrity(
         copied.get("files"),
         copied.get("unmounted"),
-        channel=str(copied.get("channel") or "text_json"),
+        channel=str(copied.get("channel") or "local"),
         error=copied.get("error"),
     )
     return copied
-
-
-async def _try_fetch_package_zip(
-    client: httpx.AsyncClient, base: str, headers: dict, record_id: str
-) -> Optional[dict]:
-    """Prefer a whole-package ZIP when auth-api exposes it. None = channel missing."""
-    try:
-        response = await client.get(
-            f"{base}{_PACKAGE_ZIP_PATH}",
-            params={"id": record_id},
-            headers=headers,
-        )
-        status = int(getattr(response, "status_code", 0) or 0)
-        success = bool(getattr(response, "is_success", status == 200 if status else False))
-        if status in {404, 405, 501} or not success:
-            return None
-        raw = bytes(getattr(response, "content", b"") or b"")
-        headers_map = getattr(response, "headers", None) or {}
-        content_type = str(
-            headers_map.get("content-type") if hasattr(headers_map, "get") else ""
-        ).lower()
-        if "json" in content_type or not raw:
-            try:
-                payload = _unwrap(response.json())
-            except Exception:  # noqa: BLE001
-                payload = None
-            if isinstance(payload, dict):
-                raw = _decode_possible_base64(
-                    payload.get("content") or payload.get("package") or payload.get("data")
-                ) or raw
-            elif isinstance(payload, str):
-                raw = _decode_possible_base64(payload) or raw
-            elif isinstance(payload, (bytes, bytearray)):
-                raw = bytes(payload)
-        if not _looks_like_zip(raw):
-            return None
-        return _attach_integrity(_extract_zip_package(raw))
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("skill package ZIP 探测失败 %s: %s", record_id, exc)
-        return None
-
-
-async def _fetch_binary_bytes(
-    client: httpx.AsyncClient,
-    base: str,
-    headers: dict,
-    record_id: str,
-    rel: str,
-) -> Optional[bytes]:
-    """Try base64 then octet-stream. None means this file (or the channel) is unavailable."""
-    params = {"id": record_id, "path": rel}
-    try:
-        encoded = await client.get(
-            f"{base}/ai/skill/file",
-            params={**params, "encoding": "base64"},
-            headers=headers,
-        )
-    except Exception:  # noqa: BLE001
-        encoded = None
-    if encoded is not None and bool(getattr(encoded, "is_success", False)):
-        payload: Any = None
-        try:
-            payload = _unwrap(encoded.json())
-        except Exception:  # noqa: BLE001
-            payload = None
-        if isinstance(payload, dict):
-            payload = payload.get("content") or payload.get("data")
-        raw = _decode_possible_base64(payload)
-        # JSON envelope content-type is not the file type; validate decoded bytes only.
-        if raw and binary_payload_ok(rel, raw, ""):
-            return raw
-    try:
-        raw_resp = await client.get(
-            f"{base}/ai/skill/file",
-            params=params,
-            headers={**headers, "Accept": "application/octet-stream"},
-        )
-    except Exception:  # noqa: BLE001
-        return None
-    if not bool(getattr(raw_resp, "is_success", False)):
-        return None
-    headers_map = getattr(raw_resp, "headers", None) or {}
-    content_type = str(headers_map.get("content-type") if hasattr(headers_map, "get") else "")
-    body = bytes(getattr(raw_resp, "content", b"") or b"")
-    if binary_payload_ok(rel, body, content_type):
-        return body
-    return None
 
 
 def _short_digest(value: str) -> str:
@@ -550,174 +366,30 @@ def package_slug(name: str, record_id: str) -> str:
     return _slugify(name, record_id)
 
 
-def _flatten_tree(nodes: Any, prefix: str = "") -> List[str]:
-    """`/ai/skill/files` 的嵌套树 → 叶子文件相对路径列表。
+async def _fetch_one_skill(record_id: str, token: str) -> dict:
+    """进程内取单个 skill 的文件树字节。返回 {files:{rel:bytes}, entrypoint, error, ...}。
 
-    `path` 视为完整相对路径直接采用；子节点只带 `name` 时拼上父级 prefix 还原目录层级——
-    不拼的话嵌套包会被拍平（scripts/gen.py 变 gen.py：同名互相覆盖、脚本相对路径失效）。
+    目录里没有这条记录（不存在/已停用/无权限）时同样返回**带 error 的结果**而不是抛异常：
+    调用方据此生成占位记录，回执里如实说"本轮没挂上"。declared_scripts=None 表示连文件
+    树都不知道——与「确定不带脚本」必须分开，调用方按保守（可能带脚本）处理。
     """
-    out: List[str] = []
-    if not isinstance(nodes, list):
-        return out
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        own = str(node.get("path") or "").strip().strip("/")
-        name = str(node.get("name") or "").strip().strip("/")
-        path = own or (f"{prefix}/{name}" if prefix and name else name)
-        is_dir = bool(node.get("directory"))
-        children = node.get("children")
-        if is_dir or children:
-            out.extend(_flatten_tree(children, path))
-        elif path:
-            out.append(path)
-    return out
+    from app.services.skills import skill_catalog
 
-
-def _unwrap(payload: Any) -> Any:
-    """jeecg 信封解包：{success,result} → result；否则原样。"""
-    if isinstance(payload, dict) and "result" in payload:
-        return payload.get("result")
-    return payload
-
-
-async def _fetch_one_skill(
-    client: httpx.AsyncClient, base: str, headers: dict, record_id: str
-) -> dict:
-    """取单个 skill 的文件树字节。返回 {files:{rel:bytes}, entrypoint}。"""
-    zipped = await _try_fetch_package_zip(client, base, headers, record_id)
-    if zipped is not None and (zipped.get("files") or zipped.get("error")):
-        return zipped
-
-    files: dict = {}
-    entrypoint: Optional[str] = None
     try:
-        r = await client.get(f"{base}/ai/skill/files", params={"id": record_id}, headers=headers)
-        tree = _unwrap(r.json())
+        source = await skill_catalog.load_skill_package_source(record_id, token)
     except Exception as e:  # noqa: BLE001
-        logger.warning("skill files 回源失败 %s: %s", record_id, e)
-        # declared_scripts=None：文件树都没拿到，**不知道**这个技能带不带脚本。
-        # 与「确定不带脚本」必须分开——调用方对未知一律按保守（可能带脚本）处理。
+        logger.warning("skill 包读取失败 %s: %s", record_id, e)
         return _attach_integrity({
-            "files": files, "entrypoint": None, "error": f"文件树取不到（{e}）",
-            "declared_scripts": None, "unmounted": {}, "channel": "text_json",
+            "files": {}, "entrypoint": None, "error": f"技能包读取失败（{e}）",
+            "declared_scripts": None, "unmounted": {}, "channel": "local",
         })
-
-    all_rels = _flatten_tree(tree)
-    # 二进制资源先摘出来单独记账（不是"取失败"，是通道不支持——两者对模型的含义完全不同）
-    binary_set = {r for r in all_rels if r.lower().endswith(_BINARY_SUFFIXES)}
-    # 一次遍历分两堆：原先 `[r for r in all_rels if r not in set(binary_rels)]` 每次迭代
-    # 都重建一遍 set，是 O(n²)（12k 文件的包尤其肉疼）。
-    binary_rels = [r for r in all_rels if r in binary_set]
-    text_rels = [r for r in all_rels if r not in binary_set]
-    rels = text_rels[:_MAX_FILES]
-    # 截断**必须留痕**：原先 `[:_MAX_FILES]` 与下面的字节预算 break 都是静默的，模型按
-    # SKILL.md 执行时会撞"文件不存在"却无从知晓（12k 文件的包只挂前 200 个）。
-    dropped_count = text_rels[_MAX_FILES:]
-    if dropped_count:
-        logger.warning(
-            "skill 包 %s 文本文件 %d 个，超过上限 %d，未挂载 %d 个（前几个：%s）",
-            record_id, len(text_rels), _MAX_FILES, len(dropped_count), dropped_count[:5])
-    if binary_rels:
-        logger.warning(
-            "skill 包 %s 含 %d 个二进制资源，取包通道只支持文本，未挂载（前几个：%s）",
-            record_id, len(binary_rels), binary_rels[:5])
-    sem = asyncio.Semaphore(_FETCH_CONCURRENCY)
-
-    async def _one(rel: str):
-        async with sem:
-            try:
-                fr = await client.get(
-                    f"{base}/ai/skill/file", params={"id": record_id, "path": rel}, headers=headers
-                )
-                content = _unwrap(fr.json())
-            except Exception:  # noqa: BLE001 单文件失败不毁整包
-                return rel, None, True
-            if content is None:
-                return rel, None, True
-            if isinstance(content, (dict, list)):
-                content = content.get("content") if isinstance(content, dict) else None
-            if content is None:
-                return rel, None, True
-            return rel, str(content).encode("utf-8"), False
-
-    total = 0
-    over_budget: List[str] = []
-    fetch_failed: List[str] = []
-    for rel, data, failed in await asyncio.gather(*[_one(r) for r in rels]):
-        if failed:
-            fetch_failed.append(rel)
-        if data is None:
-            continue
-        if total + len(data) > _MAX_BYTES:
-            # 原先是 `break`：剩下的文件连同它们的名字一起消失，且**跳过的是遍历顺序里
-            # 剩下的全部**，而不只是这一个。改成 continue + 记名，字节预算照样守住。
-            over_budget.append(rel)
-            continue
-        total += len(data)
-        files[rel] = data
-        low = rel.lower()
-        if low == "entrypoint.sh" or low.endswith("/entrypoint.sh"):
-            entrypoint = rel
-    if over_budget:
-        logger.warning(
-            "skill 包 %s 超出 %dMB 字节预算，未挂载 %d 个（前几个：%s）",
-            record_id, _MAX_BYTES // 1024 // 1024, len(over_budget), over_budget[:5])
-    mounted_binary: List[str] = []
-    binary_failed: List[str] = []
-    binary_channel = False
-    if binary_rels:
-        probe = await _fetch_binary_bytes(client, base, headers, record_id, binary_rels[0])
-        if probe is not None:
-            binary_channel = True
-            if total + len(probe) <= _MAX_BYTES and len(files) < _MAX_FILES:
-                files[binary_rels[0]] = probe
-                mounted_binary.append(binary_rels[0])
-                total += len(probe)
-            elif len(files) >= _MAX_FILES:
-                dropped_count.append(binary_rels[0])
-            else:
-                over_budget.append(binary_rels[0])
-            for rel in binary_rels[1:]:
-                if len(files) >= _MAX_FILES:
-                    dropped_count.append(rel)
-                    continue
-                blob = await _fetch_binary_bytes(client, base, headers, record_id, rel)
-                if blob is None:
-                    binary_failed.append(rel)
-                    continue
-                if total + len(blob) > _MAX_BYTES:
-                    over_budget.append(rel)
-                    continue
-                files[rel] = blob
-                mounted_binary.append(rel)
-                total += len(blob)
-        else:
-            binary_failed = []
-    remaining_binary = [rel for rel in binary_rels if rel not in mounted_binary]
-    error: Optional[str] = None
-    if not files:
-        # 文件树拿到了、一个字节都没取回来：单文件接口在抖。这一分支以前是 `continue`
-        # 整包丢弃且无痕，模型却已被系统提示词告知"脚本已挂在 /workspace/skills/ 下"。
-        error = (f"文件树有 {len(all_rels)} 个条目，但没有一个文件取回成功"
-                 if all_rels else "技能包是空的（auth-api 侧文件树无内容）")
-    channel = "bytes" if binary_channel else "text_json"
-    return _attach_integrity({
-        "files": files,
-        "entrypoint": entrypoint,
-        "error": error,
-        # 树里声明了什么就算什么：即使字节没取回来，也知道这包**本该**含脚本。
-        "declared_scripts": _rels_have_scripts(all_rels),
-        # 未挂载清单：由 use_skill 的回执如实告诉模型。缺了这一层，模型会按 SKILL.md 去
-        # 引用一个不存在的文件、然后在"文件不存在"里反复打转，完全猜不到是平台没挂上来。
-        "unmounted": {
-            "binary": remaining_binary,
-            "over_file_limit": dropped_count,
-            "over_byte_budget": over_budget,
-            "fetch_failed": fetch_failed + binary_failed,
-        },
-        "channel": channel,
-    })
+    if source is None:
+        return _attach_integrity({
+            "files": {}, "entrypoint": None,
+            "error": "技能目录里没有这条记录（不存在 / 已停用 / 无权限）",
+            "declared_scripts": None, "unmounted": {}, "channel": "local",
+        })
+    return _attach_integrity(source)
 
 
 def _copy_fetch_result(value: dict) -> dict:
@@ -739,17 +411,15 @@ def _copy_fetch_result(value: dict) -> dict:
     return copied
 
 
-async def _fetch_one_skill_cached(
-    client: httpx.AsyncClient, base: str, headers: dict, record_id: str, token: str
-) -> dict:
-    """Deduplicate the expensive per-file package fetch within one worker.
+async def _fetch_one_skill_cached(record_id: str, token: str) -> dict:
+    """Deduplicate the package materialization (zip decode / disk walk) within one worker.
 
     The ACL check still happens before this function.  The cache key includes a one-way digest of
     the access token, so a package fetched for one user is never reused for another user's ACL.
-    Failures are deliberately not cached; transient auth-api errors must remain retryable.
+    Failures are deliberately not cached; transient DB errors must remain retryable.
     """
     token_digest = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:16]
-    key = f"{base}\0{record_id}\0{token_digest}"
+    key = f"{record_id}\0{token_digest}"
     now = time.monotonic()
     cached = _package_fetch_cache.get(key)
     if cached and now - cached[0] < _PACKAGE_CACHE_TTL_SECONDS:
@@ -757,7 +427,7 @@ async def _fetch_one_skill_cached(
 
     task = _package_fetch_inflight.get(key)
     if task is None:
-        task = asyncio.create_task(_fetch_one_skill(client, base, headers, record_id))
+        task = asyncio.create_task(_fetch_one_skill(record_id, token))
         _package_fetch_inflight[key] = task
     try:
         fetched = await task
@@ -831,75 +501,71 @@ def _unavailable_pkg(skill: dict, record_id: str, name: str, *,
         "unmounted": {},
         "unavailable": True,
         "reason": reason,
-        "channel": "text_json",
-        "integrity": package_integrity({}, {}, channel="text_json", error=reason),
+        "channel": "local",
+        "integrity": package_integrity({}, {}, channel="local", error=reason),
     }
 
 
 async def fetch_skill_packages(skills: List[dict], token: str) -> List[dict]:
-    """skills: [{record_id, name}]（record_id 与 /ai/skill/readme 同源，非 skillId）。
+    """skills: [{record_id, name}]（record_id = agent_skill.id，与目录记录的 `id` 同源）。
 
-    返回 [{skillId, name, slug, files:{相对路径:bytes}, hasScripts, entrypoint}]，仅含成功取到的文本文件。
+    返回 [{skillId, name, slug, files:{相对路径:bytes}, hasScripts, entrypoint}]，仅含成功取到的文件。
 
     取包失败**不再静默丢弃**：失败的技能以 `unavailable=True` 的占位记录回来（`files` 为空），
-    由调用方在回执里如实告诉模型"这个技能本轮没挂上、别去跑它的脚本"。整体失败（auth-api 不可达等）
+    由调用方在回执里如实告诉模型"这个技能本轮没挂上、别去跑它的脚本"。整体失败（DB 不可达等）
     同样返回全量占位记录而不是空列表——空列表与"没选技能"无法区分，正是静默的来源。
     """
     wanted = [s for s in (skills or []) if str(s.get("record_id") or "").strip()]
     if not wanted:
         return []
-    base = settings.AUTH_API_BASE
-    headers = {"X-Access-Token": token or ""}
     packages: List[dict] = []
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            for s in wanted:
-                record_id = str(s["record_id"]).strip()
-                name = str(s.get("name") or record_id)
-                got = await _fetch_one_skill_cached(client, base, headers, record_id, token)
-                files = got["files"]
-                if not files:
-                    logger.warning("skill 包 %s（%s）未取到任何文件：%s",
-                                   record_id, name, got.get("error"))
-                    packages.append(_unavailable_pkg(
-                        s, record_id, name,
-                        reason=str(got.get("error") or "取包失败"),
-                        declared_scripts=got.get("declared_scripts"),
-                    ))
-                    continue
-                files = adapt_first_party_skill_package(name, files)
-                unmounted = _drop_injected_ppt_engine_from_unmounted(got.get("unmounted") or {})
-                violations = validate_harness_skill_package(files)
-                if violations:
-                    reason = (
-                        "Skill 使用已退休的工具或工作区契约："
-                        + "、".join(violations)
-                        + "。请迁移为 bash + /workspace/files 后重新导入。"
-                    )
-                    logger.warning("skill 包 %s（%s）不兼容 Agent Harness: %s", record_id, name, violations)
-                    packages.append(_unavailable_pkg(
-                        s, record_id, name,
-                        reason=reason,
-                        declared_scripts=got.get("declared_scripts"),
-                    ))
-                    continue
-                packages.append({
-                    "skillId": str(s.get("id") or record_id),
-                    "recordId": record_id,
-                    "name": name,
-                    "slug": package_slug(name, record_id),
-                    "files": files,
-                    "entrypoint": got["entrypoint"],
-                    "hasScripts": _has_scripts(files, got["entrypoint"]),
-                    "scriptsKnown": True,
-                    "unmounted": unmounted,
-                    "channel": got.get("channel") or "text_json",
-                    "integrity": got.get("integrity") or package_integrity(
-                        files, unmounted,
-                        channel=str(got.get("channel") or "text_json"),
-                        error=got.get("error"),
-                    ),
-                })
+        for s in wanted:
+            record_id = str(s["record_id"]).strip()
+            name = str(s.get("name") or record_id)
+            got = await _fetch_one_skill_cached(record_id, token)
+            files = got["files"]
+            if not files:
+                logger.warning("skill 包 %s（%s）未取到任何文件：%s",
+                               record_id, name, got.get("error"))
+                packages.append(_unavailable_pkg(
+                    s, record_id, name,
+                    reason=str(got.get("error") or "取包失败"),
+                    declared_scripts=got.get("declared_scripts"),
+                ))
+                continue
+            files = adapt_first_party_skill_package(name, files)
+            unmounted = _drop_injected_ppt_engine_from_unmounted(got.get("unmounted") or {})
+            violations = validate_harness_skill_package(files)
+            if violations:
+                reason = (
+                    "Skill 使用已退休的工具或工作区契约："
+                    + "、".join(violations)
+                    + "。请迁移为 bash + /workspace/files 后重新导入。"
+                )
+                logger.warning("skill 包 %s（%s）不兼容 Agent Harness: %s", record_id, name, violations)
+                packages.append(_unavailable_pkg(
+                    s, record_id, name,
+                    reason=reason,
+                    declared_scripts=got.get("declared_scripts"),
+                ))
+                continue
+            channel = str(got.get("channel") or "local")
+            packages.append({
+                "skillId": str(s.get("id") or record_id),
+                "recordId": record_id,
+                "name": name,
+                "slug": package_slug(name, record_id),
+                "files": files,
+                "entrypoint": got["entrypoint"],
+                "hasScripts": _has_scripts(files, got["entrypoint"]),
+                "scriptsKnown": True,
+                "unmounted": unmounted,
+                "channel": channel,
+                "integrity": got.get("integrity") or package_integrity(
+                    files, unmounted, channel=channel, error=got.get("error"),
+                ),
+            })
     except Exception as e:  # noqa: BLE001
         logger.warning("skill 取包整体失败: %s", e)
         got_ids = {str(p.get("recordId") or "") for p in packages}

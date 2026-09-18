@@ -298,6 +298,23 @@ async def _seed_builtin_app_catalog():
             log.exception("补建 sys_user 管理员档案失败")
 
 
+async def _seed_builtin_skill_catalog():
+    """把系统技能与随代码发布的内置技能包（services/skills/builtin/ppt-studio）注册进
+    agent_skill 表（幂等）。
+
+    Skill 目录原由 JeecgBoot(Java) 的 /ai/skill/* 提供，Java 下线后 auth-api 只剩空桩，
+    技能广场、@Skill 与演示文稿助手全部落空。目录已改由 agent-api 自持（skill_catalog），
+    内置包必须在库表里有一条 source=system 的记录才对目录可见；这里在启动期先播一次，
+    worker 进程与首次读目录时还会再幂等一次（skill_catalog.ensure_builtin_skills_seeded）。
+    """
+    from app.routers.agent_skill import _seed_system_skills
+
+    try:
+        await _seed_system_skills()
+    except Exception:
+        logging.getLogger(__name__).exception("内置技能目录播种失败（首次读目录时会重试）")
+
+
 async def _migrate_chat_message_sender_type():
     """给消息表补逐消息发送方字段（幂等）。
 
@@ -439,6 +456,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await _migrate_chat_thread_origin()
         await _migrate_chat_message_sender_type()
         await _seed_builtin_app_catalog()
+        await _seed_builtin_skill_catalog()
     else:
         # P1 版本化迁移（migrations/README.md）：生产滚动发布注入 MIGRATE_ON_STARTUP=false，
         # schema 由部署前的 `alembic upgrade head` 管理——启动期不再执行任何 DDL，规避大表

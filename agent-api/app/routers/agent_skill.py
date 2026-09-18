@@ -27,6 +27,7 @@ from app.core.config import settings
 from app.core.database import async_session
 from app.models import AgentSkill, AgentSkillVersion
 from app.services.platform import zip_guard
+from app.services.skills import skill_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -98,25 +99,10 @@ async def _get_visible_skill(session, skill_id: str, user_id: str) -> AgentSkill
     return skill
 
 
-def _skill_dict(skill: AgentSkill) -> dict:
-    try:
-        category = json.loads(skill.category_json or "[]")
-    except json.JSONDecodeError:
-        category = []
-    return {
-        "id": skill.id,
-        "parentId": None,
-        "type": "skill",
-        "source": skill.source,
-        "name": skill.name,
-        "description": skill.description or "",
-        "category": category if isinstance(category, list) else [],
-        "currentVersionId": skill.current_version_id,
-        "creationStatus": skill.creation_status,
-        "creationError": skill.creation_error,
-        "createTime": skill.create_time.isoformat(sep=" ", timespec="seconds") if skill.create_time else None,
-        "updateTime": skill.update_time.isoformat(sep=" ", timespec="seconds") if skill.update_time else None,
-    }
+def _skill_dict(skill: AgentSkill, version: Optional[AgentSkillVersion] = None) -> dict:
+    """序列化统一走 skill_catalog.serialize_skill：路由输出与主对话进程内目录是同一份字段
+    （skillId/recordId/enabled/version），Skill 广场与 @Skill 面板不用再适配第二种形状。"""
+    return skill_catalog.serialize_skill(skill, version)
 
 
 def _version_dict(version: AgentSkillVersion) -> dict:
@@ -141,7 +127,10 @@ def _clean_categories(raw) -> str:
 
 
 async def _seed_system_skills() -> None:
-    """首次访问时补齐系统技能（固定 id，幂等）。"""
+    """首次访问时补齐系统技能（固定 id，幂等）；随后注册随代码发布的内置技能包（ppt-studio 等）。
+
+    内置包播种放这里而不是只放 main.py 启动期：worker 进程不经过 API 的 lifespan，
+    而演示文稿助手在 worker 里跑，目录必须在任一进程首次读取时就能自足。"""
     async with async_session() as session:
         existing = (
             (await session.execute(select(AgentSkill.id).where(AgentSkill.source == "system"))).scalars().all()
@@ -167,6 +156,7 @@ async def _seed_system_skills() -> None:
                 AgentSkillVersion(id=version_id, skill_id=seed["id"], version_name="v1", content=seed["content"])
             )
         await session.commit()
+    await skill_catalog.ensure_builtin_skills_seeded()
 
 
 async def _generate_skill_content(skill_id: str, name: str, description: str, user_id: str) -> None:
@@ -243,7 +233,15 @@ async def list_skills(
                 (AgentSkill.source == "system") | (AgentSkill.owner_user_id == user.user_id)
             )
         rows = (await session.execute(query)).scalars().all()
-    items = [_skill_dict(row) for row in rows]
+        # 带上当前版本号（Skill 广场卡片展示 v3.0.7 之类），一次 IN 查询而不是逐条取
+        version_ids = [row.current_version_id for row in rows if row.current_version_id]
+        versions: dict[str, AgentSkillVersion] = {}
+        if version_ids:
+            version_rows = (
+                await session.execute(select(AgentSkillVersion).where(AgentSkillVersion.id.in_(version_ids)))
+            ).scalars().all()
+            versions = {v.id: v for v in version_rows}
+    items = [_skill_dict(row, versions.get(row.current_version_id or "")) for row in rows]
     if keyword:
         key = keyword.strip().lower()
         items = [i for i in items if key in i["name"].lower() or key in (i["description"] or "").lower()]
@@ -562,6 +560,10 @@ def _extract_skill_files(version: AgentSkillVersion) -> tuple[dict[str, bytes], 
     解一次同一个包，静默截断等于让攻击者反复触发；技能实际不可用就必须明确失败（ADR-043
     同款语义）。导入闸只在入库时跑一次，历史入库数据仍要在这里再判一次。
     """
+    builtin_slug = skill_catalog.builtin_slug_of_version(version)
+    if builtin_slug:
+        # 内置技能包（随代码发布，文件树不进库）：从磁盘读，见 skill_catalog 模块说明
+        return skill_catalog.builtin_package_files(builtin_slug)
     if not version.package_b64:
         # 内容型技能：物化 SKILL.md
         content = (version.content or "").encode("utf-8")
