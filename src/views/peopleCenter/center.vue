@@ -628,6 +628,7 @@ const navItems = [
   { key: 'knowledge' as const, label: '我的知识库', icon: ReadOutlined },
   { key: 'skill' as const, label: 'Skill广场', icon: ToolOutlined },
   { key: 'files' as const, label: '我的文件', icon: FolderOutlined },
+  { key: 'models' as const, label: '模型配置', icon: SettingOutlined },
 ];
 
 type CenterNavItem = (typeof navItems)[number];
@@ -642,7 +643,7 @@ const compactNavGroups = [
     key: 'library',
     label: '我的内容',
     // 手机/iPad 只保留文件入口；智能体与知识库仍保留在桌面端，不删除路由或权限。
-    items: navItems.filter((item) => item.key === 'files'),
+    items: navItems.filter((item) => ['files', 'models'].includes(item.key)),
   },
 ];
 const visibleNavGroups = computed(() => (isCompactShell.value ? compactNavGroups : desktopNavGroups));

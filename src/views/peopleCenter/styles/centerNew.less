@@ -1871,6 +1871,17 @@ html:has(.tox-center.sidebar-collapsed) {
   font-style: normal;
 }
 
+/* 桌面端状态卡贴在顶栏下方居中，给各内容页标题留出高度，避免挡住「模型配置」等页头。 */
+.workspace:has(> .background-chat-task) .agent-market,
+.workspace:has(> .background-chat-task) .skill-square-section,
+.workspace:has(> .background-chat-task) .model-page,
+.workspace:has(> .background-chat-task) .my-knowledge-section,
+.workspace:has(> .background-chat-task) .myfiles-pane,
+.workspace:has(> .background-chat-task) .my-agent-section,
+.workspace:has(> .background-chat-task) .agent-metrics-page {
+  padding-top: 96px;
+}
+
 @keyframes chat-task-spin {
   to {
     transform: rotate(360deg);
@@ -2879,7 +2890,12 @@ html:has(.tox-center.sidebar-collapsed) {
 
   /* 后台回复保持可见，同时为它留出页面流空间，不压住广场的搜索和首张卡。 */
   .workspace:has(> .background-chat-task) .agent-market,
-  .workspace:has(> .background-chat-task) .skill-square-section {
+  .workspace:has(> .background-chat-task) .skill-square-section,
+  .workspace:has(> .background-chat-task) .model-page,
+  .workspace:has(> .background-chat-task) .my-knowledge-section,
+  .workspace:has(> .background-chat-task) .myfiles-pane,
+  .workspace:has(> .background-chat-task) .my-agent-section,
+  .workspace:has(> .background-chat-task) .agent-metrics-page {
     padding-top: 88px;
   }
 
@@ -3121,7 +3137,12 @@ html:has(.tox-center.sidebar-collapsed) {
   }
 
   .workspace:has(> .background-chat-task) .agent-market,
-  .workspace:has(> .background-chat-task) .skill-square-section {
+  .workspace:has(> .background-chat-task) .skill-square-section,
+  .workspace:has(> .background-chat-task) .model-page,
+  .workspace:has(> .background-chat-task) .my-knowledge-section,
+  .workspace:has(> .background-chat-task) .myfiles-pane,
+  .workspace:has(> .background-chat-task) .my-agent-section,
+  .workspace:has(> .background-chat-task) .agent-metrics-page {
     padding-top: 76px;
   }
 

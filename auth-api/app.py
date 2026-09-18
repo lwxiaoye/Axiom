@@ -378,7 +378,20 @@ def dict_items(code: str, x_access_token: Optional[str] = Header(None, alias="X-
     return ok([])
 
 
+@app.get("/app/appInfo/my/all/list")
+@app.get("/ai/skill/list")
+def empty_local_catalog(
+    x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
+    authorization: Optional[str] = Header(None),
+):
+    _, error = require_user(x_access_token, authorization)
+    if error:
+        return error
+    return ok([])
+
+
 @app.get("/ai/knowledge/base/queryById")
+@app.get("/ai/knowledge/base/list")
 @app.get("/ai/knowledge/document/list")
 @app.get("/ai/knowledge/acl/list")
 @app.post("/ai/knowledge/retrieval/test")

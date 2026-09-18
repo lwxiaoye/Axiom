@@ -24,6 +24,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from sqlalchemy import text
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.database import async_session
 from app.services.agent_harness.model_usage_audit import ExternalAttribution
@@ -680,7 +681,7 @@ class WorkflowEngine:
     ) -> ChatOpenAI:
         kwargs: dict = {
             "model": model,
-            "base_url": settings.NEWAPI_BASE_URL,
+            "base_url": get_model_base_url(),
             "api_key": self.ctx.llm_api_key,
             "streaming": streaming,
             # Workflow node retries are owned by the workflow executor.  Disable the SDK's
@@ -2688,7 +2689,7 @@ class WorkflowEngine:
                     {
                         "api_key": self.ctx.llm_api_key,
                         "default_model": self.ctx.default_model,
-                        "base_url": settings.NEWAPI_BASE_URL,
+                        "base_url": get_model_base_url(),
                         "user_input": self.ctx.input_text,
                         "user_id": self.ctx.user_id,
                         "thread_id": self.ctx.thread_id,

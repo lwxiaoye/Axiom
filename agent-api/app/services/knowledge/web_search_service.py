@@ -16,6 +16,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.platform import platform_config_service as cfg
 from app.services.gateway.mcp_client import assert_public_http_url
@@ -866,7 +867,7 @@ async def _stage_search_single(
             # 固定走平台 NewAPI 网关。DeepSeek 的 Responses 原生 web_search 会在
             # 服务端执行；旧 Messages 路径在未开启渠道透传时会被 NewAPI 转换成
             # 客户端 tool_use，只产生费用却没有搜索结果，不能再用。
-            base = settings.NEWAPI_BASE_URL.rstrip("/")
+            base = get_model_base_url().rstrip("/")
             payload = {
                 "model": str(c.get("deepseekModel") or "deepseek-v4-flash"),
                 "instructions": (

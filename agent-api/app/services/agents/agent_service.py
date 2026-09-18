@@ -5,6 +5,7 @@ from typing import List, Optional
 import httpx
 from sqlalchemy import select
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import ChatModel, EmbeddingModel
@@ -73,10 +74,15 @@ class AgentService:
         if not user_key:
             return []
 
+        from app.core.model_endpoint import get_model_connection
+        connection = get_model_connection()
+        if connection and connection["api_key"] == user_key:
+            return [ModelItem(id=connection["model"], name=connection["model"], is_default=True)]
+
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 resp = await client.get(
-                    f"{settings.NEWAPI_BASE_URL}/models",
+                    f"{get_model_base_url()}/models",
                     headers={"Authorization": f"Bearer {user_key}"},
                 )
                 resp.raise_for_status()

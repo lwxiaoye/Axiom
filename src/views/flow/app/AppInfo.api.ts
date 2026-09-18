@@ -31,7 +31,11 @@ export const getImportUrl = Api.importExcel;
  */
 export const list = (params) => defHttp.get({ url: Api.list, params });
 
-export const myAppList = (params) => defHttp.get({ url: Api.myAppList, params });
+export const myAppList = (params) =>
+  defHttp.get(
+    { url: Api.myAppList, params },
+    { errorMessageMode: 'none', successMessageMode: 'none' },
+  );
 
 export const getBriefList = () => defHttp.get({ url: Api.getBriefList });
 /**

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.core.auth import UserContext, current_user
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import AgentSkill, AgentSkillVersion
@@ -192,7 +193,7 @@ async def _generate_skill_content(skill_id: str, name: str, description: str, us
         )
         async with httpx.AsyncClient(timeout=90) as client:
             resp = await client.post(
-                f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                f"{get_model_base_url().rstrip('/')}/chat/completions",
                 json={"model": default_model, "messages": [{"role": "user", "content": prompt}], "stream": False},
                 headers={"Authorization": f"Bearer {api_key}"},
             )

@@ -56,7 +56,7 @@ describe('手机端登录与主对话布局契约', () => {
     expect(centerShell).toContain('class="compact-menu-trigger"');
     expect(centerShell).toContain('class="compact-nav-shortcuts"');
     expect(centerShell).toContain("label: '我的内容'");
-    expect(compactGroupsSource).toContain("item.key === 'files'");
+    expect(compactGroupsSource).toContain("['files', 'models'].includes(item.key)");
     expect(compactGroupsSource).not.toContain("'myAgent'");
     expect(compactGroupsSource).not.toContain("'knowledge'");
     expect(centerStyles).toContain('@media (max-width: 1024px)');
@@ -113,8 +113,8 @@ describe('手机端登录与主对话布局契约', () => {
 
   it('启用全屏安全区并使用 AXIOM Agent 小球作为标签页图标', () => {
     expect(indexHtml).toContain('viewport-fit=cover');
-    expect(indexHtml).toContain('type="image/png"');
-    expect(indexHtml).toContain('href="/favicon.png?v=20260902"');
+    expect(indexHtml).toContain('type="image/svg+xml"');
+    expect(indexHtml).toContain('href="/axiom-mark.svg"');
   });
 
   it('我的文件全端都有缩略图/列表切换，不再放「显示全部文件」按钮', () => {
@@ -172,6 +172,8 @@ describe('手机端登录与主对话布局契约', () => {
     expect(centerStyles).toContain('animation: background-task-enter-compact 0.22s');
     expect(centerStyles).toContain('.workspace:has(> .background-chat-task) .agent-market');
     expect(centerStyles).toContain('.workspace:has(> .background-chat-task) .skill-square-section');
+    expect(centerStyles).toContain('.workspace:has(> .background-chat-task) .model-page');
+    expect(centerStyles).toContain('.workspace:has(> .background-chat-task) .my-knowledge-section');
     expect(centerStyles).toMatch(/\.toast-error,[\s\S]*?\.toast-info\s*\{[\s\S]*?transform:\s*none;/);
   });
 

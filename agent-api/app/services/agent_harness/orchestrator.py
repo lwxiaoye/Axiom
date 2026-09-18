@@ -23,6 +23,7 @@ from sqlalchemy import and_, delete as sa_delete, exists, select, func, or_, upd
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import ChatMessage, ChatThread, live_chat_message_clause, visible_chat_message_clause
@@ -629,7 +630,7 @@ class HarnessOrchestrator:
     def _create_llm(self, model: str, api_key: str) -> ChatOpenAI:
         return ChatOpenAI(
             model=model,
-            base_url=settings.NEWAPI_BASE_URL,
+            base_url=get_model_base_url(),
             api_key=api_key,
             streaming=True,
             stream_usage=True,  # 请求流式回传真实 usage（§13 用真值校准上下文用量指示）

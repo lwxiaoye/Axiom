@@ -370,11 +370,13 @@ function handleSelect(modelId: string) {
 
 onMounted(() => {
   loadModels();
+  window.addEventListener('axiom:model-config-updated', loadModels);
   document.addEventListener('click', handleClickOutside);
   document.addEventListener(PICKER_OPEN_EVENT, handlePickerOpen);
 });
 
 onUnmounted(() => {
+  window.removeEventListener('axiom:model-config-updated', loadModels);
   document.removeEventListener('click', handleClickOutside);
   document.removeEventListener(PICKER_OPEN_EVENT, handlePickerOpen);
 });

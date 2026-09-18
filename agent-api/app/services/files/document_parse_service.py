@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.platform import platform_config_service as cfg
 from app.services.platform import zip_guard
@@ -456,7 +457,7 @@ async def _ocr_image(
         if vision_base:
             base_url, api_key = vision_base, str(conf.get("visionApiKey") or "").strip()
         else:
-            base_url, api_key = settings.NEWAPI_BASE_URL.rstrip("/"), newapi_key
+            base_url, api_key = get_model_base_url().rstrip("/"), newapi_key
         if not api_key:
             return "（多模态 OCR 缺少调用凭证：请填视觉模型 API Key，或确保平台网关可用）", "failed", "缺少视觉模型调用凭证"
 
@@ -550,7 +551,7 @@ async def _describe_image(
         if vision_base:
             base_url, api_key = vision_base, str(conf.get("visionApiKey") or "").strip()
         else:
-            base_url, api_key = settings.NEWAPI_BASE_URL.rstrip("/"), newapi_key
+            base_url, api_key = get_model_base_url().rstrip("/"), newapi_key
         if not api_key:
             return ""
         prompt = str(conf.get("visionPrompt") or "").strip() or DEFAULT_VISION_PROMPT

@@ -311,6 +311,17 @@ describe('主对话 Harness 前端契约', () => {
     expect(agentMarketTabSource).toContain('item.createByAvatar');
   });
 
+  it('智能体目录 404 不向主对话弹出 axios 原文，也不在发送时反复重试', () => {
+    const appInfoApi = readFileSync(resolve(root, '../flow/app/AppInfo.api.ts'), 'utf8');
+    expect(appInfoApi).toContain('errorMessageMode: \'none\'');
+    expect(appInfoApi).toContain('successMessageMode: \'none\'');
+    expect(agentMarketSource).toContain('catalogUnavailable');
+    expect(agentMarketSource).toContain('catalogLoaded');
+    expect(agentMarketSource).toContain("options.activeSection.value !== 'agent'");
+    expect(agentMarketSource).toContain('智能体广场暂时无法加载，请稍后重试');
+    expect(agentMarketSource).not.toContain('if (appResult.status === \'rejected\') throw appResult.reason');
+  });
+
   it('任务计划与委派进入终态后撤掉顶栏动效', () => {
     expect(collaborationSource).toContain("s.status === 'skipped' || s.status === 'invalidated'");
     expect(collaborationSource).not.toContain('hasTaskSteps.value || teamMembers.value.length > 0');

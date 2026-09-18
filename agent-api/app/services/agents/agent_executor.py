@@ -24,6 +24,7 @@ from typing import Any, Callable, Awaitable, Optional
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.chat.turn_context_builder import (
     _fetch_trusted_skills,
@@ -325,7 +326,7 @@ async def build_tools(engine, node: dict) -> tuple[list[ToolSpec], list[str]]:
                         {
                             "api_key": engine.ctx.llm_api_key,
                             "default_model": engine.ctx.default_model,
-                            "base_url": settings.NEWAPI_BASE_URL,
+                            "base_url": get_model_base_url(),
                             "user_input": engine.ctx.input_text,
                             "user_id": engine.ctx.user_id,
                             "thread_id": engine.ctx.thread_id,

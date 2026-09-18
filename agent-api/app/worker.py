@@ -191,9 +191,9 @@ async def _resolve_worker_input(payload: dict[str, Any]) -> dict[str, Any]:
     })
     # v2.72 diagnostics: V2 worker 路径曾出现 free-quota 403，而同 key 在 API 进程 V1 正常
     logger.info(
-        "worker_input_resolved run=%s user=%s model=%s key_prefix=%s key_len=%s token_len=%s msg_len=%s",
+        "worker_input_resolved run=%s user=%s model=%s credential_set=%s token_len=%s msg_len=%s",
         data.get("run_id"), user_id, resolved_model,
-        (newapi_key or "")[:16], len(newapi_key or ""), len(str(data.get("token") or "")),
+        bool(newapi_key), len(str(data.get("token") or "")),
         len(str(data.get("message") or "")),
     )
     return data

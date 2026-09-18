@@ -199,6 +199,7 @@ async def vet_images(
     import base64 as _b64
     import json as _json
 
+    from app.core.model_endpoint import get_model_base_url
     from app.core.config import settings
     from app.services.platform import platform_config_service as cfg
 
@@ -211,7 +212,7 @@ async def vet_images(
     if vision_base:
         base_url, api_key = vision_base, str(conf.get("visionApiKey") or "").strip()
     else:
-        base_url, api_key = settings.NEWAPI_BASE_URL.rstrip("/"), newapi_key
+        base_url, api_key = get_model_base_url().rstrip("/"), newapi_key
     if not model or not api_key:
         return files, []
 

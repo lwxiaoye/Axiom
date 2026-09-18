@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.runtime_db import runtime_session
 from .governance import IDENTITY_INSTRUCTIONS, grounded_quote, memory_identity, sensitive_reason
@@ -1129,7 +1130,7 @@ async def extract_and_store(
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
-                    f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                    f"{get_model_base_url().rstrip('/')}/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}"},
                     json=wire_payload,
                 )
@@ -1314,7 +1315,7 @@ async def generate_summary(
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
-                f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                f"{get_model_base_url().rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=wire_payload,
             )
@@ -1382,7 +1383,7 @@ async def update_from_text(user_id: str, text: str, *, model: str, api_key: str)
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                f"{get_model_base_url().rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={"model": model, "stream": False, "messages": [
                     {"role": "system", "content": prompt},

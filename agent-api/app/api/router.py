@@ -40,6 +40,8 @@ from app.routers.external_agent_runs import router as external_agent_runs_router
 from app.api.interview import router as interview_router
 
 api_router = APIRouter()
+from app.routers.model_connection import router as model_connection_router
+api_router.include_router(model_connection_router)
 api_router.include_router(embedding_config_router)
 api_router.include_router(platform_config_router)
 api_router.include_router(workflow_router)

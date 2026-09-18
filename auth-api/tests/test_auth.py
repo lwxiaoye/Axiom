@@ -104,8 +104,9 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(auth.app.state.store.consume_captcha("expired", "ABCD"))
 
     async def test_missing_auth_cannot_access_knowledge_or_write(self):
-        for method, path in [("GET", "/ai/knowledge/acl/list"), ("POST", "/sys/user/add"),
-                             ("GET", "/sys/dict/getDictItems/test")]:
+        for method, path in [("GET", "/ai/knowledge/acl/list"), ("GET", "/ai/knowledge/base/list"),
+                             ("GET", "/app/appInfo/my/all/list"), ("GET", "/ai/skill/list"),
+                             ("POST", "/sys/user/add"), ("GET", "/sys/dict/getDictItems/test")]:
             result = await self.client.request(method, path)
             self.assertEqual(result.status_code, 401)
             self.assertFalse(result.json()["success"])
@@ -120,6 +121,7 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
     async def test_knowledge_unavailable_is_not_an_empty_success(self):
         headers = await self.headers()
         for method, path in [("GET", "/ai/knowledge/base/queryById"),
+                             ("GET", "/ai/knowledge/base/list"),
                              ("GET", "/ai/knowledge/document/list"),
                              ("GET", "/ai/knowledge/acl/list"),
                              ("POST", "/ai/knowledge/retrieval/test"),
@@ -127,6 +129,14 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.request(method, path, headers=headers)
             self.assertEqual(response.status_code, 503)
             self.assertFalse(response.json()["success"])
+
+    async def test_local_catalog_lists_are_empty_not_404(self):
+        headers = await self.headers()
+        for path in ("/app/appInfo/my/all/list", "/ai/skill/list"):
+            response = await self.client.get(path, headers=headers)
+            self.assertEqual(response.status_code, 200, path)
+            self.assertTrue(response.json()["success"])
+            self.assertEqual(response.json()["result"], [])
 
     async def test_persistent_sessions_and_password_rotation(self):
         headers = await self.headers()

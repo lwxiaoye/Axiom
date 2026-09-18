@@ -40,6 +40,12 @@ export const mainOutRoutes: AppRouteModule[] = [
     },
     children: [
       {
+        path: 'models',
+        name: 'CenterModels',
+        component: () => import('/@/views/peopleCenter/pages/ModelConfigPage.vue'),
+        meta: { title: '模型配置' },
+      },
+      {
         path: 'chat',
         name: 'CenterChat',
         component: () => import('/@/views/peopleCenter/pages/ChatPage.vue'),

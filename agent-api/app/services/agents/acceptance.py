@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -120,7 +121,7 @@ async def review(
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
             resp = await client.post(
-                f"{settings.NEWAPI_BASE_URL.rstrip('/')}/chat/completions",
+                f"{get_model_base_url().rstrip('/')}/chat/completions",
                 json=wire_payload,
                 headers={"Authorization": f"Bearer {api_key}"},
             )
