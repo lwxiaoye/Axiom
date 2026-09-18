@@ -16,7 +16,6 @@ import { PermissionModeEnum } from '/@/enums/appEnum';
 import { asyncRoutes } from '/@/router/routes';
 import { ERROR_LOG_ROUTE, PAGE_NOT_FOUND_ROUTE } from '/@/router/routes/basic';
 import { staticRoutesList } from '../../router/routes/staticRouter';
-import { ensureCampusAssistantMenu } from '/@/views/newapi/campusAssistant/ensureCampusMenu';
 import { ensureSubAgentSkinMenu } from '/@/views/workflow/skins/ensureSubAgentSkinMenu';
 
 import { filter } from '/@/utils/helper/treeHelper';
@@ -268,9 +267,9 @@ export const usePermissionStore = defineStore({
           routeList = transformObjToRoute(routeList);
 
           // 构建后台路由菜单
-          const backMenuList = ensureSubAgentSkinMenu(
-            ensureCampusAssistantMenu(transformRouteToMenu(routeList)),
-          );
+          // 不再往侧栏硬塞「校园百事通配置」(/newapi/campus-assistant)：那是 Jeecg 时代的旧页，
+          // 功能已并入 /admin 管理页的「校园百事通」tab，留着只会让所有人看到一个死入口。
+          const backMenuList = ensureSubAgentSkinMenu(transformRouteToMenu(routeList));
           this.setBackMenuList(backMenuList);
 
           // 删除meta.ignoreRoute项

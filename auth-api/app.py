@@ -95,7 +95,10 @@ async def login_rate_limit(request: Request, call_next):
     return response
 
 
-def ok(result: Any = None, message: str = "成功", code: int = 200) -> dict:
+def ok(result: Any = None, message: str = "", code: int = 200) -> dict:
+    """Jeecg 信封。message 默认留空：前端 axios 默认 successMessageMode='success'，
+    凡是 success 且 message 非空的响应都会弹「成功」气泡，Java 端 Result.OK(data)
+    的 message 就是空串——只有明确要提示的操作（注册等）才传文案。"""
     return {"success": True, "code": code, "message": message, "result": result}
 
 
@@ -218,13 +221,14 @@ def permission_rows() -> list[dict[str, Any]]:
     return [
         {"id": "p-campus", "name": "校园百事通", "url": "/center/chat/campus", "perms": "campus:view", "menuType": 1},
         {"id": "p-chat", "name": "主对话", "url": "/center/chat", "perms": "chat:view", "menuType": 1},
-        {"id": "p-campus-admin", "name": "校园百事通配置", "url": "/newapi/campus-assistant", "perms": "campus:admin", "menuType": 1},
-        {"id": "p-user", "name": "用户管理", "url": "/system/user", "perms": "system:user", "menuType": 1},
-        {"id": "p-role", "name": "角色管理", "url": "/system/role", "perms": "system:role", "menuType": 1},
     ]
 
 
 def menus() -> list[dict[str, Any]]:
+    """侧栏菜单。只下发工作台真正有的页面：
+    /system/user、/system/role 是 Jeecg 的用户/角色管理页，Java 后端下线后表格空、
+    异步组件超时；/newapi/campus-assistant 的功能已并入 /admin 的「校园百事通」tab。
+    用户/角色管理页的静态路由已随前端瘦身移到 routes/modules-disabled，这里不能再指过去。"""
     return [
         {
             "path": "/center",
@@ -240,30 +244,6 @@ def menus() -> list[dict[str, Any]]:
                     "id": "menu-chat",
                     "component": "peopleCenter/pages/ChatPage",
                     "meta": {"title": "新对话", "keepAlive": True},
-                },
-            ],
-        },
-        {
-            "path": "/system",
-            "component": "LAYOUT",
-            "redirect": "/system/user",
-            "name": "system-manage",
-            "id": "menu-system",
-            "meta": {"title": "权限管理", "icon": "ant-design:safety-certificate-outlined"},
-            "children": [
-                {
-                    "path": "/system/user",
-                    "name": "system-user",
-                    "id": "menu-user",
-                    "component": "system/user/index",
-                    "meta": {"title": "用户管理"},
-                },
-                {
-                    "path": "/system/role",
-                    "name": "system-role",
-                    "id": "menu-role",
-                    "component": "system/role/index",
-                    "meta": {"title": "角色管理"},
                 },
             ],
         },
