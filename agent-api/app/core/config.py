@@ -284,11 +284,6 @@ class Settings(BaseSettings):
     INTERNAL_SYNC_SECRET: str = ""
     INTERNAL_SYNC_MAX_AGE_SECONDS: int = 300
 
-    # APISIX forward-auth identity signed by the Java auth service.
-    GATEWAY_IDENTITY_SECRET: str = ""
-    GATEWAY_IDENTITY_SIGNATURE_REQUIRED: bool = False
-    GATEWAY_IDENTITY_MAX_AGE_SECONDS: int = 300
-
     # 选中知识库后的前置召回不能无限挡住首帧；超时后模型会明确说明本轮未取得资料。
     # 2026-08-08：12s 对「选了库的普通问」过长；6s 足够大多数 Java 召回，超时走诚实降级文案。
     KNOWLEDGE_PRE_RETRIEVE_TIMEOUT_SECONDS: int = 6

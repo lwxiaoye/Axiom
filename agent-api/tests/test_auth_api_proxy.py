@@ -50,7 +50,6 @@ def test_auth_api_bypasses_environment_proxy(monkeypatch):
 def test_revoked_token_is_revalidated_instead_of_using_stale_cache(monkeypatch):
     user = auth.UserContext(user_id="test-user", username="test-name")
     monkeypatch.setattr(auth.settings, "AUTH_TOKEN_CACHE_TTL_SECONDS", 0)
-    monkeypatch.setattr(auth.settings, "GATEWAY_IDENTITY_SIGNATURE_REQUIRED", False)
     monkeypatch.setattr(auth, "_token_cache", {"revoked-token": (time.time() + 300, user)})
 
     async def rejected(_token):

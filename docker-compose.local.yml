@@ -23,7 +23,6 @@ x-agent-environment: &agent-environment
   MIGRATE_ON_STARTUP: "true"
   FILE_STORAGE_PROVIDER: local
   CONNECTOR_SECRET_KEY: ${AXIOM_CONNECTOR_SECRET}
-  GATEWAY_IDENTITY_SIGNATURE_REQUIRED: "false"
 
 x-agent-healthcheck: &agent-healthcheck
   test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5)"]

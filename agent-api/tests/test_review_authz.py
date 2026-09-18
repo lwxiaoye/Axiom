@@ -102,7 +102,7 @@ class RegistryEventSignatureFailClosedTest(unittest.TestCase):
     def _patch_secret(self, secret: str):
         stub = SimpleNamespace(
             INTERNAL_SYNC_SECRET=secret,
-            GATEWAY_IDENTITY_MAX_AGE_SECONDS=300,
+            INTERNAL_SYNC_MAX_AGE_SECONDS=300,
         )
         return mock.patch.object(reg, "settings", stub)
 
