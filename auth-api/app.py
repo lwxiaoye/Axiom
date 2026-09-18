@@ -12,13 +12,15 @@ import re
 import random
 import secrets
 from contextlib import asynccontextmanager
+from datetime import date
+from pathlib import Path
 from typing import Any, Optional
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
 from store import AuthStore
@@ -30,6 +32,24 @@ TOKEN_TTL_SECONDS = int(os.environ.get("AXIOM_TOKEN_TTL", "86400"))
 
 CAPTCHA_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
+# ---- 图片上传（头像、智能体图标） ----
+UPLOAD_SUBDIR = "uploads"
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+# multipart 分隔符和头部的余量；正文超过它直接拒收，不把整个请求读进内存。
+MAX_UPLOAD_REQUEST_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
+# Pillow 识别出的格式 → 落盘扩展名 / Content-Type。类型判定看文件内容，不信文件名。
+IMAGE_FORMATS = {
+    "PNG": ("png", "image/png"),
+    "JPEG": ("jpg", "image/jpeg"),
+    "GIF": ("gif", "image/gif"),
+    "WEBP": ("webp", "image/webp"),
+}
+IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+IMAGE_MEDIA_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                     "gif": "image/gif", "webp": "image/webp"}
+# 我们自己生成的对象路径长这样；静态接口和头像字段都只认这个形状，天然挡掉 ../ 和绝对路径。
+UPLOAD_PATH_PATTERN = re.compile(rf"^{UPLOAD_SUBDIR}/[0-9a-f]{{32}}\.(png|jpg|gif|webp)$")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if len(AES_KEY) not in (16, 24, 32) or len(AES_IV) != 16:
@@ -40,7 +60,11 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(f"Set AXIOM_ADMIN_PASSWORD to a password of at least {minimum_length} characters")
     if not DEFAULT_USERNAME.strip() or TOKEN_TTL_SECONDS <= 0:
         raise RuntimeError("AXIOM_ADMIN_USER and AXIOM_TOKEN_TTL must be valid")
-    app.state.store = AuthStore(os.environ.get("AXIOM_AUTH_DB", "data/auth.sqlite3"), DEFAULT_USERNAME, password)
+    db_path = os.environ.get("AXIOM_AUTH_DB", "data/auth.sqlite3")
+    app.state.store = AuthStore(db_path, DEFAULT_USERNAME, password)
+    # 上传的图片放在数据库旁边的 uploads/：容器里 /app/data 已经是持久卷，不用再挂一个。
+    app.state.upload_dir = (Path(db_path).resolve().parent / UPLOAD_SUBDIR)
+    app.state.upload_dir.mkdir(parents=True, exist_ok=True)
     yield
 
 
@@ -66,11 +90,15 @@ async def login_rate_limit(request: Request, call_next):
         if not app.state.store.allow_attempt(key, 10 if login_request else 30, 300 if login_request else 60):
             return fail("请求过于频繁，请稍后重试", code=429, status=429)
     response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store"
+    # 处理器自己设了 Cache-Control（上传图片文件名随机、内容不变，可长期缓存）就不覆盖。
+    response.headers.setdefault("Cache-Control", "no-store")
     return response
 
 
-def ok(result: Any = None, message: str = "成功", code: int = 200) -> dict:
+def ok(result: Any = None, message: str = "", code: int = 200) -> dict:
+    """Jeecg 信封。message 默认留空：前端 axios 默认 successMessageMode='success'，
+    凡是 success 且 message 非空的响应都会弹「成功」气泡，Java 端 Result.OK(data)
+    的 message 就是空串——只有明确要提示的操作（注册等）才传文案。"""
     return {"success": True, "code": code, "message": message, "result": result}
 
 
@@ -114,17 +142,34 @@ def session_record(session: dict[str, Any]) -> dict[str, Any] | None:
     return app.state.store.user_record(session["user"]["username"])
 
 
+def profile_payload(record: dict[str, Any]) -> dict[str, Any]:
+    """个人资料列 → Jeecg 字段。birthday 空串给 None，前端 dayjs('') 判为无效日期会当空处理，
+    但 Jeecg 原本就是 null，保持一致。"""
+    return {
+        "realname": record.get("realname") or "",
+        "avatar": record.get("avatar") or "",
+        "birthday": record.get("birthday") or None,
+        "sex": int(record.get("sex") or 0),
+        "email": record.get("email") or "",
+        "phone": record.get("phone") or "",
+    }
+
+
 def user_payload(record: dict[str, Any]) -> dict[str, Any]:
     """Jeecg-shaped user object for either the administrator or a member account."""
     base = admin_user()
+    profile = profile_payload(record)
     if record.get("is_admin"):
+        # 管理员没填邮箱时沿用旧的占位地址，前端有地方拿它当展示文本。
+        profile["email"] = profile["email"] or base["email"]
+        base.update(profile)
         return base
     username = record["username"]
+    base.update(profile)
     base.update({
         "id": f"u-{username}",
         "username": username,
-        "realname": record.get("realname") or username,
-        "email": "",
+        "realname": profile["realname"] or username,
         "workNo": username,
         "post": "member",
         "userIdentity": 1,
@@ -176,13 +221,14 @@ def permission_rows() -> list[dict[str, Any]]:
     return [
         {"id": "p-campus", "name": "校园百事通", "url": "/center/chat/campus", "perms": "campus:view", "menuType": 1},
         {"id": "p-chat", "name": "主对话", "url": "/center/chat", "perms": "chat:view", "menuType": 1},
-        {"id": "p-campus-admin", "name": "校园百事通配置", "url": "/newapi/campus-assistant", "perms": "campus:admin", "menuType": 1},
-        {"id": "p-user", "name": "用户管理", "url": "/system/user", "perms": "system:user", "menuType": 1},
-        {"id": "p-role", "name": "角色管理", "url": "/system/role", "perms": "system:role", "menuType": 1},
     ]
 
 
 def menus() -> list[dict[str, Any]]:
+    """侧栏菜单。只下发工作台真正有的页面：
+    /system/user、/system/role 是 Jeecg 的用户/角色管理页，Java 后端下线后表格空、
+    异步组件超时；/newapi/campus-assistant 的功能已并入 /admin 的「校园百事通」tab。
+    用户/角色管理页的静态路由已随前端瘦身移到 routes/modules-disabled，这里不能再指过去。"""
     return [
         {
             "path": "/center",
@@ -198,30 +244,6 @@ def menus() -> list[dict[str, Any]]:
                     "id": "menu-chat",
                     "component": "peopleCenter/pages/ChatPage",
                     "meta": {"title": "新对话", "keepAlive": True},
-                },
-            ],
-        },
-        {
-            "path": "/system",
-            "component": "LAYOUT",
-            "redirect": "/system/user",
-            "name": "system-manage",
-            "id": "menu-system",
-            "meta": {"title": "权限管理", "icon": "ant-design:safety-certificate-outlined"},
-            "children": [
-                {
-                    "path": "/system/user",
-                    "name": "system-user",
-                    "id": "menu-user",
-                    "component": "system/user/index",
-                    "meta": {"title": "用户管理"},
-                },
-                {
-                    "path": "/system/role",
-                    "name": "system-role",
-                    "id": "menu-role",
-                    "component": "system/role/index",
-                    "meta": {"title": "角色管理"},
                 },
             ],
         },
@@ -393,6 +415,200 @@ def get_user_permission(
     codes = permission_codes(session_record(session))
     auth = [{"action": code, "type": "1", "status": "1", "describe": code} for code in codes]
     return ok({"menu": menus(), "auth": auth, "allAuth": auth, "codeList": codes, "sysSafeMode": False})
+
+
+# ---------------- 个人资料 ----------------
+
+class UserEditBody(BaseModel):
+    """前端 userEdit 只传改动的键（头像单独一次、基本资料一次），全部可选。
+    id 收下但不用：只能改会话本人的资料，改谁由 token 决定。"""
+    id: Optional[int | str] = None
+    realname: Optional[str] = Field(default=None, max_length=100)
+    avatar: Optional[str] = Field(default=None, max_length=256)
+    birthday: Optional[str] = Field(default=None, max_length=32)
+    sex: Optional[int | str] = None
+    email: Optional[str] = Field(default=None, max_length=128)
+    phone: Optional[str] = Field(default=None, max_length=32)
+
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+PHONE_PATTERN = re.compile(r"^\+?[0-9-]{6,20}$")
+
+
+def validate_profile_patch(body: UserEditBody) -> tuple[dict[str, Any], str]:
+    """把请求体收敛成能直接写库的字段；返回 (字段, 错误文案)。"""
+    fields: dict[str, Any] = {}
+    if body.realname is not None:
+        realname = body.realname.strip()
+        if not realname:
+            return {}, "名称不能为空"
+        fields["realname"] = realname
+    if body.avatar is not None:
+        avatar = body.avatar.strip()
+        # 头像只接受本服务签发的对象路径（或清空）：存任意 URL 会被其他用户的浏览器当 <img> 加载。
+        if avatar and not UPLOAD_PATH_PATTERN.match(avatar):
+            return {}, "头像地址无效，请重新上传"
+        fields["avatar"] = avatar
+    if body.birthday is not None:
+        birthday = body.birthday.strip()[:10]
+        if birthday:
+            try:
+                birthday = date.fromisoformat(birthday).isoformat()
+            except ValueError:
+                return {}, "生日格式应为 YYYY-MM-DD"
+        fields["birthday"] = birthday
+    if body.sex is not None:
+        sex = str(body.sex).strip()
+        if sex not in ("", "0", "1", "2"):
+            return {}, "性别取值无效"
+        fields["sex"] = int(sex or 0)
+    if body.email is not None:
+        email = body.email.strip()
+        if email and not EMAIL_PATTERN.match(email):
+            return {}, "邮箱格式不正确"
+        fields["email"] = email
+    if body.phone is not None:
+        phone = body.phone.strip()
+        if phone and not PHONE_PATTERN.match(phone):
+            return {}, "手机号格式不正确"
+        fields["phone"] = phone
+    return fields, ""
+
+
+@app.get("/sys/user/login/setting/getUserData")
+def get_user_data(
+    x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
+    authorization: Optional[str] = Header(None),
+):
+    """「个人资料」弹窗的读接口：就是当前用户的 Jeecg 用户对象。"""
+    session, error = require_user(x_access_token, authorization)
+    if error:
+        return error
+    return ok(session["user"])
+
+
+@app.api_route("/sys/user/login/setting/userEdit", methods=["POST", "PUT"])
+def user_edit(
+    body: UserEditBody,
+    x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
+    authorization: Optional[str] = Header(None),
+):
+    """改自己的资料。前端用 POST；Jeecg 原版是 PUT，两个都接。"""
+    session, error = require_user(x_access_token, authorization)
+    if error:
+        return error
+    fields, message = validate_profile_patch(body)
+    if message:
+        return fail(message, code=400)
+    username = session["user"]["username"]
+    if fields:
+        app.state.store.update_user_profile(username, fields)
+    record = app.state.store.user_record(username)
+    return ok(user_payload(record))
+
+
+# ---------------- 图片上传与静态文件 ----------------
+
+def parse_multipart(body: bytes, content_type: str) -> dict[str, tuple[str, bytes]]:
+    """最小 multipart/form-data 解析：{字段名: (文件名, 内容)}。
+
+    不装 python-multipart 的原因：线上容器是源码挂载 + --reload，requirements 变了
+    镜像不会自动重建；FastAPI 的 UploadFile 在导入期就会因缺依赖抛错，整个认证服务跟着挂。
+    浏览器 FormData 生成的报文格式固定（CRLF 分隔、每段一个 Content-Disposition），
+    这里只处理这一种，畸形报文一律当作没有文件。"""
+    match = re.search(r'boundary="?([^";,]+)"?', content_type or "", re.IGNORECASE)
+    if not match:
+        return {}
+    delimiter = b"--" + match.group(1).encode("latin-1")
+    fields: dict[str, tuple[str, bytes]] = {}
+    # 首段前面没有 CRLF，补一个让所有段的切法一致。
+    for chunk in (b"\r\n" + body).split(b"\r\n" + delimiter)[1:]:
+        if chunk.startswith(b"--"):
+            break  # 结束分隔符
+        head, sep, data = chunk.lstrip(b"\r\n").partition(b"\r\n\r\n")
+        if not sep:
+            continue
+        headers = head.decode("latin-1", "replace")
+        disposition = re.search(r"content-disposition:\s*form-data;(.*)", headers, re.IGNORECASE)
+        if not disposition:
+            continue
+        params = dict(re.findall(r'\s*([A-Za-z0-9_-]+)="?([^";]*)"?', disposition.group(1)))
+        name = params.get("name")
+        if name:
+            fields[name] = (params.get("filename", ""), data)
+    return fields
+
+
+def sniff_image(data: bytes) -> tuple[str, str] | None:
+    """用 Pillow 按内容识别格式并校验完整性；返回 (扩展名, Content-Type)，不是允许的图片给 None。"""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            fmt = image.format
+            image.verify()
+    except Exception:  # Pillow 对坏文件抛的异常类型很多，统一当作不是图片
+        return None
+    return IMAGE_FORMATS.get(fmt or "")
+
+
+@app.post("/sys/common/upload")
+async def upload_image(request: Request):
+    """Jeecg 的 /sys/common/upload：字段名 file，返回对象路径。
+    路径同时放在 result 和 message：新组件（头像裁剪、智能体图标）读 result，
+    Jeecg 老组件 JUpload/JImageUpload 读 message——Java 原版就是把路径写在 message 里。"""
+    _, error = require_user(request.headers.get("X-Access-Token"), request.headers.get("Authorization"))
+    if error:
+        return error
+    content_type = request.headers.get("content-type", "")
+    if not content_type.lower().startswith("multipart/form-data"):
+        return fail("请以 multipart/form-data 上传文件", code=400)
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_REQUEST_BYTES:
+        return fail("图片不能超过 2MB", code=400)
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_UPLOAD_REQUEST_BYTES:
+            return fail("图片不能超过 2MB", code=400)
+    filename, data = parse_multipart(bytes(body), content_type).get("file", ("", b""))
+    if not data:
+        return fail("没有收到文件，请选择图片后重试", code=400)
+    if len(data) > MAX_UPLOAD_BYTES:
+        return fail("图片不能超过 2MB", code=400)
+    # 文件名扩展名和内容都要过：扩展名挡明显错传，内容识别挡改名的可执行文件。
+    suffix = Path(filename).suffix.lower().lstrip(".")
+    if suffix and suffix not in IMAGE_EXTENSIONS:
+        return fail("仅支持 png、jpg、gif、webp 图片", code=400)
+    kind = sniff_image(data)
+    if kind is None:
+        return fail("文件不是有效的 png、jpg、gif 或 webp 图片", code=400)
+    extension, _ = kind
+    # 文件名用随机 id，不用用户给的：避免覆盖、路径穿越和可预测的地址。
+    object_path = f"{UPLOAD_SUBDIR}/{secrets.token_hex(16)}.{extension}"
+    target = app.state.upload_dir / Path(object_path).name
+    target.write_bytes(data)
+    return ok(object_path, message=object_path)
+
+
+@app.get("/sys/common/static/{path:path}")
+def static_file(path: str):
+    """按上传时返回的对象路径把文件吐回去。<img src> 带不了 token，这里不做鉴权（Jeecg 原版也是
+    白名单）；文件名是 128 位随机 id，猜不到。路径只认我们自己签发的形状，任何 ../、绝对路径、
+    其他目录都是 404。"""
+    if not UPLOAD_PATH_PATTERN.match(path):
+        return fail("文件不存在", code=404, status=404)
+    upload_dir: Path = app.state.upload_dir
+    target = (upload_dir / Path(path).name).resolve()
+    if target.parent != upload_dir or not target.is_file():
+        return fail("文件不存在", code=404, status=404)
+    return FileResponse(
+        target,
+        media_type=IMAGE_MEDIA_TYPES[target.suffix.lstrip(".")],
+        headers={
+            # 文件名随机且内容不变：可以放心长期缓存。
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @app.get("/sys/user/list")

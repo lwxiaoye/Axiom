@@ -8,7 +8,6 @@ import { filter } from '/@/utils/helper/treeHelper';
 import { isUrl } from '/@/utils/is';
 import { router } from '/@/router';
 import { PermissionModeEnum } from '/@/enums/appEnum';
-import { ensureCampusAssistantMenu } from '/@/views/newapi/campusAssistant/ensureCampusMenu';
 import { ensureSubAgentSkinMenu } from '/@/views/workflow/skins/ensureSubAgentSkinMenu';
 import { pathToRegexp } from 'path-to-regexp';
 
@@ -56,9 +55,9 @@ const staticMenus: Menu[] = [];
 async function getAsyncMenus() {
   const permissionStore = usePermissionStore();
   if (isBackMode()) {
-    return ensureSubAgentSkinMenu(ensureCampusAssistantMenu(
+    return ensureSubAgentSkinMenu(
       permissionStore.getBackMenuList.filter((item) => !item.meta?.hideMenu && !item.hideMenu),
-    ));
+    );
   }
   if (isRouteMappingMode()) {
     return permissionStore.getFrontMenuList.filter((item) => !item.hideMenu);
