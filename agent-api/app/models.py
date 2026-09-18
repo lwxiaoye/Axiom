@@ -143,7 +143,7 @@ class EmbeddingModel(Base):
     dimension = Column(Integer, nullable=False)
     enabled = Column(SmallInteger, nullable=False, default=1)
     is_default = Column(SmallInteger, nullable=False, default=0)
-    api_key = Column(String(512), nullable=True)
+    api_key = Column(String(512), nullable=True)  # Fernet 密文；见 embedding_service._store_key
     base_url = Column(String(512), nullable=True)
     is_active = Column(SmallInteger, nullable=False, default=0)
     test_status = Column(String(32), nullable=True)

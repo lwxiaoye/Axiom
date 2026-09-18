@@ -171,7 +171,7 @@ def verify_event_signature(canonical: str, timestamp: str, signature: str) -> No
         ts = int(timestamp)
     except ValueError as exc:
         raise ValueError("时间戳非法") from exc
-    if abs(time.time() - ts) > settings.GATEWAY_IDENTITY_MAX_AGE_SECONDS:
+    if abs(time.time() - ts) > settings.INTERNAL_SYNC_MAX_AGE_SECONDS:
         raise ValueError("事件已过期")
     digest = hmac.new(secret.encode(), f"{canonical}\n{timestamp}".encode(), hashlib.sha256).digest()
     expected = base64.urlsafe_b64encode(digest).decode().rstrip("=")

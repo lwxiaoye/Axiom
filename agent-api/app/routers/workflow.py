@@ -495,7 +495,7 @@ def _menu_tree_contains_path(menu_nodes: Any, target_path: str) -> bool:
     return False
 
 
-async def _java_user_has_menu_path(access_token: str, menu_path: str) -> bool:
+async def _auth_api_user_has_menu_path(access_token: str, menu_path: str) -> bool:
     token = str(access_token or "").strip()
     if not token:
         return False
@@ -522,7 +522,7 @@ async def _java_user_has_menu_path(access_token: str, menu_path: str) -> bool:
 async def _require_agent_manage_permission(user: UserContext) -> None:
     if is_platform_admin(user):
         return
-    if await _java_user_has_menu_path(getattr(user, "access_token", ""), AGENT_MANAGE_MENU_PATH):
+    if await _auth_api_user_has_menu_path(getattr(user, "access_token", ""), AGENT_MANAGE_MENU_PATH):
         return
     raise HTTPException(403, "需要智能体管理页面权限")
 
@@ -530,7 +530,7 @@ async def _require_agent_manage_permission(user: UserContext) -> None:
 async def _require_review_permission(user: UserContext) -> None:
     if is_reviewer(user):
         return
-    if await _java_user_has_menu_path(getattr(user, "access_token", ""), REVIEW_MENU_PATH):
+    if await _auth_api_user_has_menu_path(getattr(user, "access_token", ""), REVIEW_MENU_PATH):
         return
     raise HTTPException(403, "需要发布审核页面权限")
 

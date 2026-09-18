@@ -132,9 +132,11 @@ export const uploadKnowledgeDocument = (knowledgeId: string, file: File, options
     { isReturnResponse: true },
   );
 
+// 上传向导第三步的「预览分段」：只切不入库。options 里的 splitStrategy / chunkSize 等是老
+// Java 的切分参数，agent-api 入库时并不读（切法固定），照样带上只是保持签名不变。
 export const previewKnowledgeDocument = (knowledgeId: string, file: File, options: KnowledgeUploadOptions) =>
   defHttp.uploadFile<KnowledgeDocumentPreview>(
-    { url: Api.documentPreview, baseURL: knowledgeApiBaseUrl },
+    { url: `${KB}/bases/${knowledgeId}/documents/preview`, baseURL: '' },
     {
       file,
       data: {
@@ -169,27 +171,36 @@ export const downloadKnowledgeDocumentArchive = (ids: string[]) =>
     .post({ url: `${KB}/documents/download-zip`, params: { ids }, responseType: 'blob' }, KB_OPTS)
     .then((blob: any) => saveBlob(blob, '知识库原始文档.zip'));
 
+// KB_OPTS 关掉了自动报错提示，agent-api 的错误在 response.data.detail 里；
+// 分段面板/编辑器拿这个把原因显示出来，否则失败就是静默的。
+export function knowledgeErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as any)?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  const message = (error as any)?.message;
+  return typeof message === 'string' && message.trim() ? message : fallback;
+}
+
+// 分段：正本在 agent-api 的 agent_knowledge_chunk，接口直接返回 {records,total}。
+// 查询参数名（knowledgeId / documentId / keyword / pageNo / pageSize）服务端原样接收。
 export const getChunkList = (params: Recordable) =>
-  defHttp.get<PageResult<KnowledgeChunk>>({ url: Api.chunkList, params }, { errorMessageMode: 'none' });
+  defHttp.get<PageResult<KnowledgeChunk>>({ url: `${KB}/chunks`, params }, KB_OPTS);
 
+// 只有 content 会被保存：agent-api 的分段没有图片存储，contentWithImages / images 这两个
+// 老 Java 的图文字段服务端忽略；签名保留是为了让编辑器组件在用户侧/管理侧共用一套调用。
 export const updateChunk = (params: Pick<KnowledgeChunk, 'id' | 'content' | 'contentWithImages' | 'images'>) =>
-  defHttp.put<KnowledgeChunk>({ url: Api.chunkEdit, params });
+  defHttp.put<KnowledgeChunk>({ url: `${KB}/chunks/${params.id}`, params: { content: params.content } }, KB_OPTS);
 
-export const uploadKnowledgeChunkImage = (id: string, file: File) =>
-  defHttp.uploadFile<KnowledgePreviewImage>(
-    { url: Api.chunkImageUpload, baseURL: knowledgeApiBaseUrl },
-    { file, data: { id } },
-    { isReturnResponse: true },
-  );
+// 用户侧分段图片上传没有对应的 agent-api 接口（分段表没有图片列，也没有跨用户可读的
+// 图片存储），编辑器在用户侧已把插图入口藏起来；这里保留函数只为防止某条路径漏网时
+// 报一个看得懂的错，而不是打到已下线的 Java 地址得到 503。
+export const uploadKnowledgeChunkImage = (_id: string, _file: File): Promise<KnowledgePreviewImage> =>
+  Promise.reject(new Error('当前版本的分段暂不支持插入图片'));
 
 export const setChunkEnabled = (id: string, enabled: boolean) =>
-  defHttp.post(
-    { url: enabled ? Api.chunkEnable : Api.chunkDisable, params: { id } },
-    { joinParamsToUrl: true },
-  );
+  defHttp.post({ url: `${KB}/chunks/${id}/enabled`, params: { enabled } }, KB_OPTS);
 
 export const deleteChunk = (id: string) =>
-  defHttp.delete({ url: Api.chunkDelete, params: { id } }, { joinParamsToUrl: true });
+  defHttp.delete({ url: `${KB}/chunks/${id}` }, KB_OPTS);
 
 export const testRetrieval = (params: Recordable) =>
   defHttp.post<RetrievalResponse>({ url: Api.retrievalManualTest, params });

@@ -1,6 +1,3 @@
-import base64
-import hashlib
-import hmac
 import logging
 import time
 from typing import Optional
@@ -114,43 +111,11 @@ def _cache_verified(token: str, user: UserContext) -> None:
         _token_cache[token] = (now + ttl, user)
 
 
-def _verify_gateway_signature(
-    user_id: str,
-    username: str,
-    role_ids: str,
-    dept_ids: str,
-    timestamp: str,
-    nonce: str,
-    signature: str,
-) -> None:
-    if not settings.GATEWAY_IDENTITY_SECRET:
-        if settings.GATEWAY_IDENTITY_SIGNATURE_REQUIRED:
-            raise HTTPException(503, "Gateway identity secret is not configured")
-        return
-    if not timestamp or not nonce or not signature:
-        raise HTTPException(401, "Missing trusted gateway identity signature")
-    try:
-        ts = int(timestamp)
-    except ValueError as exc:
-        raise HTTPException(401, "Invalid gateway identity timestamp") from exc
-    if abs(time.time() - ts) > settings.GATEWAY_IDENTITY_MAX_AGE_SECONDS:
-        raise HTTPException(401, "Gateway identity has expired")
-    canonical = "\n".join([user_id, username, role_ids, dept_ids, timestamp, nonce])
-    digest = hmac.new(
-        settings.GATEWAY_IDENTITY_SECRET.encode(),
-        canonical.encode(),
-        hashlib.sha256,
-    ).digest()
-    expected = base64.urlsafe_b64encode(digest).decode().rstrip("=")
-    if not hmac.compare_digest(signature, expected):
-        raise HTTPException(401, "Invalid gateway identity signature")
-
-
 def _resolve_tenant_id(info: dict, result: dict) -> str:
     """从**可信 auth-api 回源结果**读取租户（语义发现升级 §十一）。
 
-    只信 getUserInfo 响应本体，不信任何未签名请求头（如 X-Tenant-Id——它不在
-    网关 HMAC canonical 里，伪造即越租户）。取不到即 tenant 0（单租户环境语义）。
+    只信 getUserInfo 响应本体，不信任何请求头（如 X-Tenant-Id——没有可信来源，
+    伪造即越租户）。取不到即 tenant 0（单租户环境语义）。
     """
     for source in (info or {}, result or {}):
         for key in ("tenantId", "tenant_id", "loginTenantId"):
@@ -165,7 +130,7 @@ def _resolve_tenant_id(info: dict, result: dict) -> str:
     return "0"
 
 
-async def _verify_token_with_java(token: str) -> UserContext:
+async def _verify_token_with_auth_api(token: str) -> UserContext:
     url = f"{settings.AUTH_API_BASE}/sys/user/getUserInfo"
     logger.info("回源 auth-api 校验 token: %s -> %s", _mask_token(token), url)
     try:
@@ -227,73 +192,22 @@ async def _verify_token_with_java(token: str) -> UserContext:
 
 
 async def current_user(
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    x_username: Optional[str] = Header(None, alias="X-Username"),
-    x_real_name: Optional[str] = Header("", alias="X-Real-Name"),
-    x_role_ids: Optional[str] = Header("", alias="X-Role-Ids"),
-    x_dept_ids: Optional[str] = Header("", alias="X-Dept-Ids"),
-    x_auth_timestamp: Optional[str] = Header("", alias="X-Auth-Timestamp"),
-    x_auth_nonce: Optional[str] = Header("", alias="X-Auth-Nonce"),
-    x_auth_signature: Optional[str] = Header("", alias="X-Auth-Signature"),
     x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
     authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> UserContext:
+    """请求主体只来自访问令牌回源 auth-api（带缓存）。
+
+    不读取任何 X-User-Id / X-Username 之类的身份头：它们没有签名来源，
+    伪造即越权。历史上的「APISIX 网关签名身份」路径随 Java 后端一起下线。
+    """
     token = _clean_access_token(x_access_token, authorization)
-    def _header_text(value) -> str:
-        # FastAPI Header defaults are FieldInfo objects when this dependency is called directly
-        # in tests or internal code.  Only actual header strings are trusted as request data.
-        return value.strip() if isinstance(value, str) else ""
-
-    user_id = _header_text(x_user_id)
-    username = _header_text(x_username)
-    timestamp = _header_text(x_auth_timestamp)
-    nonce = _header_text(x_auth_nonce)
-    signature = _header_text(x_auth_signature)
-    has_signed_identity = bool(
-        user_id and username and settings.GATEWAY_IDENTITY_SECRET
-        and timestamp and nonce and signature
-    )
-    if has_signed_identity:
-        roles = _header_text(x_role_ids)
-        depts = _header_text(x_dept_ids)
-        _verify_gateway_signature(
-            user_id, username, roles, depts,
-            timestamp, nonce, signature,
-        )
-        if token:
-            # 网关签名保障了代理传入的主体，但签名协议没有 tenant 字段。浏览器请求
-            # 同时携带 token 时，以 auth-api 回源的已验证租户、角色和部门为准，并校验
-            # 两个可信身份来源的 user_id 一致，避免原本固定 tenant=0 误拒绝应用权限。
-            verified = _get_cached(token) or await _verify_token_with_java(token)
-            if verified.user_id != user_id:
-                raise HTTPException(401, "Gateway identity does not match access token")
-            verified.access_token = token
-            _cache_verified(token, verified)
-            return verified
-
-        # 网关身份路径的租户保持 "0"：tenant 不在 HMAC canonical（user_id/username/
-        # roles/depts/timestamp/nonce）里，未签名的租户头不可信（§十一.2/3）。要传租户
-        # 必须先把它纳入网关签名协议并同步 auth-api 侧；协议未同步前明确保持单租户限制。
-        return UserContext(
-            user_id=user_id,
-            username=username,
-            real_name=_header_text(x_real_name),
-            tenant_id="0",
-            role_ids=_normalize_ids(roles),
-            dept_ids=_normalize_ids(depts),
-            access_token=token,
-        )
-
-    if settings.GATEWAY_IDENTITY_SIGNATURE_REQUIRED:
-        raise HTTPException(401, "Missing APISIX authenticated identity")
-
     if not token:
         raise HTTPException(401, "缺少访问令牌")
     cached = _get_cached(token)
     if cached:
         cached.access_token = token
         return cached
-    user = await _verify_token_with_java(token)
+    user = await _verify_token_with_auth_api(token)
     user.access_token = token
     _cache_verified(token, user)
     return user
@@ -309,7 +223,7 @@ async def user_from_token(token: str) -> Optional[UserContext]:
     if cached:
         return cached
     try:
-        user = await _verify_token_with_java(cleaned)
+        user = await _verify_token_with_auth_api(cleaned)
     except Exception:  # noqa: BLE001 - 含 HTTPException(401)
         return None
     _cache_verified(cleaned, user)

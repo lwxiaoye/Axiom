@@ -10,11 +10,11 @@
             :maxlength="20000"
             :readonly="!canEdit"
             show-count
-            placeholder="把光标放到需要插入图片的位置，右键可插入图片。"
+            :placeholder="imageToolsEnabled ? '把光标放到需要插入图片的位置，右键可插入图片。' : '编辑分段内容，保存后会重新生成向量。'"
             @keydown.esc="closeChunkImageMenu"
           />
           <div
-            v-if="canEdit && chunkImageMenu.open"
+            v-if="canEdit && imageToolsEnabled && chunkImageMenu.open"
             class="chunk-image-context-menu"
             :style="{ left: `${chunkImageMenu.left}px`, top: `${chunkImageMenu.top}px` }"
             @click.stop
@@ -40,20 +40,22 @@
             <span v-else class="chunk-image-menu-empty">暂无已上传图片</span>
           </div>
         </div>
-        <p class="chunk-content-tip">图片会以 Markdown 形式插入到正文中，保存后检索回复会按这里的图文顺序展示。</p>
+        <p v-if="imageToolsEnabled" class="chunk-content-tip">图片会以 Markdown 形式插入到正文中，保存后检索回复会按这里的图文顺序展示。</p>
       </a-form-item>
-      <a-form-item label="分段图片">
+      <!-- 用户侧分段由 agent-api 承接，分段表没有图片存储，插图入口整体隐藏而不是留一个必然报错的按钮；
+           管理侧仍走原来的接口，保持不动。 -->
+      <a-form-item v-if="imageToolsEnabled || chunkEditorImages.length" label="分段图片">
         <div class="chunk-editor-images">
           <div v-for="(image, index) in chunkEditorImages" :key="image.imageId || image.url" class="chunk-editor-image">
             <a-image :src="imageSrc(image.url)" :alt="image.caption || image.ocrText || '分段图片'" />
             <a-button v-if="canEdit" type="link" size="small" @click="insertChunkImage(image)">插入到光标处</a-button>
             <a-button v-if="canEdit" type="text" danger size="small" @click="removeChunkImage(index)">删除图片</a-button>
           </div>
-          <a-upload v-if="canEdit" accept="image/png,image/jpeg,image/gif,image/bmp,image/webp" :show-upload-list="false" :custom-request="uploadChunkImage">
+          <a-upload v-if="canEdit && imageToolsEnabled" accept="image/png,image/jpeg,image/gif,image/bmp,image/webp" :show-upload-list="false" :custom-request="uploadChunkImage">
             <a-button :loading="chunkImageUploading"><UploadOutlined /> 上传图片</a-button>
           </a-upload>
         </div>
-        <p class="chunk-image-tip">支持 PNG、JPG、GIF、BMP、WEBP，单张不超过 5 MB，最多 10 张。</p>
+        <p v-if="imageToolsEnabled" class="chunk-image-tip">支持 PNG、JPG、GIF、BMP、WEBP，单张不超过 5 MB，最多 10 张。</p>
       </a-form-item>
       <a-button v-if="canEdit" type="primary" block size="large" class="drawer-save" :loading="chunkSaving" @click="saveChunk">保存并更新向量</a-button>
     </a-form>
@@ -65,7 +67,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { UploadOutlined } from '@ant-design/icons-vue';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { getProxyStaticFileUrl } from '/@/utils/common/fileUrl';
-import { updateChunk, updateManagedChunk, uploadKnowledgeChunkImage, uploadManagedKnowledgeChunkImage } from '../knowledge.api';
+import { knowledgeErrorMessage, updateChunk, updateManagedChunk, uploadKnowledgeChunkImage, uploadManagedKnowledgeChunkImage } from '../knowledge.api';
 import type { KnowledgeChunk, KnowledgePreviewImage } from '../knowledge.types';
 
 type TextSelection = { start: number; end: number };
@@ -102,6 +104,11 @@ const drawerOpen = computed({
   get: () => props.open,
   set: (value: boolean) => emit('update:open', value),
 });
+
+// 用户侧（agent-api）的分段只有纯文本正本，没有图片存储与跨用户可读的图片地址，
+// 插图入口只在管理侧（仍走原接口）显示。用 management 推断而不加新 prop，
+// 是为了不改 MyKnowledgeTab 的调用处。
+const imageToolsEnabled = computed(() => Boolean(props.management));
 
 watch(() => [props.open, props.chunk?.id] as const, ([open]) => {
   if (open) initEditor();
@@ -187,6 +194,9 @@ async function saveChunk() {
     createMessage.success('分段和向量已更新');
     emit('update:open', false);
     emit('saved');
+  } catch (error) {
+    // 用户侧请求关掉了自动报错提示，失败原因（如重嵌入失败）要在这里显示出来
+    createMessage.error(knowledgeErrorMessage(error, '分段保存失败'));
   } finally {
     chunkSaving.value = false;
   }
@@ -230,7 +240,8 @@ function openChunkImageMenu(event: MouseEvent) {
 }
 
 function handleChunkContextMenu(event: MouseEvent) {
-  if (!props.canEdit) return;
+  // 不支持插图时放行浏览器原生右键菜单（复制/粘贴），不弹一个空的插图菜单
+  if (!props.canEdit || !imageToolsEnabled.value) return;
   event.preventDefault();
   openChunkImageMenu(event);
 }
