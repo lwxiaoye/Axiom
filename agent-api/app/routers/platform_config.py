@@ -53,9 +53,11 @@ async def test_web_search(
             from app.services.knowledge.web_search_service import _stage_search_single
             from app.services.platform.key_service import key_service
 
-            key = await key_service.get_user_key(user.user_id)
-            if not key:
-                return {"status": "failed", "message": "当前账号未分配模型 API Key"}
+            # 统一解析（个人覆盖 → 平台默认 → new-api）；拿不到用统一文案，不进外层的「连通失败」。
+            try:
+                key = await key_service.require_user_key(user.user_id)
+            except HTTPException as exc:
+                return {"status": "failed", "message": str(exc.detail)}
             config = await cfg.get_web_search_config()
             config.update({k: body[k] for k in ("deepseekModel", "deepseekMaxTokens") if k in body})
             config = cfg._normalize_provider_pool(config)
