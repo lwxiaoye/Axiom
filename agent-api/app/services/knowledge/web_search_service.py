@@ -78,6 +78,7 @@ _CONTENT_LIMIT = 1500    # 单条正文进入上下文的字符上限
 # 自托管 CPU 重排（TEI）对长中文文本很慢：实测 2000字×5≈28s、500字×5≈5s。相关性信号
 # 集中在标题+开头，故送入前单条截到 _RERANK_LOCAL_DOC_CHARS，并单独放宽超时（SaaS 的
 # jina/cohere 很快，仍用 _TIMEOUT）。超时/失败照旧静默回退不重排。
+# platform（平台重排模型）是云端按量计费，同样只送截断后的标题+开头。
 _RERANK_LOCAL_DOC_CHARS = 500
 _RERANK_LOCAL_TIMEOUT = 20
 
@@ -1370,6 +1371,34 @@ async def _stage_rerank(query: str, results: List[Dict[str, Any]], c: Dict[str, 
             data = resp.json()
             rows = data.get("results") if isinstance(data, dict) else data
             order = [r["index"] for r in (rows or []) if isinstance(r, dict) and "index" in r]
+            if order:
+                return [results[i] for i in order if 0 <= i < len(results)]
+        elif provider == "platform":
+            # 平台级重排模型（管理台统一配置，与知识库检索共用）。HTTP 调用、密钥与用量记账
+            # 都收在 rerank_service 里，这里不再套 _paid_provider_post——那套审计要拿到线上
+            # 报文和响应，隔着服务层记只会得到一条"不知道有没有扣费"的空壳记录。
+            # 延迟导入：重排是可选段，服务模块缺失（分支未合并、依赖缺失）应只让这一段降级，
+            # 不能让整个联网搜索模块 import 失败。
+            try:
+                from app.services.knowledge import rerank_service
+            except ImportError as e:
+                logger.warning("联网搜索[重排段/platform]：重排服务模块缺失，跳过重排: %s", e)
+                return results
+            # 送入内容与 local 分支同样截到标题+开头（见 _RERANK_LOCAL_DOC_CHARS 注释）：
+            # 相关性信号就在前几百字，多送只是多付 token、多等。
+            texts = [d[:_RERANK_LOCAL_DOC_CHARS] for d in docs]
+            try:
+                ranked = await rerank_service.rerank(query, texts, top_n=len(texts))
+            except rerank_service.RerankUnavailable:
+                # 未配置/未启用不是故障：按 provider=none 处理，但留一条 info，
+                # 否则管理员选了「平台重排模型」却看不出它从未生效。
+                logger.info("平台重排模型未配置，联网搜索跳过重排")
+                return results
+            except rerank_service.RerankError as e:
+                logger.warning("联网搜索[重排段/platform]失败，退回未重排顺序: %s", e)
+                return results
+            # 与其它分支一致：重排段只回收顺序，分数不落到结果上（调用处只读 _i）。
+            order = [i for i, _score in ranked]
             if order:
                 return [results[i] for i in order if 0 <= i < len(results)]
     except Exception as e:  # noqa: BLE001

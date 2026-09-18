@@ -47,7 +47,9 @@ WEB_SEARCH_DEFAULTS: Dict[str, Any] = {
     "scraperProvider": "firecrawl" if settings.WEB_SEARCH_FIRECRAWL_URL else "none",  # none | firecrawl | tavily
     "firecrawlUrl": settings.WEB_SEARCH_FIRECRAWL_URL,
     "firecrawlApiKey": "",
-    "rerankerProvider": "local" if settings.WEB_SEARCH_LOCAL_RERANKER_URL else "none",  # none | jina | cohere | local（自托管 TEI /rerank）
+    # none | jina | cohere | local（自托管 TEI /rerank）| platform（平台重排模型，走 rerank_service；
+    # 缺省不随它联动——缺省在 import 时算，那时读不到库里有没有重排配置，运行时未配置会退化为 none）
+    "rerankerProvider": "local" if settings.WEB_SEARCH_LOCAL_RERANKER_URL else "none",
     "jinaApiKey": "",
     "cohereApiKey": "",
     # 自托管重排服务地址（TEI 等，兼容 /rerank 接口），如 http://<服务器IP>:8087
