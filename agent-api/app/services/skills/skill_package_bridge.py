@@ -1,6 +1,6 @@
-"""Skill 广场（Java `ai_skill`）→ 主对话沙箱的取包桥接（ADR-047 §6.6）。
+"""Skill 广场（`ai_skill`，经 auth-api 回源）→ 主对话沙箱的取包桥接（ADR-047 §6.6）。
 
-广场 skill 把整包解压成文件目录存在 Java 侧，暴露 `/ai/skill/files`（文件树）+
+广场 skill 把整包解压成文件目录存在 auth-api 侧，暴露 `/ai/skill/files`（文件树）+
 `/ai/skill/file`（单文件内容）。这里逐文件回源重建 `{相对路径: bytes}`，供
 `sandbox_executor.execute_in_sandbox(skill_packages=...)` 挂进 `/workspace/skills/<slug>/`。
 
@@ -84,7 +84,7 @@ def is_first_party_ppt_studio(name: object) -> bool:
 
 
 def _ppt_engine_wasm_bytes() -> Optional[bytes]:
-    """Host copy of the PPTD WASM engine. Java skill fetch cannot carry ``.wasm``."""
+    """Host copy of the PPTD WASM engine. auth-api skill fetch cannot carry ``.wasm``."""
     here = Path(__file__).resolve()
     candidates = (
         here.parents[3] / "deploy" / "sandbox" / "pptd_wasm_bg.wasm",
@@ -170,7 +170,7 @@ def validate_harness_skill_package(files: dict[str, bytes]) -> tuple[str, ...]:
 # **在服务端就已经丢了**，这边 `str(content).encode("utf-8")` 只是把损坏固定下来。
 # 挂一个坏掉的 png/ttf 比不挂更糟：模型会当它可用，引用后产物里是一块空白或乱码字形，
 # 而且没有任何报错。所以这些后缀**直接不挂**，并如实记下告诉模型与运维。
-# 真正支持二进制要 Java 侧提供 base64 或裸字节通道（与 zip 上传大小限制同属那边的事）。
+# 真正支持二进制要 auth-api 侧提供 base64 或裸字节通道（与 zip 上传大小限制同属那边的事）。
 _BINARY_SUFFIXES = (
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff",
     ".ttf", ".otf", ".woff", ".woff2", ".eot",
@@ -312,7 +312,7 @@ def _decode_possible_base64(value: Any) -> Optional[bytes]:
 
 
 def _extract_zip_package(raw: bytes) -> dict:
-    """Turn a Skill ZIP into the same shape as the per-file Java fetch."""
+    """Turn a Skill ZIP into the same shape as the per-file auth-api fetch."""
     from app.services.platform import zip_guard
 
     files: dict[str, bytes] = {}
@@ -426,7 +426,7 @@ def _attach_integrity(fetched: dict) -> dict:
 async def _try_fetch_package_zip(
     client: httpx.AsyncClient, base: str, headers: dict, record_id: str
 ) -> Optional[dict]:
-    """Prefer a whole-package ZIP when Java exposes it. None = channel missing."""
+    """Prefer a whole-package ZIP when auth-api exposes it. None = channel missing."""
     try:
         response = await client.get(
             f"{base}{_PACKAGE_ZIP_PATH}",
@@ -700,7 +700,7 @@ async def _fetch_one_skill(
         # 文件树拿到了、一个字节都没取回来：单文件接口在抖。这一分支以前是 `continue`
         # 整包丢弃且无痕，模型却已被系统提示词告知"脚本已挂在 /workspace/skills/ 下"。
         error = (f"文件树有 {len(all_rels)} 个条目，但没有一个文件取回成功"
-                 if all_rels else "技能包是空的（Java 侧文件树无内容）")
+                 if all_rels else "技能包是空的（auth-api 侧文件树无内容）")
     channel = "bytes" if binary_channel else "text_json"
     return _attach_integrity({
         "files": files,
@@ -746,7 +746,7 @@ async def _fetch_one_skill_cached(
 
     The ACL check still happens before this function.  The cache key includes a one-way digest of
     the access token, so a package fetched for one user is never reused for another user's ACL.
-    Failures are deliberately not cached; transient Java errors must remain retryable.
+    Failures are deliberately not cached; transient auth-api errors must remain retryable.
     """
     token_digest = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:16]
     key = f"{base}\0{record_id}\0{token_digest}"
@@ -842,7 +842,7 @@ async def fetch_skill_packages(skills: List[dict], token: str) -> List[dict]:
     返回 [{skillId, name, slug, files:{相对路径:bytes}, hasScripts, entrypoint}]，仅含成功取到的文本文件。
 
     取包失败**不再静默丢弃**：失败的技能以 `unavailable=True` 的占位记录回来（`files` 为空），
-    由调用方在回执里如实告诉模型"这个技能本轮没挂上、别去跑它的脚本"。整体失败（Java 不可达等）
+    由调用方在回执里如实告诉模型"这个技能本轮没挂上、别去跑它的脚本"。整体失败（auth-api 不可达等）
     同样返回全量占位记录而不是空列表——空列表与"没选技能"无法区分，正是静默的来源。
     """
     wanted = [s for s in (skills or []) if str(s.get("record_id") or "").strip()]

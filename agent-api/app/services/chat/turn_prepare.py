@@ -4,7 +4,7 @@
 相同——本模块是唯一实现,两个入口共享。产出 TurnContext(chat/types.py):
 - 自动路由(R3+R4,ADR-045,默认关):无显式 @/未选知识库/未开联网时由轻量 LLM 在
   ACL 候选里二分,命中即本轮转交该子智能体,歧义则出消歧卡;
-- 并发预取:技能按 ID 回源 Java(防 Prompt Injection)/ 长期记忆
+- 并发预取:技能按 ID 回源 auth-api(防 Prompt Injection)/ 长期记忆
   召回 / 个性化 / Skill 目录,四项互不依赖,gather 压缩首字延迟(各自内部已做失败降级);
 
 智能体推荐已迁入 Harness ``recommend_agent`` 工具，不再每轮预取或向 system prompt
@@ -168,7 +168,7 @@ async def prepare_turn(
             logger.info("自动路由失败，降级直答: %s", e)
 
     # 2026-08-08：目录/历史/记忆/个性化并发；总墙钟受 TURN_PREPARE_BUDGET
-    # 约束——超时用已完成部分继续，绝不因 Java/embedding 慢把首字拖成空白十几秒。
+    # 约束——超时用已完成部分继续，绝不因 auth-api/embedding 慢把首字拖成空白十几秒。
     async def _prior_users_task():
         # PPT 语境要看最近几轮（2026-07-27 真机事故）；失败降级只看当轮。
         try:

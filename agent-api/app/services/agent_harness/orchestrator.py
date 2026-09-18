@@ -1797,7 +1797,7 @@ class HarnessOrchestrator:
 
         # Dynamic use_skill facts belong to the Run, not to a worker/process closure.  For an
         # explicit "continue" load the single finalized source Run; for a worker retry load the
-        # same Run.  IDs are only candidates here—turn preparation still rechecks Java ACL before
+        # same Run.  IDs are only candidates here—turn preparation still rechecks auth-api ACL before
         # injecting any Skill instructions or package.
         _recovery_skill_state: list[dict] = []
         _explicit_skill_ids = [
@@ -3155,7 +3155,7 @@ class HarnessOrchestrator:
             logger.info("计划续接：已把计划轮约束改写为执行指令 run=%s", run_id)
         if executing_now:
             messages.append({"role": "system", "content": _PLAN_EXECUTION_GUARD})
-        # 技能包按 id 实时回源（不用快照里的正文）：ACL/enabled 以续接这一刻的 Java 为准，
+        # 技能包按 id 实时回源（不用快照里的正文）：ACL/enabled 以续接这一刻的 auth-api 为准，
         # 挂起期间被停用/失权的技能不会因为快照而复活。
         env_skills = await _fetch_trusted_skills(env_skill_ids, token) if env_skill_ids else []
         if runtime_policy and runtime_policy.validate_resume_skills:

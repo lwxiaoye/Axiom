@@ -272,7 +272,7 @@ class Settings(BaseSettings):
 
     # 发布审批（WS2，强制审批）：所有工作流/对话 Agent 发布须提交审核，审核员通过后上线。
     PUBLISH_APPROVAL_REQUIRED: bool = True
-    # 审核员 / 平台管理员角色白名单（逗号分隔的 Java role_id）。命中即拥有审核 / 跨用户管理权限。
+    # 审核员 / 平台管理员角色白名单（逗号分隔的 auth-api 返回的 role_id）。命中即拥有审核 / 跨用户管理权限。
     # role_id↔权限码映射是跨团队 seam；username==admin 或 role 含 "admin" 亦视为平台管理员（沿用 is_admin）。
     AGENT_REVIEWER_ROLE_IDS: str = ""
     AGENT_ADMIN_ROLE_IDS: str = ""

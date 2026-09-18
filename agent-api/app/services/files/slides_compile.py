@@ -256,7 +256,7 @@ async def _read_named(user_id: str, filename: str) -> tuple[str, bytes]:
 
 
 async def _deployed_skill_records(token: str) -> list:
-    """Java 权威技能目录（enabled=1，ACL 由 token 决定），与主对话选技能同一个来源。"""
+    """auth-api 权威技能目录（enabled=1，ACL 由 token 决定），与主对话选技能同一个来源。"""
     from app.services.chat.turn_context_builder import _get_catalog_records
 
     try:
