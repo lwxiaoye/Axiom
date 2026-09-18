@@ -125,9 +125,12 @@ export class VAxios {
       formData.append(customFilename, params.file);
     }
     const glob = useGlobSetting();
-    // Most legacy uploads use the configured direct upload host. Callers that
-    // must stay on the normal API proxy can opt in with an explicit baseURL.
-    if (!config.baseURL) {
+    // 老的上传默认走配置里的直连上传地址；要留在同源代理上的调用方显式传 baseURL。
+    // 「显式传空串」就是「同源、不加前缀」的意思（agent-api 的地址已含 /agent-api 前缀），
+    // 必须用 === undefined 判断：用 !baseURL 会把空串当成没传，回退到直连地址——开发环境
+    // 那个地址是 http://127.0.0.1:9090/，浏览器不在服务器上就是 ERR_CONNECTION_REFUSED，
+    // 知识库上传向导因此整条不可用。
+    if (config.baseURL === undefined) {
       config.baseURL = glob.uploadUrl;
     }
     if (params.data) {
