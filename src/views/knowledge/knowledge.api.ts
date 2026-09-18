@@ -198,6 +198,12 @@ export const uploadKnowledgeChunkImage = (_id: string, _file: File): Promise<Kno
 export const setChunkEnabled = (id: string, enabled: boolean) =>
   defHttp.post({ url: `${KB}/chunks/${id}/enabled`, params: { enabled } }, KB_OPTS);
 
+// 切片正本表（agent_knowledge_chunk）上线前入库的文档只在 Qdrant 里有切片：卡片写着
+// 「N 个分段」、「分段」面板却是空的。这个接口从 Qdrant 按 payload 回填正本表（幂等），
+// 返回 { rebuilt: 新写入行数 }。需要编辑权限。
+export const rebuildKnowledgeChunks = (knowledgeId: string) =>
+  defHttp.post<{ rebuilt: number }>({ url: `${KB}/bases/${knowledgeId}/chunks/rebuild` }, KB_OPTS);
+
 export const deleteChunk = (id: string) =>
   defHttp.delete({ url: `${KB}/chunks/${id}` }, KB_OPTS);
 

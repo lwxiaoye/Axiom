@@ -123,4 +123,19 @@ describe('MyKnowledgeTab chunk refresh', () => {
     expect(component).not.toContain('function currentRoleIds');
     expect(component).not.toContain('function currentDeptIds');
   });
+
+  it('never mounts the department selector on the user-side ACL editor', () => {
+    const template = component.slice(0, component.indexOf('<script'));
+    const renderedTemplate = template.replace(/<!--[\s\S]*?-->/g, '');
+    // auth-api 没有部门概念：JSelectDept 一挂载就请求已下线的 sysDepart 接口（授权页打开即 404）。
+    // 既不引入该组件，下拉也不再提供「部门」；历史数据里的部门行只读展示、保存时原样带回。
+    expect(component).not.toMatch(/import \{[^}]*JSelectDept[^}]*\} from '\/@\/components\/Form'/);
+    expect(renderedTemplate).not.toContain('<JSelectDept');
+    expect(renderedTemplate).not.toContain('value="DEPARTMENT"');
+    expect(renderedTemplate).toContain('v-for="(item, index) in aclReadonlyItems"');
+    // 服务端存的 subjectType 大小写不一（所有者那条是小写 user）：读回时先归一，
+    // 否则小写行落进错误分支——这正是之前 JSelectDept 被渲染出来的原因
+    expect(component).toContain('subjectType: normalizeAclSubjectType(row.subjectType)');
+    expect(component).toMatch(/expandAclItems\(\[\.\.\.aclReadonlyItems\.value, \.\.\.aclItems\.value\]\)/);
+  });
 });
