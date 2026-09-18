@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services.chat.builtin_assistants.campus_services import config_service
-from app.services.chat.builtin_assistants.campus_services import java_knowledge
+from app.services.chat.builtin_assistants.campus_services import knowledge_access
 from app.services.chat.builtin_assistants.campus_services.runtime_service import (
     resolve_published_snapshot,
     snapshot_from_release,
@@ -68,8 +68,8 @@ def test_config_payload_includes_available_models():
 
 def test_campus_knowledge_permissions_accept_all_three_tiers():
     assert config_service.RETRIEVAL_PERMISSIONS == frozenset({"VIEWER", "EDITOR", "OWNER"})
-    assert java_knowledge.permission_of({"currentPermission": "editor"}) == "EDITOR"
-    assert java_knowledge.permission_of({"currentPermission": "USER"}) == "VIEWER"
+    assert knowledge_access.permission_of({"currentPermission": "editor"}) == "EDITOR"
+    assert knowledge_access.permission_of({"currentPermission": "USER"}) == "VIEWER"
 
 
 def test_publish_promotes_draft_without_rewriting_history():
