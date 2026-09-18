@@ -1020,7 +1020,7 @@ function handleProfileSaved() {
 
 function goToAdmin() {
   userMenuOpen.value = false;
-  router.push('/center/admin');
+  window.open('/admin', '_blank');
 }
 
 function handleLogout() {

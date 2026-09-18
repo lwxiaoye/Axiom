@@ -957,3 +957,82 @@ class AgentPresentationAssignment(Base):
     published_version = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ─── 原 JeecgBoot(Java) 业务库表 ────────────────────────────────────────────
+# 这些表原先由已下线的 Java 后端建立与维护，agent-api 只读不建。Java 移除后表
+# 从未被创建，导致 builtin_app_access 查询 app_info 直接抛异常，内置智能体全部
+# 返回 503「应用目录暂时不可用」——登录后落地校园百事通即白屏。
+# 现由 Python 侧自行拥有 schema（create_all 负责建表），彻底断开对 Java 的依赖。
+# 列集合取自实际查询语句，不臆造字段。
+
+class AppInfo(Base):
+    """智能体广场上架记录：名称/图标/分类/状态/归属，与 BUILTIN_APP_SPECS 按 route 关联。"""
+    __tablename__ = "app_info"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    app_name = Column(String(128), nullable=False, default="")
+    app_remark = Column(String(512), default="")
+    # external=广场应用；custom=自建。见 builtin_app_access.CATALOG_APP_TYPES
+    app_type = Column(String(32), nullable=False, default="external")
+    app_icon = Column(String(512), default="")
+    app_category = Column(String(64), default="")
+    pc_url = Column(String(255), index=True, default="")
+    h5_url = Column(String(255), index=True, default="")
+    form_options = Column(Text, nullable=True)
+    status = Column(String(8), nullable=False, default="1")  # "1" 启用
+    order_num = Column(Integer, nullable=False, default=0)
+    open_type = Column(String(32), default="route")
+    del_flag = Column(Integer, nullable=False, default=0)
+    create_by = Column(String(64), default="")
+    create_time = Column(DateTime, server_default=func.now())
+
+
+class AppRole(Base):
+    """应用可见范围——角色维度。无行表示不限角色。"""
+    __tablename__ = "app_role"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    app_id = Column(String(64), nullable=False, index=True)
+    role_id = Column(String(64), nullable=False, index=True)
+
+
+class AppDept(Base):
+    """应用可见范围——部门维度。无行表示不限部门。"""
+    __tablename__ = "app_dept"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    app_id = Column(String(64), nullable=False, index=True)
+    dept_id = Column(String(64), nullable=False, index=True)
+
+
+class SysUser(Base):
+    """用户档案：仅供展示创建者信息（_load_creator_profiles）。认证仍在 auth-api。"""
+    __tablename__ = "sys_user"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    username = Column(String(128), index=True, nullable=False)
+    realname = Column(String(128), default="")
+    avatar = Column(String(512), default="")
+
+
+class SysUserRole(Base):
+    __tablename__ = "sys_user_role"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    role_id = Column(String(64), nullable=False, index=True)
+
+
+class SysUserDepart(Base):
+    __tablename__ = "sys_user_depart"
+    __table_args__ = {"mysql_charset": "utf8mb4"}
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(64), nullable=False, index=True)
+    dep_id = Column(String(64), nullable=False, index=True)
