@@ -175,6 +175,31 @@ async def _save_raw(key: str, data: Dict[str, Any]) -> None:
         await session.commit()
 
 
+async def _list_raw_by_prefix(prefix: str) -> Dict[str, Dict[str, Any]]:
+    """按 config_key 前缀列出配置行（原样、不补默认值）。
+
+    给对话模型配置的「旧按用户记录 → 平台默认」迁移用：迁移要知道平台级那行**存不存在**
+    （_get_raw 会用默认值补齐，分不清「没有」和「空」），还要枚举旧的哈希后缀行。
+    解析失败的行跳过并告警，不让一行坏 JSON 挡住整个迁移。
+    """
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(PlatformConfig).where(PlatformConfig.config_key.like(prefix + "%"))
+            )
+        ).scalars().all()
+    result: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        try:
+            parsed = json.loads(row.config_json or "")
+        except (ValueError, TypeError):
+            logger.warning("平台配置 %s 的 JSON 解析失败，按前缀枚举时跳过", row.config_key)
+            continue
+        if isinstance(parsed, dict):
+            result[row.config_key] = parsed
+    return result
+
+
 def _mask(data: Dict[str, Any], secret_fields: Iterable[str]) -> Dict[str, Any]:
     """脱敏：密钥字段置空，附带 `secrets_set` 标记每个密钥是否已配置。"""
     masked = dict(data)

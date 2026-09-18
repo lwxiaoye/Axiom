@@ -602,10 +602,11 @@ class HarnessOrchestrator:
         return models[0].id if models else ""
 
     async def prepare_chat(self, user_id: str, model: Optional[str]) -> tuple[str, str]:
-        """在响应开始前完成 Key 和模型校验，保证流式错误状态码正确。"""
-        user_key = await key_service.get_user_key(user_id)
-        if not user_key:
-            raise HTTPException(status_code=403, detail="当前账号未分配模型 API Key，请联系管理员")
+        """在响应开始前完成 Key 和模型校验，保证流式错误状态码正确。
+
+        Key 走 key_service 的统一解析（个人覆盖 → 平台默认 → new-api），拿不到由它抛 403。
+        """
+        user_key = await key_service.require_user_key(user_id)
         resolved_model = await self._resolve_model(model, user_key=user_key)
         if not resolved_model:
             raise HTTPException(status_code=400, detail="当前账号没有可用的对话模型")

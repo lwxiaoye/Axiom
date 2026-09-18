@@ -1052,11 +1052,14 @@ async def update_personalization(
 # Model endpoints
 @api_router.get("/models", response_model=List[ModelItem])
 async def get_models(user: UserContext = Depends(current_user)):
-    """获取用户 Key 可用的非 Embedding 对话模型。"""
+    """获取当前用户可用的非 Embedding 对话模型。
+
+    凭据按 key_service 的统一顺序解析（个人覆盖 → 平台默认 → new-api 专属 key）；
+    命中个人覆盖/平台默认时 get_models 直接返回那一个模型（名称即管理员配的 model），
+    普通用户的下拉才有东西可选。没有任何凭据才 403。
+    """
     from app.services.platform.key_service import key_service
-    user_key = await key_service.get_user_key(user.user_id)
-    if not user_key:
-        raise HTTPException(status_code=403, detail="当前账号未分配模型 API Key，请联系管理员")
+    user_key = await key_service.require_user_key(user.user_id)
     return await agent_service.get_models(user_key=user_key)
 
 

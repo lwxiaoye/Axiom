@@ -19,6 +19,7 @@ import httpx
 from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.platform import platform_config_service as cfg
+from app.services.platform.key_service import key_service
 from app.services.gateway.mcp_client import assert_public_http_url
 from .web_engine_health import engine_health
 from .public_page_reader import read_public_page
@@ -862,9 +863,10 @@ async def _stage_search_single(
 
         if provider == "deepseek-official":
             c.pop("_deepseekUsage", None)
-            key = str(c.get("deepseekApiKey") or "").strip()
+            # 付费兜底的 Key 走统一解析（个人覆盖 → 平台默认 → new-api），见 key_service。
+            key = await key_service.resolve_search_fallback_key(c)
             if not key:
-                return [], "当前用户未分配模型 API Key"
+                return [], key_service.NO_MODEL_MESSAGE
             # 固定走平台 NewAPI 网关。DeepSeek 的 Responses 原生 web_search 会在
             # 服务端执行；旧 Messages 路径在未开启渠道透传时会被 NewAPI 转换成
             # 客户端 tool_use，只产生费用却没有搜索结果，不能再用。
@@ -1064,11 +1066,11 @@ async def _stage_search(
             # _ordered_search_providers 已检查配置和熔断状态。这里绝不能为了生成错误文案
             # 再调用一次 first_enabled，否则会绕过 open/half-open 屏障并重复烧上游配额。
             reason = "所有已配置的联网搜索 Provider 均处于熔断冷却期"
-            if "deepseek-official" in enabled and not _provider_configured("deepseek-official", c):
-                reason += "；当前用户未分配模型 API Key，付费兜底不可用"
+            if "deepseek-official" in enabled and not await key_service.resolve_search_fallback_key(c):
+                reason += f"；{key_service.NO_MODEL_MESSAGE}，付费兜底不可用"
             return [], reason
-        if "deepseek-official" in enabled and not _provider_configured("deepseek-official", c):
-            return [], "当前用户未分配模型 API Key，付费兜底不可用"
+        if "deepseek-official" in enabled and not await key_service.resolve_search_fallback_key(c):
+            return [], f"{key_service.NO_MODEL_MESSAGE}，付费兜底不可用"
         return [], "没有已启用且配置完整的联网搜索 Provider（相关地址或 Key 未配置）"
     failures = []
     skipped = []

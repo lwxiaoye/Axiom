@@ -416,6 +416,16 @@ async def _initialize_model_config() -> None:
         await session.commit()
 
 
+async def _migrate_model_connection_to_platform():
+    """对话模型配置：旧「管理员按用户哈希」记录 → 平台级单记录（幂等）。
+
+    产品要求管理员和普通用户都能直接用智能体，旧存法只对管理员自己生效。核心逻辑在
+    model_connection.migrate_legacy_to_platform；这里只负责启动期触发并兜住异常。
+    """
+    from app.services.platform.model_connection import ensure_migrated
+    await ensure_migrated()
+
+
 # 启动期后台任务的强引用集合（B4 教训）：事件循环只持弱引用，见 lifespan 内 _spawn_startup_task
 _startup_tasks: set = set()
 
@@ -473,6 +483,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "schema 以 Alembic 迁移为准（mysql revision=%s）", _rev)
     # 无论开关都要跑（DML）：存量明文 embedding key 原地加密，见 _encrypt_embedding_keys
     await _encrypt_embedding_keys()
+    # 无论开关都要跑（DML）：管理员配的对话模型从旧的「按用户哈希」记录迁成平台默认，
+    # 让所有登录用户都能用；幂等，见 model_connection.migrate_legacy_to_platform。
+    # 这里只是提前到启动期把日志打出来，首次读取时也会自动做，失败不挡启动。
+    await _migrate_model_connection_to_platform()
     # 无论开关都要跑：缺列即 fail fast（见 _assert_chat_message_columns docstring）
     await _assert_chat_message_columns()
     try:
