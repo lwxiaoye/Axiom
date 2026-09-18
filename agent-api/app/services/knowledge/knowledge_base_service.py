@@ -835,8 +835,14 @@ async def search_chunks(
     retrieval_mode: Optional[str] = None,
     semantic_weight: Optional[float] = None,
     keyword_weight: Optional[float] = None,
+    telemetry: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
     """检索。top_k / 阈值 / 检索方式 / 权重未显式传入时，取知识库设置里保存的值。
+
+    telemetry：调用方传一个 dict 进来，返回前填入本次实际生效的 retrieval_mode 与 reranked，
+    供检索日志记录。放在这里而不是让调用方自己再算一遍：检索方式与重排配置的解析
+    （库设置回落、拼写归一化、重排开关）都在本函数内部，外面重算既多两次查询又会漂移。
+    不传则一切如旧。
 
     此前两者都是写死的默认值，于是「知识库设置」里改完保存、检索行为却纹丝不动。
     多库检索的合并规则见 _load_base_settings。
@@ -888,6 +894,11 @@ async def search_chunks(
         results = fuse_hits(vector_hits, keyword_hits, sw, kw)
     else:
         results = await _vector_search(ids, query, limit, float(score_threshold))
+    if telemetry is not None:
+        # reranked 反映「重排配置生效且有候选送去重排」；重排调用失败退回召回序的情形
+        # 在 _rerank_hits 里只 warning，这里不区分——它是配置维度的事实，不是成功率
+        telemetry["retrieval_mode"] = mode
+        telemetry["reranked"] = bool(rerank_config is not None and results)
     if rerank_config is None or not results:
         return results[:k]
     return await _rerank_hits(query, results, k, rerank_config)

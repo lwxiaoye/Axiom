@@ -60,7 +60,18 @@
               <span aria-hidden="true"></span>
             </template>
           </article>
-          <a-empty v-if="!chunks.length" description="暂无分段" />
+          <a-empty v-if="!chunks.length" :description="needsRebuild ? '文档已有分段，但分段索引尚未同步到这里' : '暂无分段'">
+            <!--
+              分段正本表上线前入库的文档：卡片写着「N 个分段」，这里却是空的——切片只在向量库里。
+              给一个入口从向量库回填，而不是让用户重新上传（重切结果未必和当年一致）。
+              只在用户侧（agent-api）提供；管理侧分段列表仍走旧路径，不在本次范围内。
+            -->
+            <template v-if="needsRebuild">
+              <p class="chunk-rebuild-hint">这些文档是在分段管理上线前入库的，切片只存在向量库里。重建一次即可在此查看、编辑与停用，不影响检索。</p>
+              <a-button v-if="canEdit" type="primary" size="small" :loading="rebuilding" @click="rebuildChunks">重建分段索引</a-button>
+              <p v-else class="chunk-rebuild-hint">请联系该知识库的所有者或编辑者重建分段索引。</p>
+            </template>
+          </a-empty>
         </div>
       </div>
       <a-pagination
@@ -78,10 +89,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { useMessage } from '/@/hooks/web/useMessage';
-import { deleteChunk, deleteManagedChunk, getChunkList, getDocumentList, getManagedChunkList, getManagedDocumentList, knowledgeErrorMessage, setChunkEnabled, setManagedChunkEnabled } from '../knowledge.api';
+import { deleteChunk, deleteManagedChunk, getChunkList, getDocumentList, getManagedChunkList, getManagedDocumentList, knowledgeErrorMessage, rebuildKnowledgeChunks, setChunkEnabled, setManagedChunkEnabled } from '../knowledge.api';
 import type { KnowledgeChunk, KnowledgeDocument } from '../knowledge.types';
 
 const props = withDefaults(defineProps<{
@@ -108,8 +119,19 @@ const loading = ref(false);
 const keyword = ref('');
 const chunks = ref<KnowledgeChunk[]>([]);
 const selectedDocumentId = ref<string>();
+const documents = ref<KnowledgeDocument[]>([]);
 const documentOptions = ref<{ label: string; value: string }[]>([]);
 const pagination = reactive({ current: 1, pageSize: 20, total: 0 });
+const rebuilding = ref(false);
+
+// 「列表空，但文档自己记着有分段」= 切片正本表没同步，才提示重建；关键词搜不到、
+// 文档本来就 0 段、管理侧列表（走旧路径）都不算。
+const needsRebuild = computed(() => {
+  if (props.management || loading.value || chunks.value.length || keyword.value.trim()) return false;
+  const filterId = props.documentId || selectedDocumentId.value;
+  const candidates = filterId ? documents.value.filter((document) => document.id === filterId) : documents.value;
+  return candidates.some((document) => Number(document.chunkCount) > 0);
+});
 
 onMounted(async () => {
   selectedDocumentId.value = props.documentId;
@@ -154,7 +176,26 @@ async function loadDocumentOptions() {
   if (!kid) return;
   const page = await (props.management ? getManagedDocumentList : getDocumentList)({ knowledgeId: kid, pageNo: 1, pageSize: 1000 });
   if (kid !== props.knowledgeId) return;
-  documentOptions.value = (page?.records || []).map((document: KnowledgeDocument) => ({ label: document.originalName, value: document.id }));
+  documents.value = page?.records || [];
+  documentOptions.value = documents.value.map((document: KnowledgeDocument) => ({ label: document.originalName, value: document.id }));
+}
+
+async function rebuildChunks() {
+  const kid = props.knowledgeId;
+  if (!kid || !props.canEdit || props.management || rebuilding.value) return;
+  rebuilding.value = true;
+  try {
+    const result = await rebuildKnowledgeChunks(kid);
+    if (kid !== props.knowledgeId) return;
+    const rebuilt = Number(result?.rebuilt || 0);
+    createMessage.success(rebuilt ? `已从向量库回填 ${rebuilt} 个分段` : '向量库里没有可回填的分段');
+    await loadChunks();
+    emit('changed');
+  } catch (error) {
+    createMessage.error(knowledgeErrorMessage(error, '重建分段索引失败'));
+  } finally {
+    if (kid === props.knowledgeId) rebuilding.value = false;
+  }
 }
 
 function changeChunkPage(page: number, pageSize: number) {
@@ -395,6 +436,14 @@ defineExpose({ reload, reloadDocuments });
   margin-top: 6px;
   color: #2563eb;
   font-size: 12px;
+}
+
+.chunk-rebuild-hint {
+  max-width: 520px;
+  margin: 0 auto 12px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .knowledge-list-pagination {

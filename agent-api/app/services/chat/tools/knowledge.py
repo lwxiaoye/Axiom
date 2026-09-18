@@ -8,6 +8,7 @@ search_knowledge 工具供模型多轮按需补检。harness_orchestrator 经 ma
 import asyncio
 import logging
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
@@ -232,6 +233,8 @@ async def retrieve_knowledge(
 
     k = int(top_k or settings.KNOWLEDGE_TOP_K)
     th = settings.KNOWLEDGE_THRESHOLD if threshold is None else threshold
+    search_started = time.monotonic()
+    search_telemetry: Dict[str, Any] = {}
     try:
         hits = await kb.search_chunks(
             knowledge_ids=allowed_ids, query=q[:512], top_k=k, score_threshold=th,
@@ -239,6 +242,7 @@ async def retrieve_knowledge(
             retrieval_mode=retrieval_mode,
             semantic_weight=semantic_weight,
             keyword_weight=keyword_weight,
+            telemetry=search_telemetry,
         )
     except ValueError as exc:
         # 向量模型未配置等可读原因，原样透出而不是假装没找到
@@ -246,6 +250,19 @@ async def retrieve_knowledge(
     except Exception as exc:  # noqa: BLE001
         logger.warning("知识库检索失败: %s", exc, exc_info=True)
         return {"ok": False, "chunks": [], "error": f"检索失败: {exc}"}
+    # 运营统计的数据源：每个实际参与检索的库各记一行（无命中也记，无命中率靠它算）。
+    # 只记成功执行的检索——上面抛出的异常是「检索没跑成」，不是「跑了没命中」，混进去会
+    # 虚高无命中率。写入失败在 record_retrieval 里 warning 吞掉，不影响本轮回答。
+    from app.services.knowledge import retrieval_log_service
+    await retrieval_log_service.record_retrieval(
+        knowledge_ids=allowed_ids, hits=hits, query=q,
+        user_id=telemetry_user_id or acting_user_id,
+        source=source or "CHAT",
+        latency_ms=(time.monotonic() - search_started) * 1000,
+        retrieval_mode=search_telemetry.get("retrieval_mode"),
+        reranked=bool(search_telemetry.get("reranked")),
+        turn_id=turn_id,
+    )
 
     # 归一到下面那段解析逻辑认得的字段名，复用它的去重、配图与引用回填。
     raw = [{

@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from app.core.auth import UserContext, current_user, is_admin
 from app.services.knowledge import chunk_service
 from app.services.knowledge import knowledge_base_service as kb
+from app.services.knowledge import retrieval_log_service as retrieval_log
 
 logger = logging.getLogger(__name__)
 
@@ -487,18 +488,28 @@ async def retrieval(
         return None if value in (None, "") else float(value)
 
     started = time.monotonic()
+    query = str(body.get("query") or "")
+    telemetry: dict[str, Any] = {}
     try:
         chunks = await kb.search_chunks(
             knowledge_ids=[str(x) for x in ids],
-            query=str(body.get("query") or ""),
+            query=query,
             top_k=int(body.get("topK") or body.get("top_k") or 5),
             score_threshold=_num("scoreThreshold", "score_threshold"),
             retrieval_mode=body.get("retrievalMode", body.get("retrieval_mode")) or None,
             semantic_weight=_num("semanticWeight", "semantic_weight"),
             keyword_weight=_num("keywordWeight", "keyword_weight"),
+            telemetry=telemetry,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    latency_ms = round((time.monotonic() - started) * 1000)
+    # 页面「召回测试」记 source=TEST：运营统计默认不计入它，但留痕能看出谁在调参
+    await retrieval_log.record_retrieval(
+        knowledge_ids=[str(x) for x in ids], hits=chunks, query=query,
+        user_id=str(user.user_id), source="TEST", latency_ms=latency_ms,
+        retrieval_mode=telemetry.get("retrieval_mode"), reranked=bool(telemetry.get("reranked")),
+    )
     items = [{
         "knowledgeId": c.get("knowledgeId", ""),
         "documentId": c.get("documentId", ""),
@@ -512,8 +523,40 @@ async def retrieval(
     } for c in chunks]
     return {
         "ok": True,
-        "query": str(body.get("query") or ""),
-        "latencyMs": round((time.monotonic() - started) * 1000),
+        "query": query,
+        "latencyMs": latency_ms,
         "items": items,
         "chunks": chunks,
     }
+
+
+# ---- 运营统计 ----
+
+@router.get("/bases/{knowledge_id}/analytics")
+async def base_analytics(
+    knowledge_id: str,
+    range_: Optional[str] = Query(
+        None, alias="range", description="today / 7d / 30d，from/to 缺省时生效",
+    ),
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = Query(None),
+    sources: Optional[str] = Query(
+        None, description="逗号分隔的来源过滤（CHAT/AGENT/WORKFLOW/TEST）；缺省不含 TEST",
+    ),
+    user: UserContext = Depends(current_user),
+):
+    """单个知识库的运营统计，输出前端 KnowledgeAnalyticsOverview 契约。
+
+    原路径 /api/ai/knowledge/base/{id}/analytics 归已下线的 Java，面板一直报「统计迁移」。
+    面板发 from / to（YYYY-MM-DD，按用户本地日历），range 只是给直接调接口的人的简写。
+    权限与详情页一致（能看这个库就能看它的统计）；是否只对所有者显示由前端决定。
+    """
+    base = await _require_access(knowledge_id, user)
+    date_from, date_to = retrieval_log.resolve_range(from_, to, range_)
+    source_filter = (
+        [s for s in (sources or "").split(",") if s.strip()]
+        or list(retrieval_log.FORMAL_SOURCES)
+    )
+    return await retrieval_log.build_overview(
+        base, date_from=date_from, date_to=date_to, sources=source_filter,
+    )

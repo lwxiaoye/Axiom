@@ -198,6 +198,12 @@ export const uploadKnowledgeChunkImage = (_id: string, _file: File): Promise<Kno
 export const setChunkEnabled = (id: string, enabled: boolean) =>
   defHttp.post({ url: `${KB}/chunks/${id}/enabled`, params: { enabled } }, KB_OPTS);
 
+// 切片正本表（agent_knowledge_chunk）上线前入库的文档只在 Qdrant 里有切片：卡片写着
+// 「N 个分段」、「分段」面板却是空的。这个接口从 Qdrant 按 payload 回填正本表（幂等），
+// 返回 { rebuilt: 新写入行数 }。需要编辑权限。
+export const rebuildKnowledgeChunks = (knowledgeId: string) =>
+  defHttp.post<{ rebuilt: number }>({ url: `${KB}/bases/${knowledgeId}/chunks/rebuild` }, KB_OPTS);
+
 export const deleteChunk = (id: string) =>
   defHttp.delete({ url: `${KB}/chunks/${id}` }, KB_OPTS);
 
@@ -315,8 +321,11 @@ export const getManagedKnowledgeBaseAnalytics = (id: string, params: KnowledgeAn
     params,
   }, { errorMessageMode: 'none' });
 
+// 用户侧单库运营统计：数据源是 agent-api 的检索日志（agent_knowledge_retrieval_log），
+// 原 /ai/knowledge/base/{id}/analytics 归已下线的 Java，面板一直报「统计迁移」。
+// 参数仍是 from / to（YYYY-MM-DD），服务端按平台业务时区分桶。
 export const getOwnedKnowledgeBaseAnalytics = (id: string, params: KnowledgeAnalyticsRange) =>
   defHttp.get<KnowledgeAnalyticsOverview>({
-    url: `/ai/knowledge/base/${encodeURIComponent(id)}/analytics`,
+    url: `${KB}/bases/${encodeURIComponent(id)}/analytics`,
     params,
-  }, { errorMessageMode: 'none' });
+  }, KB_OPTS);

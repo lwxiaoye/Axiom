@@ -224,7 +224,7 @@
             <div class="knowledge-section-heading">
               <div>
                 <h3>授权</h3>
-                <p>按用户、角色或部门授予查看或编辑权限。</p>
+                <p>按用户或角色授予查看或编辑权限。</p>
               </div>
               <button v-if="canManageAccess" class="knowledge-save-button" type="button" :disabled="aclSaving" @click="saveAcl">
                 {{ aclSaving ? '保存中' : '保存授权' }}
@@ -234,11 +234,21 @@
             <div v-if="aclLoading" class="knowledge-panel-state"><LoadingOutlined /> 正在加载授权...</div>
             <div v-else class="knowledge-acl-panel">
               <div v-if="canManageAccess" class="acl-editor-list">
+                <!--
+                  只读行：所有者自己那条（服务端始终保留，改了也没用），以及历史数据里的部门授权
+                  （auth-api 没有部门概念，选不了也改不了，但保存时要原样带回去，否则整表替换会把它删掉）。
+                  这些行以前也进了编辑器：服务端存的是小写 user，模板按大写比对不上，就落进了
+                  v-else 的 JSelectDept，一挂载就打两个已下线的 sysDepart 接口——授权页打开即报 404 的根源。
+                -->
+                <div v-for="(item, index) in aclReadonlyItems" :key="`readonly-${index}`" class="acl-readonly-row">
+                  <span>{{ subjectTypeText(item.subjectType) }}</span>
+                  <strong>{{ formatSubjectId(item.subjectIds) }}</strong>
+                  <em>{{ readonlyAclLabel(item) }}</em>
+                </div>
                 <div v-for="(item, index) in aclItems" :key="index" class="acl-editor-row">
                   <a-select v-model:value="item.subjectType" @change="() => handleAclSubjectTypeChange(item)">
                     <a-select-option value="USER">用户</a-select-option>
                     <a-select-option value="ROLE">角色</a-select-option>
-                    <a-select-option value="DEPARTMENT">部门</a-select-option>
                   </a-select>
                   <JSelectUser
                     v-if="item.subjectType === 'USER'"
@@ -249,15 +259,9 @@
                     button-text="选择"
                   />
                   <JSelectRole
-                    v-else-if="item.subjectType === 'ROLE'"
-                    v-model:value="item.subjectIds"
-                    placeholder="请选择角色"
-                    button-text="选择"
-                  />
-                  <JSelectDept
                     v-else
                     v-model:value="item.subjectIds"
-                    placeholder="请选择部门"
+                    placeholder="请选择角色"
                     button-text="选择"
                   />
                   <a-select v-model:value="item.permission">
@@ -270,13 +274,13 @@
               </div>
 
               <div v-else class="acl-readonly-list">
-                <div v-for="(item, index) in aclItems" :key="index" class="acl-readonly-row">
+                <div v-for="(item, index) in allAclRows" :key="index" class="acl-readonly-row">
                   <span>{{ subjectTypeText(item.subjectType) }}</span>
                   <strong>{{ formatSubjectId(item.subjectIds) }}</strong>
                   <em>{{ permissionText(item.permission) }}</em>
                 </div>
               </div>
-              <a-empty v-if="!aclItems.length" description="暂无授权对象" />
+              <a-empty v-if="!allAclRows.length" description="暂无授权对象" />
             </div>
           </template>
         </section>
@@ -377,7 +381,8 @@ import {
   SettingOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons-vue';
-import { JSelectDept, JSelectRole, JSelectUser } from '/@/components/Form';
+// 不引 JSelectDept：auth-api 没有部门概念，它一挂载就请求的 sysDepart 接口已随 Java 下线
+import { JSelectRole, JSelectUser } from '/@/components/Form';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { useUserStore } from '/@/store/modules/user';
 import {
@@ -443,7 +448,11 @@ const chunkEditorOpen = ref(false);
 const editingChunk = ref<KnowledgeChunk>();
 const aclLoading = ref(false);
 const aclSaving = ref(false);
+// 可编辑的授权行（用户 / 角色，非所有者）
 const aclItems = ref<AclEditorItem<KnowledgePermission>[]>([]);
+// 只读的授权行：所有者那条，以及历史数据里的部门授权（见模板注释）；保存时原样带回
+const aclReadonlyItems = ref<AclEditorItem<KnowledgePermission>[]>([]);
+const allAclRows = computed(() => [...aclReadonlyItems.value, ...aclItems.value]);
 const pagination = reactive({ current: 1, pageSize: 24, total: 0 });
 const documentPagination = reactive({ current: 1, pageSize: 20, total: 0 });
 const statusSaving = ref(false);
@@ -651,6 +660,7 @@ function backToList() {
   documents.value = [];
   selectedDocumentIds.value = [];
   aclItems.value = [];
+  aclReadonlyItems.value = [];
 }
 
 // 请求身份闸（写法同 components/FileSelector.vue:107 的 loadSeq 注释）：详情/文档/分段/授权
@@ -700,14 +710,33 @@ async function reloadChunksPanel() {
   await chunksPanelRef.value?.reload?.();
 }
 
+// 服务端存的 subjectType 大小写不一（所有者那条是小写 user，页面存的是大写 USER），
+// 模板按大写比对，这里先归一，否则小写行会落进错误的分支。
+function normalizeAclSubjectType(value: unknown): KnowledgeAcl['subjectType'] {
+  const text = String(value || '').trim().toUpperCase();
+  if (text === 'ROLE') return 'ROLE';
+  if (text === 'DEPT' || text === 'DEPARTMENT') return 'DEPARTMENT';
+  return 'USER';
+}
+
+function isEditableAcl(item: AclEditorItem<KnowledgePermission>) {
+  return (item.subjectType === 'USER' || item.subjectType === 'ROLE') && item.permission !== 'OWNER';
+}
+
 async function loadAcl() {
   const kid = selectedKnowledgeId.value;
   if (!kid || !canManageAccess.value) return;
   aclLoading.value = true;
   try {
-    const acl = groupAclItems((await getKnowledgeAcl(kid)) || []);
+    const rows = ((await getKnowledgeAcl(kid)) || []).map((row) => ({
+      ...row,
+      subjectType: normalizeAclSubjectType(row.subjectType),
+      permission: String(row.permission || 'VIEWER').toUpperCase() as KnowledgePermission,
+    }));
+    const acl = groupAclItems(rows);
     if (kid !== selectedKnowledgeId.value) return;
-    aclItems.value = acl;
+    aclItems.value = acl.filter(isEditableAcl);
+    aclReadonlyItems.value = acl.filter((item) => !isEditableAcl(item));
   } finally {
     if (kid === selectedKnowledgeId.value) aclLoading.value = false;
   }
@@ -857,7 +886,8 @@ async function saveAcl() {
   if (!selectedKnowledgeId.value || !canManageAccess.value) return;
   aclSaving.value = true;
   try {
-    await saveKnowledgeAcl(selectedKnowledgeId.value, expandAclItems(aclItems.value));
+    // 服务端是整表替换：只读行（部门授权、所有者）也要一并带回，否则保存一次就把它们删了
+    await saveKnowledgeAcl(selectedKnowledgeId.value, expandAclItems([...aclReadonlyItems.value, ...aclItems.value]));
     await loadAcl();
   } finally {
     aclSaving.value = false;
@@ -867,6 +897,11 @@ async function saveAcl() {
 function subjectTypeText(type: KnowledgeAcl['subjectType']) {
   const map = { USER: '用户', ROLE: '角色', DEPARTMENT: '部门' };
   return map[type] || type;
+}
+
+function readonlyAclLabel(item: AclEditorItem<KnowledgePermission>) {
+  if (item.permission === 'OWNER') return '所有者';
+  return `${permissionText(item.permission)} · 部门授权不可在此修改`;
 }
 
 function permissionText(permission: KnowledgeAcl['permission']) {
