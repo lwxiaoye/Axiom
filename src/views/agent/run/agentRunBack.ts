@@ -1,4 +1,4 @@
-/** 智能体运行页返回：广场进来回广场，我的智能体进来回我的智能体。 */
+/** 智能体运行页与父页（广场 iframe）之间的消息协议。 */
 
 export const AGENT_RUN_CLOSE_MESSAGE = 'axiom:agent-run-close';
 export const AGENT_RUN_OPEN_FILES_MESSAGE = 'axiom:agent-run-open-files';
@@ -22,17 +22,6 @@ export type AgentRunDownloadVersionPayload = {
   versionNo: number;
   filename: string;
 };
-
-export type AgentRunFrom = 'agent' | 'my-agent';
-
-export function agentRunBackPath(from?: string | null): '/center/agent' | '/center/my-agent' {
-  return from === 'agent' ? '/center/agent' : '/center/my-agent';
-}
-
-export function agentRunBackLabel(from?: string | null, embedded = false): string {
-  if (embedded || from === 'agent') return '返回智能体广场';
-  return '返回我的智能体';
-}
 
 export function isAgentRunEmbedded(win: { parent: unknown } = window): boolean {
   try {
@@ -110,21 +99,4 @@ export function requestEmbeddedAgentRunDownloadVersion(
   target: { postMessage: Window['postMessage'] } = window.parent,
 ) {
   target.postMessage({ type: AGENT_RUN_DOWNLOAD_VERSION_MESSAGE, item }, '*');
-}
-
-export function appendAgentRunFrom(url: string, from: AgentRunFrom): string {
-  const raw = String(url || '').trim();
-  if (!raw) return raw;
-  try {
-    const parsed = new URL(raw, 'http://local.invalid');
-    parsed.searchParams.set('from', from);
-    const next = `${parsed.pathname}${parsed.search}${parsed.hash}`;
-    if (/^https?:\/\//i.test(raw)) {
-      return `${parsed.protocol}//${parsed.host}${next}`;
-    }
-    return next;
-  } catch {
-    const joiner = raw.includes('?') ? '&' : '?';
-    return `${raw}${joiner}from=${encodeURIComponent(from)}`;
-  }
 }

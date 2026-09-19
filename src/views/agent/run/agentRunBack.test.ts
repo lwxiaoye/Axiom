@@ -3,9 +3,6 @@ import {
   AGENT_RUN_DOWNLOAD_FILE_MESSAGE,
   AGENT_RUN_DOWNLOAD_VERSION_MESSAGE,
   AGENT_RUN_OPEN_FILES_MESSAGE,
-  agentRunBackLabel,
-  agentRunBackPath,
-  appendAgentRunFrom,
   isAgentRunCloseMessage,
   isAgentRunDownloadFileMessage,
   isAgentRunDownloadVersionMessage,
@@ -18,31 +15,11 @@ import {
 } from './agentRunBack';
 
 describe('agentRunBack', () => {
-  it('广场来源回到智能体广场，其它回到我的智能体', () => {
-    expect(agentRunBackPath('agent')).toBe('/center/agent');
-    expect(agentRunBackPath('my-agent')).toBe('/center/my-agent');
-    expect(agentRunBackPath('')).toBe('/center/my-agent');
-    expect(agentRunBackPath(undefined)).toBe('/center/my-agent');
-  });
-
-  it('按钮文案按来源区分', () => {
-    expect(agentRunBackLabel('agent')).toBe('返回智能体广场');
-    expect(agentRunBackLabel('my-agent')).toBe('返回我的智能体');
-    expect(agentRunBackLabel('', true)).toBe('返回智能体广场');
-  });
-
   it('iframe 内视为嵌在广场里', () => {
     expect(isAgentRunEmbedded({ parent: {} })).toBe(true);
     const self = {} as { parent: unknown };
     self.parent = self;
     expect(isAgentRunEmbedded(self)).toBe(false);
-  });
-
-  it('给运行地址补 from，不打乱已有 query', () => {
-    expect(appendAgentRunFrom('/agent/run/a', 'agent')).toBe('/agent/run/a?from=agent');
-    expect(appendAgentRunFrom('/agent/run/a?x=1', 'agent')).toBe('/agent/run/a?x=1&from=agent');
-    expect(appendAgentRunFrom('https://host/agent/run/a?x=1', 'my-agent'))
-      .toBe('https://host/agent/run/a?x=1&from=my-agent');
   });
 
   it('关闭消息只认约定 type', () => {

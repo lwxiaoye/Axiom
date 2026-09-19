@@ -147,15 +147,11 @@
       </template>
     </div>
 
-    <footer v-if="activeTab === 'myTools' || activeTab === 'agent'" class="panel-footer">
-      <a @click="goWorkbench">去工作台创建{{ activeTab === 'myTools' ? '工具' : '应用' }}</a>
-    </footer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import {
   ApiOutlined,
@@ -196,7 +192,6 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
-const router = useRouter();
 const { graph } = useEditorContext();
 
 const iconMap: Record<string, any> = {
@@ -382,10 +377,6 @@ function handleDynamicDragStart(event: DragEvent, item: NodeTemplateSummary) {
   // 动态项拖拽只带摘要；drop 端异步取 previewNode 后落图
   event.dataTransfer?.setData('application/workflow-node-summary', JSON.stringify(item));
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-}
-
-function goWorkbench() {
-  router.push('/center/my-agent');
 }
 
 // 首次即为 basic，无需请求；导出给父组件在打开时重置
