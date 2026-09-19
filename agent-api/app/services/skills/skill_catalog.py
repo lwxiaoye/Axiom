@@ -141,11 +141,15 @@ def builtin_package_files(slug: str) -> tuple[dict[str, bytes], Optional[str]]:
 
 
 def builtin_slug_of_version(version: Optional[AgentSkillVersion]) -> Optional[str]:
-    """版本行是否指向内置包：`import_source_json.builtin` 即目录名。"""
-    if version is None or not version.import_source_json:
+    """版本行是否指向内置包：`import_source_json.builtin` 即目录名。
+
+    用 getattr 而不是直接取属性：这是个「是不是内置包」的探针，调用方（挂载路径、测试替身）
+    可能只给一个带 package_b64/content 的轻量对象，缺字段就当「不是内置」而不是炸掉。"""
+    raw_meta = getattr(version, "import_source_json", None) if version is not None else None
+    if not raw_meta:
         return None
     try:
-        meta = json.loads(version.import_source_json)
+        meta = json.loads(raw_meta)
     except Exception:  # noqa: BLE001
         return None
     slug = str((meta or {}).get("builtin") or "").strip() if isinstance(meta, dict) else ""
