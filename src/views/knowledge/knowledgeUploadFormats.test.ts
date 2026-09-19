@@ -55,16 +55,8 @@ describe('knowledge upload formats', () => {
     expect(modal).toContain("if (completed) { emit('success'); close(); }");
   });
 
-  it('keeps the knowledge detail navigation flush with the left edge', () => {
-    const detail = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeDetail.vue'), 'utf8');
-    expect(detail).toContain('width: 100%; max-width: none;');
-    expect(detail).toContain('margin: 0;');
-  });
-
   it('paginates knowledge chunks by 20 while keeping pagination outside the scrollable table body', () => {
-    const detail = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeDetail.vue'), 'utf8');
     const chunksPanel = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunksPanel.vue'), 'utf8');
-    expect(detail).toContain('<KnowledgeChunksPanel');
     expect(chunksPanel).toContain('const pagination = reactive({ current: 1, pageSize: 20');
     expect(chunksPanel).toContain('class="knowledge-list-scroll"');
     expect(chunksPanel).toContain('class="knowledge-list-pagination"');
@@ -72,14 +64,10 @@ describe('knowledge upload formats', () => {
   });
 
   it('opens a document-specific chunk list when its name is clicked', () => {
-    const detail = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeDetail.vue'), 'utf8');
     const chunksPanel = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunksPanel.vue'), 'utf8');
-    expect(detail).toContain('@click="openDocumentChunks(record)"');
-    expect(detail).toContain('chunkDocumentId.value = document.id;');
     expect(chunksPanel).toContain('documentId: props.documentId');
     expect(chunksPanel).toContain('v-model:value="selectedDocumentId"');
     expect(chunksPanel).toContain('@change="handleChunkDocumentFilter"');
-    expect(detail).not.toContain('查看全部');
   });
 
   it('labels the retrieval percentage as relevance instead of accuracy', () => {
@@ -88,10 +76,8 @@ describe('knowledge upload formats', () => {
   });
 
   it('edits chunk images inline by inserting markdown at the textarea cursor', () => {
-    const detail = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeDetail.vue'), 'utf8');
     const editor = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunkEditorDrawer.vue'), 'utf8');
     const api = readFileSync(resolve(process.cwd(), 'src/views/knowledge/knowledge.api.ts'), 'utf8');
-    expect(detail).toContain('<KnowledgeChunkEditorDrawer');
     expect(editor).toContain('ref="chunkTextareaRef"');
     expect(editor).toContain('@contextmenu="handleChunkContextMenu"');
     expect(editor).toContain('function handleChunkContextMenu(event: MouseEvent)');

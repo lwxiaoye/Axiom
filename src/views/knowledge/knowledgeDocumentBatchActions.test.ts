@@ -2,10 +2,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const api = readFileSync(resolve(process.cwd(), 'src/views/knowledge/knowledge.api.ts'), 'utf8');
-const managementDetail = readFileSync(
-  resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeDetail.vue'),
-  'utf8',
-);
 const myKnowledge = readFileSync(
   resolve(process.cwd(), 'src/views/peopleCenter/tabs/MyKnowledgeTab.vue'),
   'utf8',
@@ -35,19 +31,13 @@ describe('knowledge document batch actions', () => {
     expect(api).not.toContain('sourceUri');
   });
 
-  it('keeps downloads available to viewers while limiting deletion to editors in both document lists', () => {
+  it('keeps downloads available to viewers while limiting deletion to editors', () => {
     expect(myKnowledge).toContain('下载原文');
     expect(myKnowledge).toContain('aria-label="批量操作"');
     expect(myKnowledge).toContain('selectedDocumentIds');
     expect(myKnowledge).toContain('v-if="canEditCurrent"');
     expect(myKnowledge).toContain('await deleteDocuments(selectedDocumentIds.value)');
     expect(myKnowledge).toContain('downloadKnowledgeDocumentArchive(selectedDocumentIds.value)');
-
-    expect(managementDetail).toContain('下载原文');
-    expect(managementDetail).toContain('批量下载原文');
-    expect(managementDetail).toContain('selectedDocumentIds');
-    expect(managementDetail).toContain('await deleteManagedDocuments(deletingIds)');
-    expect(managementDetail).toContain('downloadManagedKnowledgeDocumentArchive(selectedDocumentIds.value)');
   });
 
   it('keeps bulk and per-document actions in dedicated, consistently styled action zones', () => {

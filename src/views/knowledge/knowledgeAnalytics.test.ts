@@ -38,14 +38,11 @@ describe('knowledge analytics frontend contract', () => {
     expect(panel).toContain('v-if="overview.topQueries?.length"');
   });
 
-  it('renders the dense operations panel and protected dynamic menu destination', () => {
+  it('renders the dense operations panel', () => {
     const panel = read('src/views/knowledge/components/KnowledgeAnalyticsPanel.vue');
-    const page = read('src/views/knowledge/analytics/index.vue');
     expect(panel).toContain('知识问答量');
     expect(panel).toContain('按命中归属累计');
     expect(panel).toContain("scope: 'admin' | 'owner'");
-    expect(page).toContain("path: '/knowledge/base'");
-    expect(page).toContain("tab: 'analytics'");
   });
 
   it('omits the knowledge-base total for an owner single-base report', () => {

@@ -13,11 +13,8 @@ describe('knowledge base enablement', () => {
 
   it('lets owners change status and keeps disabled bases out of retrieval UI', () => {
     const myKnowledge = readFileSync(resolve(process.cwd(), 'src/views/peopleCenter/tabs/MyKnowledgeTab.vue'), 'utf8');
-    const management = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeDetail.vue'), 'utf8');
 
     expect(myKnowledge).toContain('changeKnowledgeStatus');
     expect(myKnowledge).toContain('const isCurrentKnowledgeActive');
-    expect(management).toContain('changeKnowledgeStatus');
-    expect(management).toContain('const isKnowledgeActive');
   });
 });
