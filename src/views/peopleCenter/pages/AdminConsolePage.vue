@@ -472,7 +472,8 @@
         method: 'POST',
         body: JSON.stringify({ searchProvider: 'searxng', searxngUrl: search.form.searxngUrl }),
       });
-      search.feedback = { success: r.status === 'ok' || r.success === true, message: r.message || '测试完成' };
+      // 后端 /web-search/test 用 status: 'success' | 'failed'（不是 'ok'）
+      search.feedback = { success: r.status === 'success' || r.status === 'ok' || r.success === true, message: r.message || '测试完成' };
     } catch (e: any) { search.feedback = fail(e, '测试失败'); }
     finally { search.testing = false; }
   }
