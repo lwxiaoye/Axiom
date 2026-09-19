@@ -196,9 +196,9 @@ services:
     mem_limit: 1g
 
   # ======================= browser service: Playwright MCP =======================
-  # Official image (chromium headless shell only, ~1.4 GB). deploy/browser-api/Dockerfile
-  # builds on mcr.microsoft.com/playwright:*-noble, which bundles chromium+firefox+webkit
-  # (~4.5 GB) and does not fit on this host. Same @playwright/mcp version and flags.
+  # Official image (chromium headless shell only, ~1.4 GB). The full
+  # mcr.microsoft.com/playwright:*-noble image bundles chromium+firefox+webkit (~4.5 GB)
+  # and does not fit on this host.
   agent-browser:
     image: mcr.microsoft.com/playwright/mcp:v0.0.76
     container_name: axiom-agent-browser

@@ -1,8 +1,0 @@
-# 官方 PaddleOCR 2.x（PP-OCRv4，经典架构，无 paddlex/langchain 依赖，干净可靠）
-paddlepaddle==2.6.2
-paddleocr==2.7.3
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-pillow==11.1.0
-numpy==1.26.4
-python-multipart==0.0.20

@@ -70,7 +70,6 @@ API 和 Worker 必须使用同一套数据库和连接器加密密钥（`CONNECT
 ## 部署材料的状态
 
 - Compose 中数据库密码、沙箱与搜索密钥都来自被 Git 忽略的 `deploy/local/.env`（模板 `deploy/local/.env.example`）。
-- `deploy/apisix`、`deploy/newapi`、`deploy/nginx_conf`、`deploy/ocr-api`、`deploy/browser-api` 是旧架构材料，本地与服务器 compose 都不引用，见部署手册第 7 节。
 - 原 TLS 私钥及证书未复制；需为自己的域名重新配置。
 - 首次上线前检查监听地址、端口暴露、权限、存储和数据库迁移；服务器现状以 [`生产部署手册.md`](生产部署手册.md) 为准。
 
