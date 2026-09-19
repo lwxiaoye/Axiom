@@ -22,15 +22,45 @@
 
 ## 架构
 
-```text
-浏览器（Vue 3 + Vite）
-   │  /api → auth-api        登录、注册、个人资料（FastAPI + SQLite）
-   │  /agent-api → agent-api 对话 Harness、知识库、技能、文件、管理配置（FastAPI）
-   ▼
-agent-api ─ MySQL（业务库） ─ PostgreSQL（Run/事件/审计） ─ Qdrant（向量）
-          ─ agent-worker（后台执行 Run） ─ OpenSandbox（代码/文档沙箱）
-          ─ SearXNG（联网搜索） ─ Playwright（浏览器工具）
+```mermaid
+flowchart LR
+    subgraph client[浏览器]
+        UI["Vue 3 + Vite 前端<br/>主对话 · 智能体广场 · 知识库 · Skill 广场 · 我的文件 · /admin"]
+    end
+
+    UI -->|"/api"| AUTH["auth-api<br/>FastAPI + SQLite<br/>登录 / 自助注册 / 个人资料"]
+    UI -->|"/agent-api（SSE 流式）"| API["agent-api<br/>FastAPI<br/>接口 · 鉴权回源 · 管理配置"]
+    API -. "校验 token" .-> AUTH
+
+    subgraph core[agent-api 内部]
+        API --> RUN["Run 队列"]
+        RUN --> WORKER["agent-worker<br/>后台执行 Run"]
+        WORKER --> HARNESS["对话 Harness<br/>工具循环 · 上下文压缩 · HITL 审批"]
+        HARNESS --> CAMPUS["校园百事通"]
+        HARNESS --> PPT["演示文稿助手"]
+        HARNESS --> INTERVIEW["面试助手"]
+        HARNESS --> TOOLS["工具：知识库检索 · 联网搜索<br/>沙箱执行 · 文件 · @Skill"]
+    end
+
+    API --> MYSQL[("MySQL<br/>会话 · 知识库 · 技能 · 文件 · 配置")]
+    API --> PG[("PostgreSQL<br/>Run / 事件 / 审计")]
+    TOOLS --> QDRANT[("Qdrant<br/>知识库向量")]
+    TOOLS --> SEARX["SearXNG<br/>联网搜索"]
+    TOOLS --> SANDBOX["OpenSandbox<br/>代码 / 文档沙箱"]
+    TOOLS --> BROWSER["Playwright<br/>浏览器工具"]
+
+    HARNESS -->|"OpenAI 兼容 / Anthropic 接口"| LLM["对话模型网关<br/>平台名册（管理员配置）"]
+    TOOLS -->|"embedding / rerank"| EMB["向量与重排模型"]
+
+    classDef store fill:#f4f4f5,stroke:#9ca3af,color:#111
+    classDef ext fill:#fff7ed,stroke:#f59e0b,color:#111
+    class MYSQL,PG,QDRANT store
+    class LLM,EMB,SEARX,SANDBOX,BROWSER ext
 ```
+
+请求链路：浏览器只和同源的 nginx 打交道，`/api` 转到 auth-api、`/agent-api` 转到 agent-api（关闭代理缓冲以支持
+SSE）；一次对话由 agent-api 受理后入 Run 队列，agent-worker 取出执行，事件流经 SSE 回到页面。管理员在 `/admin`
+配置的对话模型 / 向量模型 / 重排模型 / 联网搜索都以密文落库，对全体用户生效。
 
 详细边界见 [docs/架构概览.md](docs/架构概览.md)，主对话内部机制见
 [docs/主对话-Agent-Harness-架构与开发规范.md](docs/主对话-Agent-Harness-架构与开发规范.md)。
