@@ -8,6 +8,28 @@ cd "$(dirname "$0")/.."
 COMPOSE="docker compose --env-file deploy/local/.env -f docker-compose.local.yml -f docker-compose.server.yml"
 TARGET="${1:-frontend}"
 
+# 磁盘预检：这台机器 24G 盘常年 90%+。后端镜像重建在 export 阶段要 ~1.3G 临时空间，
+# 2026-09-19 就是跑了 10 分钟后在最后一步 "failed to extract layer … no space left" 白干。
+# 先回收构建缓存与悬空镜像，再按目标要求最低可用空间，不够就立刻退出而不是半途而废。
+require_disk() {
+  local need_mb="$1"
+  docker builder prune -af >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+  local free_mb
+  free_mb=$(df -Pm / | awk 'NR==2{print $4}')
+  if [ "$free_mb" -lt "$need_mb" ]; then
+    echo "!! 根分区只剩 ${free_mb}M，构建 ${TARGET} 至少需要 ${need_mb}M；请先清理磁盘（docker image prune -a、旧内核、无用 snap 等）再来" >&2
+    df -h / | tail -1 >&2
+    exit 2
+  fi
+  echo "==> 磁盘预检通过：可用 ${free_mb}M（需 ${need_mb}M）"
+}
+case "$TARGET" in
+  frontend) require_disk 1500 ;;
+  backend)  require_disk 2500 ;;
+  all)      require_disk 3000 ;;
+esac
+
 # 前端构建的内存全部靠 zram 兜底：溢出到磁盘 swap 会导致数十 GB 的换页
 # 抖动，构建永远跑不完。zstd 压缩比约 3:1，解压是 GB/s 级。
 ensure_zram() {
