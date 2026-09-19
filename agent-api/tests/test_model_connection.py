@@ -324,3 +324,41 @@ async def test_probe_uses_draft_without_saving_or_leaking(storage, monkeypatch, 
     assert seen['request'].url == 'https://model.example/v1/chat/completions'
     assert seen['request'].headers['Authorization'] == 'Bearer test-key'
     assert not storage
+
+
+@pytest.mark.asyncio
+async def test_legacy_shaped_platform_row_is_rewritten_as_roster_at_startup(storage):
+    """存量平台行还是单连接形状：迁移要原地收成名册并写回（2026-09-19 上线当天全站
+    「平台尚未配置对话模型」的根因——_get_raw 按 ROSTER_DEFAULTS 裁键后 entries 为空）。"""
+    from app.services.connectors.crypto import encrypt_secret
+    storage[service.PLATFORM_KEY] = {
+        'base_url': 'https://wushaoran.me/v1',
+        'model': 'grok-4.6',
+        'enabled': True,
+        'api_key_cipher': encrypt_secret('legacy-key'),
+    }
+    assert await service.migrate_legacy_to_platform() is True
+    stored = storage[service.PLATFORM_KEY]
+    assert [item['model'] for item in stored['entries']] == ['grok-4.6']
+    assert stored['default_id'] == stored['entries'][0]['id']
+    # 已是名册形状：不再重写
+    service._migration_checked = False
+    assert await service.migrate_legacy_to_platform() is False
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_returns_the_selected_entry_key(storage, no_newapi_rows):
+    """选中名册里非默认模型时，密钥要跟着切到那条记录——否则拿默认模型的密钥请求所选
+    模型的地址（管理页测速成功、对话却 401，2026-09-19 正式站冒烟抓到）。"""
+    from app.services.agent_harness.orchestrator import harness_orchestrator
+    await service.save_platform(roster(
+        entry(name='Grok', base_url='https://ctsafe.top/v1', model='grok-4.6', api_key='grok-key'),
+        entry(name='DeepSeek', base_url='https://api.deepseek.com', model='deepseek-flash', api_key='deepseek-key'),
+        default_id='',
+    ))
+    key, model = await harness_orchestrator.prepare_chat('student', 'deepseek-flash')
+    assert (key, model) == ('deepseek-key', 'deepseek-flash')
+    assert get_model_base_url() == 'https://api.deepseek.com'
+    key, model = await harness_orchestrator.prepare_chat('student', None)
+    assert (key, model) == ('grok-key', 'grok-4.6')
+    assert get_model_base_url() == 'https://ctsafe.top/v1'
