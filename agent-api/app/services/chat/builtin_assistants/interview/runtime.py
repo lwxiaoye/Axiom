@@ -8,7 +8,7 @@ from .contracts import InterviewDomainError
 from .definition import INTERVIEW_PRESET
 from .policy import INTERVIEW_TOOL_NAMES, filter_interview_tools, interview_turn_guard, validate_interview_tools
 from . import service
-from .tools import build_interview_tools
+from .tools import build_interview_tools, describe_phase, initial_observation_text, public_interview_loop_event
 
 
 async def prepare_request(kwargs: dict) -> None:
@@ -74,6 +74,47 @@ def public_preamble_guidance(payload: dict) -> str:
     )
 
 
+async def _accepted_state(identity: dict) -> dict | None:
+    """已受理本轮的内部快照（含冻结 input、题库、材料）；未受理返回 None。"""
+    keys = ("user_id", "thread_id", "run_id")
+    if not all(str(identity.get(key) or "") for key in keys):
+        return None
+    state = await service.get_interview_session(**{key: str(identity[key]) for key in keys}, internal=True)
+    return state if state.get("input") else None
+
+
+async def turn_opening(kwargs: dict) -> str:
+    """用户等待期间的阶段句，按服务端冻结动作生成，不等模型（首个模型调用可达一两分钟）。"""
+    state = await _accepted_state(kwargs)
+    return describe_phase(state)["opening"] if state else ""
+
+
+async def initial_observation(kwargs: dict) -> str:
+    """把本轮 state（开场加材料首页）直接交给模型，省掉 1–2 轮只读工具往返。"""
+    state = await _accepted_state(kwargs)
+    return initial_observation_text(state) if state else ""
+
+
+def public_loop_event(env):
+    """执行卡投影：提交工具的行标题按冻结动作写成「评估第 N 题的回答，准备第 N+1 题」。
+
+    阶段只读一次数据库并缓存在闭包里；读不到时退回无上下文的「准备下一问」。
+    """
+    identity = {key: str(getattr(env, key, "") or "") for key in ("user_id", "thread_id", "run_id")}
+    cache: dict = {}
+
+    async def mapper(event: dict) -> dict:
+        if "phase" not in cache:
+            try:
+                state = await _accepted_state(identity)
+                cache["phase"] = describe_phase(state) if state else None
+            except Exception:  # noqa: BLE001
+                cache["phase"] = None
+        return public_interview_loop_event(event, cache["phase"])
+
+    return mapper
+
+
 async def project_answer(env, _answer: str) -> str:
     result = await service.get_committed_turn(**{
         key: str(getattr(env, key, "") or "") for key in ("user_id", "thread_id", "run_id")
@@ -99,4 +140,8 @@ INTERVIEW_RUNTIME_POLICY = BuiltinRuntimePolicy(
     hide_selected_skill_references=True, accept_input=accept_input,
     additional_tools=build_interview_tools, action_authority="mutate", project_answer=project_answer,
     allow_memory_extraction=False, public_preamble_guidance=public_preamble_guidance,
+    # 2026-09-19 耗时盘点：面试没有沙箱工具、材料由工具提供、学生回答不是任务描述——
+    # 不建沙箱、不重复注入简历、不叠通用目标契约；状态随消息给出，首个模型调用即可提交。
+    owns_turn_context=True, initial_observation=initial_observation,
+    turn_opening=turn_opening, public_loop_event=public_loop_event,
 )

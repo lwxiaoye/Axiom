@@ -2058,6 +2058,24 @@ class HarnessOrchestrator:
             )
             if public_preamble:
                 yield channel.message_commentary(public_preamble)
+        # 结构化助手的阶段句由平台按已冻结动作直接给出（不等模型）：面试的首个模型调用
+        # 要生成整份评价/题库，长达一两分钟，期间用户原本只看到「正在思考 Ns」。
+        # 它同时作为 public_preamble 写进 turn_guard，模型不会再复述一遍。
+        if (
+            not public_preamble
+            and not loop_resume_messages
+            and runtime_policy and runtime_policy.turn_opening
+        ):
+            try:
+                public_preamble = str(await runtime_policy.turn_opening({
+                    "user_id": str(user_id or ""), "thread_id": str(thread_id or ""),
+                    "run_id": str(run_id or ""), "message": message,
+                }) or "").strip()
+            except Exception:  # noqa: BLE001
+                logger.info("builtin turn_opening skipped run=%s", run_id, exc_info=True)
+                public_preamble = ""
+            if public_preamble:
+                yield channel.message_commentary(public_preamble)
 
         # 上一轮「停止生成」的部分内容落库若仍未提交，先等它收敛（P1-4；位置修正
         # 2026-07-26）：必须排在本轮**任何写入之前**——此前它排在下面的用户消息提前
@@ -2136,7 +2154,10 @@ class HarnessOrchestrator:
                 logger.info("document page vision inject skipped", exc_info=True)
                 page_guard = ""
         file_context = ""
-        if not direct_answer:
+        # 自带上下文的内置助手（面试）：材料由其工具按需分页提供，这里再按本轮问题重检索
+        # 简历片段注入只是重复喂料，还附带「可在此 file_id 上原位修改」这类与面试无关的口径。
+        owns_turn_context = bool(runtime_policy and runtime_policy.owns_turn_context)
+        if not direct_answer and not owns_turn_context:
             file_context = await thread_attachment_service.build_file_context(
                 thread_id=thread_id, user_id=user_id, query=message, attachments=text_atts,
                 audit_context={"run_id": run_id, "thread_id": thread_id},
@@ -2228,37 +2249,40 @@ class HarnessOrchestrator:
             pass
         # 输入框 / 「我的文件」选中的附件先写入会话工作区，再 hydrate。
         # 否则 Pull 看不到本轮刚上传的照片；有活沙箱时只 overlay 素材，不新建会话。
-        try:
-            from app.services.agent_harness import workspace_service as _ws_ingest
-            await _ws_ingest.ingest_user_files_into_workspace(
-                user_id=str(user_id or ""),
-                thread_id=str(thread_id or ""),
-                attachments=attachments,
-                run_id=str(run_id or ""),
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning("workspace ingest of turn files failed run=%s", run_id, exc_info=True)
-        # 断电重续：同一 Run 被僵尸收回时 pending 仍是原任务句，不是「继续」。
-        # 只要本 Run 已有检查点就必须灌回新沙箱，不能关在 needs_resume 后面。
-        try:
-            from app.services.agent_harness.artifact_checkpoint import (
-                attach_checkpoint_to_profile,
-                hydrate_ppt_staging,
-            )
-            _ckpt_meta, _ = await hydrate_ppt_staging(
-                run_id=str(run_id or ""),
-                user_id=str(user_id or ""),
-                thread_id=str(thread_id or ""),
-                resume_source_run_id=str(resume_source_run_id or ""),
-                user_wants_resume=_user_wants_resume,
-                execution_profile=execution_profile,
-            )
-            if _ckpt_meta:
-                execution_profile = attach_checkpoint_to_profile(
-                    execution_profile, _ckpt_meta,
+        # 自带上下文的内置助手（面试）整段跳过：它没有任何沙箱工具，而 hydrate 只要工作区里
+        # 有一份资产（开场上传的简历）就会为每一轮新建沙箱——实测每题白等约 20 秒。
+        if not owns_turn_context:
+            try:
+                from app.services.agent_harness import workspace_service as _ws_ingest
+                await _ws_ingest.ingest_user_files_into_workspace(
+                    user_id=str(user_id or ""),
+                    thread_id=str(thread_id or ""),
+                    attachments=attachments,
+                    run_id=str(run_id or ""),
                 )
-        except Exception:  # noqa: BLE001
-            pass
+            except Exception:  # noqa: BLE001
+                logger.warning("workspace ingest of turn files failed run=%s", run_id, exc_info=True)
+            # 断电重续：同一 Run 被僵尸收回时 pending 仍是原任务句，不是「继续」。
+            # 只要本 Run 已有检查点就必须灌回新沙箱，不能关在 needs_resume 后面。
+            try:
+                from app.services.agent_harness.artifact_checkpoint import (
+                    attach_checkpoint_to_profile,
+                    hydrate_ppt_staging,
+                )
+                _ckpt_meta, _ = await hydrate_ppt_staging(
+                    run_id=str(run_id or ""),
+                    user_id=str(user_id or ""),
+                    thread_id=str(thread_id or ""),
+                    resume_source_run_id=str(resume_source_run_id or ""),
+                    user_wants_resume=_user_wants_resume,
+                    execution_profile=execution_profile,
+                )
+                if _ckpt_meta:
+                    execution_profile = attach_checkpoint_to_profile(
+                        execution_profile, _ckpt_meta,
+                    )
+            except Exception:  # noqa: BLE001
+                pass
         model_input_content = _as_turn_content(model_input, image_urls)
 
         # ── 用户消息提前落库（刷新丢消息修复，2026-07-17）────────────────────────────
@@ -2363,6 +2387,21 @@ class HarnessOrchestrator:
                 model_input_content = _as_turn_content(model_input, image_urls)
         except Exception:  # noqa: BLE001
             logger.warning("Skill 恢复 observation/事实保存失败 run=%s", run_id, exc_info=True)
+        # 结构化助手的开场观察：把本轮冻结状态（面试：动作、版本、候选题、开场材料）直接放进
+        # 模型输入，首个模型调用就能提交，省掉「先读 state、再读材料」两轮只读工具往返
+        # （grok 每轮 3–9 秒）。只注入模型输入，不写进落库的用户消息。
+        if runtime_policy and runtime_policy.initial_observation and not loop_resume_messages:
+            try:
+                _initial_observation = str(await runtime_policy.initial_observation({
+                    "user_id": str(user_id or ""), "thread_id": str(thread_id or ""),
+                    "run_id": str(run_id or ""), "message": message,
+                }) or "").strip()
+            except Exception:  # noqa: BLE001
+                logger.warning("builtin initial_observation skipped run=%s", run_id, exc_info=True)
+                _initial_observation = ""
+            if _initial_observation:
+                model_input = f"{model_input}\n\n{_initial_observation}"
+                model_input_content = _as_turn_content(model_input, image_urls)
 
         # 发送前同步压缩（§13）：放在 DB session 块**外**——压缩触发时是同步 LLM 调用，
         # 不占用外层 MySQL 连接期间干等（高并发下防连接池耗尽）；已带硬超时降级。
@@ -2647,9 +2686,11 @@ class HarnessOrchestrator:
                 ),
                 resume_source_run_id=str(resume_source_run_id or ""),
                 turn_guard_prompt="\n".join(filter(None, [
+                    # 自带上下文的内置助手不叠加通用回合决策/目标契约：它们由正则读用户
+                    # 文本推断，面试里学生的回答会被判成「交付文件」，与面试契约互相矛盾。
                     "\n".join(filter(None, [
-                        "" if loop_resume_messages else turn_decision.prompt_block(),
-                        goal_contract_prompt,
+                        "" if loop_resume_messages or owns_turn_context else turn_decision.prompt_block(),
+                        "" if owns_turn_context else goal_contract_prompt,
                         research_stage_prompt,
                         (
                             "本轮 RevisionTarget 已解析为："

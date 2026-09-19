@@ -982,3 +982,51 @@ def test_repeat_check_preserves_code_operators_and_rejects_same_bank_question_wi
     with pytest.raises(InterviewDomainError) as error:
         validate_question_novelty([first, {**first, "id": "another-id"}], {})
     assert error.value.code == "duplicate_bank_question"
+
+
+def test_describe_phase_and_phase_aware_commit_label():
+    """等待期文案按冻结动作生成（2026-09-19 耗时盘点）；无阶段时仍退回「准备下一问」。"""
+    import re
+    from app.services.chat.builtin_assistants.interview.tools import describe_phase, public_interview_loop_event
+
+    start = describe_phase({"input": {"action": "start"}, "progress": {"total": 3}})
+    assert start["opening"] == "正在对照简历和岗位要求，准备第 1 题。"
+    answer = describe_phase({"input": {"action": "answer"}, "progress": {"current_number": 1, "total": 3, "answered": 0, "skipped": 0}})
+    assert answer["opening"] == "正在评估你第 1 题的回答，准备第 2 题。"
+    last = describe_phase({"input": {"action": "answer"}, "progress": {"current_number": 3, "total": 3, "answered": 2, "skipped": 0}})
+    assert "复盘" in last["opening"]
+    finish = describe_phase({"input": {"action": "finish"}, "progress": {"total": 3}})
+    assert finish["commit_intent"] == "整理整场面试报告"
+    # 前端把「正在处理/检索/查看/阅读/梳理…」（≤24 字）当系统占位隐藏，阶段句不能撞上。
+    for state in (start, answer, last, finish):
+        assert not re.match(r"^正在(处理|检索|查看|阅读|梳理).{0,24}$", state["opening"])
+    event = {"type": "tool_started", "name": "commit_interview_turn", "args": {"evaluation": {"score": 1}}}
+    assert public_interview_loop_event(event)["args"] == {"intent": "准备下一问"}
+    assert public_interview_loop_event(event, answer)["args"] == {"intent": "评估第 1 题的回答，准备第 2 题"}
+
+
+def test_initial_observation_inlines_state_and_start_materials_only():
+    """开场观察 = state 载荷（+ 开场两份材料首页）；回答轮不再重复喂简历。"""
+    from app.services.chat.builtin_assistants.interview.tools import initial_observation_text, state_section_payload
+
+    base = {
+        "version": 0, "status": "preparing", "thread_id": "thread", "config": deepcopy(CONFIG),
+        "input": {"action": "start", "expected_version": 0, "question_id": None, "answer_message_id": 1,
+                  "answer_text": "开始", "run_id": "run-start"},
+        "materials": deepcopy(MATERIALS), "question_bank": [], "turns": [], "profile": None,
+        "current_question": None, "review": None, "progress": {"total": 3},
+    }
+    text = initial_observation_text(base)
+    assert "<interview_state>" in text
+    assert '<interview_material kind="resume">' in text and '<interview_material kind="jd">' in text
+    assert MATERIALS["resume"]["text"] in text and MATERIALS["jd"]["text"] in text
+    assert json.dumps(state_section_payload(base), ensure_ascii=False, separators=(",", ":"), sort_keys=True) in text
+    assert "action_contract" in text
+
+    answer = deepcopy(base)
+    answer.update(version=1, status="active", current_question=question("q1"), question_bank=[question("q1"), question("q2")])
+    answer["input"].update(action="answer", expected_version=1, question_id="q1", answer_text="我的回答")
+    text = initial_observation_text(answer)
+    assert "<interview_material" not in text
+    assert MATERIALS["resume"]["text"] not in text
+    assert "我的回答" in text and "next_candidates" in text

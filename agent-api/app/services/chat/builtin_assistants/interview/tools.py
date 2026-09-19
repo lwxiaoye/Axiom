@@ -18,7 +18,41 @@ WRITE_INLINE_CHARS = 16000
 _PAGE_CHAR_LIMIT = READ_INLINE_CHARS * 4 // 5
 
 
-def public_interview_loop_event(event: dict) -> dict:
+def describe_phase(state: dict) -> dict:
+    """本轮冻结动作对应的用户可读阶段：开场句与提交工具的行标题。
+
+    只依据服务端已受理的 input 与进度，不依赖模型输出——用户在首个模型调用的一两分钟里
+    看到的就是它。措辞避开前端把「正在处理/检索/查看/阅读/梳理…」当系统占位隐藏的规则。
+    """
+    action = str((state.get("input") or {}).get("action") or "start")
+    progress = state.get("progress") or {}
+    number = int(progress.get("current_number") or 0) or 1
+    total = int(progress.get("total") or (state.get("config") or {}).get("question_count") or 0)
+    done = int(progress.get("answered") or 0) + int(progress.get("skipped") or 0)
+    last_main = total and done + 1 >= total
+    if action == "start":
+        opening, intent = "正在对照简历和岗位要求，准备第 1 题。", "对照简历和岗位要求，准备第 1 题"
+    elif action == "answer":
+        tail = "准备追问或整场复盘" if last_main else f"准备第 {number + 1} 题"
+        opening = f"正在评估你第 {number} 题的回答，{tail}。"
+        intent = f"评估第 {number} 题的回答，{tail}"
+    elif action == "skip":
+        tail = "整理整场复盘" if last_main else f"准备第 {number + 1} 题"
+        opening, intent = f"已记下第 {number} 题跳过，正在{tail}。", tail
+    elif action == "hint":
+        opening, intent = f"正在准备第 {number} 题的思路提示。", f"准备第 {number} 题的思路提示"
+    elif action == "retry":
+        opening, intent = f"正在恢复第 {number} 题，准备重答。", f"恢复第 {number} 题准备重答"
+    elif action == "finish":
+        opening, intent = "正在整理整场面试报告。", "整理整场面试报告"
+    elif action == "pause":
+        opening, intent = "正在保存面试进度。", "保存面试进度"
+    else:
+        opening, intent = "正在恢复面试进度。", "恢复面试进度"
+    return {"action": action, "number": number, "total": total, "opening": opening, "commit_intent": intent}
+
+
+def public_interview_loop_event(event: dict, phase: dict | None = None) -> dict:
     """Keep interview execution cards, but never project drafts, scores or tool arguments."""
     name = str(event.get("name") or "")
     args = event.get("args") if isinstance(event.get("args"), dict) else {}
@@ -36,7 +70,7 @@ def public_interview_loop_event(event: dict) -> dict:
         else:
             intent = "查看本场面试"
     elif name == "commit_interview_turn":
-        intent = "准备下一问"
+        intent = str((phase or {}).get("commit_intent") or "") or "准备下一问"
     else:
         intent = "继续面试"
     public = {
@@ -101,6 +135,83 @@ def _bounded_page(payload: dict, request: dict, fragment_offset: int | None) -> 
     return _json(fragment(low))
 
 
+MATERIAL_PAGE_CHARS = 12000
+
+
+def _input_identity(state: dict) -> dict:
+    # The accepted action is useful on every page, but the student's full
+    # answer belongs only to state, not to every material/history page.
+    return {key: value for key, value in state["input"].items() if key != "answer_text"}
+
+
+def material_page_payload(state: dict, kind: str, offset: int = 0) -> dict:
+    """一页材料（简历/JD），与工具 section=materials 的返回完全同构，开场观察也用它内联。"""
+    request = {"section": "materials", "offset": offset, "limit": 6,
+               "snapshot_version": state["version"], "material_kind": kind}
+    material = dict(state["materials"].get(kind) or {})
+    full_text = str(material.pop("text", ""))
+    next_offset = offset + MATERIAL_PAGE_CHARS if offset + MATERIAL_PAGE_CHARS < len(full_text) else None
+    material.update(text=full_text[offset:offset + MATERIAL_PAGE_CHARS], total_chars=len(full_text), next_offset=next_offset)
+    return {"section": "materials", "snapshot_version": state["version"], "input": _input_identity(state),
+            "offset": offset, "safety": MATERIAL_SAFETY, "material": material, "next_offset": next_offset,
+            "next_request": _page_request(request, next_offset)}
+
+
+def state_section_payload(state: dict) -> dict:
+    """section=state 的完整载荷：冻结动作、当前题、少量候选题与本轮操作契约。"""
+    payload = {key: value for key, value in state.items() if key not in {"question_bank", "materials", "turns"}}
+    payload["config"] = {key: value for key, value in (state.get("config") or {}).items() if key not in {"jd_text", "resume_notes"}}
+    payload["question_bank_count"] = len(state["question_bank"])
+    payload["history_count"] = len(state["turns"])
+    payload["materials"] = [{key: item.get(key) for key in ("kind", "file_id", "filename", "status", "note", "truncated")} for item in state["materials"].values()]
+    payload.update({"section": "state", "snapshot_version": state["version"], "input": state["input"],
+                    "offset": 0, "safety": MATERIAL_SAFETY, "next_offset": None, "next_request": None})
+    action = state["input"]["action"]
+    if action in {"pause", "resume", "retry"}:
+        # These commands need identity and a version, not a second
+        # assessment of the resume, prior answer or completed review.
+        payload = {key: payload[key] for key in (
+            "section", "snapshot_version", "version", "status", "offset",
+            "next_offset", "next_request", "safety",
+        )}
+        payload["input"] = _input_identity(state)
+        payload["commit_template"] = {key: state["input"].get(key) for key in (
+            "expected_version", "question_id",
+        )}
+    elif action in {"answer", "skip"}:
+        answered_ids = {item.get("question_id") for item in state["turns"] if item.get("action") in {"answer", "skip"}}
+        candidates = [item for item in state["question_bank"] if not item.get("parent_question_id")
+                      and item["id"] != state["input"]["question_id"] and item["id"] not in answered_ids]
+        payload["next_candidates"] = [{key: item[key] for key in ("id", "type", "text", "competency")}
+                                      for item in candidates[:3]]
+        payload["next_candidate_count"] = len(candidates)
+    payload["action_contract"] = interview_action_contract(action)
+    return payload
+
+
+def initial_observation_text(state: dict) -> str:
+    """开场观察：等同模型自己先调 get_interview_session(state)（开场再加两份材料首页）。
+
+    直接放进本轮用户消息之后，首个模型调用就能提交，省掉一到两轮只读工具往返。
+    材料只内联首页；更长的部分仍按 next_request 分页读取，页结构与工具返回一致。
+    """
+    blocks = [
+        "<interview_state>\n以下是平台已为本轮读取的面试状态，等同 get_interview_session(section=\"state\") 的返回；"
+        "不必再读 state，直接据此调用 commit_interview_turn。\n"
+        + _json(state_section_payload(state)) + "\n</interview_state>"
+    ]
+    if state["input"].get("action") == "start":
+        for kind, label in (("resume", "简历"), ("jd", "岗位 JD")):
+            page = material_page_payload(state, kind)
+            note = ("；材料较长，只内联首页，续页按 next_request 读取" if page["next_offset"] is not None else "")
+            blocks.append(
+                f"<interview_material kind=\"{kind}\">\n以下是{label}材料，等同 get_interview_session"
+                f"(section=\"materials\", material_kind=\"{kind}\") 的返回{note}。\n"
+                + _json(page) + f"\n</interview_material>"
+            )
+    return "\n\n".join(blocks)
+
+
 def build_interview_tools(env) -> list[MainTool]:
     identity = {key: str(getattr(env, key, "") or "") for key in ("user_id", "thread_id", "run_id")}
     if not all(identity.values()):
@@ -129,9 +240,7 @@ def build_interview_tools(env) -> list[MainTool]:
                     raise InterviewDomainError("面试状态已变化，请从 state 重新读取，不能拼接不同版本的片段。", code="stale_page")
             if fragment_offset is not None and snapshot_version is None:
                 raise InterviewDomainError("读取片段请携带上一页的 snapshot_version。", code="invalid_paging", status_code=422)
-            # The accepted action is useful on every page, but the student's full
-            # answer belongs only to state, not to every material/history page.
-            input_identity = {key: value for key, value in state["input"].items() if key != "answer_text"}
+            input_identity = _input_identity(state)
             request = {"section": section, "offset": offset, "limit": limit, "snapshot_version": state["version"]}
             base = {"section": section, "snapshot_version": state["version"], "input": input_identity,
                     "offset": offset, "safety": MATERIAL_SAFETY}
@@ -140,12 +249,7 @@ def build_interview_tools(env) -> list[MainTool]:
                 if kind not in {"resume", "jd"}:
                     raise InterviewDomainError("请选择 resume 或 jd 材料。", code="invalid_material", status_code=422)
                 request["material_kind"] = kind
-                material = dict(state["materials"].get(kind) or {})
-                full_text = str(material.pop("text", ""))
-                next_offset = offset + 12000 if offset + 12000 < len(full_text) else None
-                material.update(text=full_text[offset:offset + 12000], total_chars=len(full_text), next_offset=next_offset)
-                payload = {**base, "material": material, "next_offset": next_offset,
-                           "next_request": _page_request(request, next_offset)}
+                payload = material_page_payload(state, kind, offset)
             elif section in {"questions", "history"}:
                 items = state["question_bank"] if section == "questions" else state["turns"]
                 payload = {**base, "items": [], "total": len(items), "next_offset": None, "next_request": None}
@@ -163,32 +267,7 @@ def build_interview_tools(env) -> list[MainTool]:
             elif section == "state":
                 if offset:
                     raise InterviewDomainError("state 的 offset 必须为 0；续读请用 fragment_offset。", code="invalid_paging", status_code=422)
-                payload = {key: value for key, value in state.items() if key not in {"question_bank", "materials", "turns"}}
-                payload["config"] = {key: value for key, value in (state.get("config") or {}).items() if key not in {"jd_text", "resume_notes"}}
-                payload["question_bank_count"] = len(state["question_bank"])
-                payload["history_count"] = len(state["turns"])
-                payload["materials"] = [{key: item.get(key) for key in ("kind", "file_id", "filename", "status", "note", "truncated")} for item in state["materials"].values()]
-                payload.update({**base, "input": state["input"], "next_offset": None, "next_request": None})
-                action = state["input"]["action"]
-                if action in {"pause", "resume", "retry"}:
-                    # These commands need identity and a version, not a second
-                    # assessment of the resume, prior answer or completed review.
-                    payload = {key: payload[key] for key in (
-                        "section", "snapshot_version", "version", "status", "offset",
-                        "next_offset", "next_request", "safety",
-                    )}
-                    payload["input"] = input_identity
-                    payload["commit_template"] = {key: state["input"].get(key) for key in (
-                        "expected_version", "question_id",
-                    )}
-                elif action in {"answer", "skip"}:
-                    answered_ids = {item.get("question_id") for item in state["turns"] if item.get("action") in {"answer", "skip"}}
-                    candidates = [item for item in state["question_bank"] if not item.get("parent_question_id")
-                                  and item["id"] != state["input"]["question_id"] and item["id"] not in answered_ids]
-                    payload["next_candidates"] = [{key: item[key] for key in ("id", "type", "text", "competency")}
-                                                  for item in candidates[:3]]
-                    payload["next_candidate_count"] = len(candidates)
-                payload["action_contract"] = interview_action_contract(action)
+                payload = state_section_payload(state)
             else:
                 raise InterviewDomainError("未知的面试读取分区。", code="invalid_section", status_code=422)
             return ToolValue(model_content=_bounded_page(payload, request, fragment_offset))
@@ -200,6 +279,9 @@ def build_interview_tools(env) -> list[MainTool]:
             result = await service.commit_interview_turn(**identity, submission=args)
             snapshot = result["public_snapshot"]
             receipt = {key: value for key, value in result.items() if key != "public_snapshot"}
+            # 正文由平台从已提交回执投影（project_answer），模型收尾说什么都不会展示；
+            # 明说「回一个词就够」把收尾那次调用的输出压到最短（实测 7–14 秒 → 数秒）。
+            receipt["next_step"] = "已保存。请只回复「已保存」结束本轮，不要再调用工具、复述题目或评分。"
             model_content = json.dumps(receipt, ensure_ascii=False)
             if len(model_content) > WRITE_INLINE_CHARS:
                 # The final user answer is projected from the saved business
@@ -220,7 +302,7 @@ def build_interview_tools(env) -> list[MainTool]:
 
     return [
         MainTool(
-            name="get_interview_session", description="读取当前面试的权威动作、题目、材料或答题记录。每轮先读state，按action_contract执行；控制动作直接提交commit_template。state含少量next_candidates，可用next_question_id选择。开场分页读resume和jd；复盘按需读history。每页按JSON长度限量，next_request为后续调用参数。fragment.encoding=json时text只是本页JSON的字符串片段，按offset/end_offset顺序读到done，不能当成完整对象或漏读证据。未公开questions仅供选择下一题，不能向学生列出。",
+            name="get_interview_session", description="读取当前面试的权威动作、题目、材料或答题记录。本轮 state（开场还含材料首页）已随用户消息里的 <interview_state>/<interview_material> 给出，不必重复读取；只在需要更多候选题、已答记录或材料续页时调用。按action_contract执行；控制动作直接提交commit_template。state含少量next_candidates，可用next_question_id选择。复盘按需读history。每页按JSON长度限量，next_request为后续调用参数。fragment.encoding=json时text只是本页JSON的字符串片段，按offset/end_offset顺序读到done，不能当成完整对象或漏读证据。未公开questions仅供选择下一题，不能向学生列出。",
             parameters={"type": "object", "properties": {
                 "section": {"type": "string", "enum": ["state", "materials", "questions", "history"]},
                 "material_kind": {"type": "string", "enum": ["resume", "jd"]},

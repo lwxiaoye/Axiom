@@ -595,3 +595,51 @@ async def test_authorized_event_subscription_keeps_replay_cursor(run_api, monkey
     subscribe.assert_called_once_with(
         user_id=run_api.user.user_id, run_id="synthetic-run", after_sequence=42, protocol="harness/1",
     )
+
+
+@pytest.mark.asyncio
+async def test_committed_text_mapper_uses_policy_phase_projection():
+    """助手自己的投影工厂（可 async）接管执行卡文案；阶段句来自冻结动作而非模型。"""
+    from app.services.chat.main_tool_turn import map_tool_loop_events
+    from app.services.sse_protocol import HARNESS, SSEChannel
+
+    async def mapper(event):
+        return {**event, "args": {"intent": "评估第 1 题的回答，准备第 2 题"}, "preview": "", "text": "", "observation": None}
+
+    async def events():
+        yield {"type": "tool_started", "name": "commit_interview_turn", "args": {"question_bank": ["SECRET"]}}
+        yield {"type": "tool_result", "name": "commit_interview_turn", "status": "succeeded", "preview": "SECRET"}
+        yield {"type": "final", "answer": "", "trace": []}
+
+    out = {"answer": "", "streamed_any": False}
+    payload = "".join([frame async for frame in map_tool_loop_events(
+        SSEChannel(HARNESS, "synthetic-thread", "synthetic-run"), events(), {}, out,
+        committed_text_only=True, public_event_mapper=mapper,
+    )])
+    assert "SECRET" not in payload
+    assert "评估第 1 题的回答，准备第 2 题" in payload
+
+
+@pytest.mark.asyncio
+async def test_interview_turn_context_policy(monkeypatch):
+    """面试自带上下文（不建沙箱/不重复注入简历/不叠通用契约），阶段句与执行卡文案来自冻结动作。"""
+    from app.services.chat.builtin_assistants.interview import runtime, service
+
+    policy = runtime.INTERVIEW_RUNTIME_POLICY
+    assert policy.owns_turn_context is True
+    assert policy.initial_observation and policy.turn_opening and policy.public_loop_event
+
+    state = {
+        "version": 1, "status": "active", "input": {"action": "answer", "expected_version": 1, "question_id": "q1",
+                                                    "answer_message_id": 7, "answer_text": "答", "run_id": "run-1"},
+        "progress": {"current_number": 1, "total": 3, "answered": 0, "skipped": 0}, "config": {"question_count": 3},
+        "materials": {}, "question_bank": [], "turns": [], "profile": None, "current_question": None, "review": None,
+    }
+    monkeypatch.setattr(service, "get_interview_session", AsyncMock(return_value=state))
+    identity = {"user_id": "u", "thread_id": "t", "run_id": "run-1"}
+    assert await policy.turn_opening(identity) == "正在评估你第 1 题的回答，准备第 2 题。"
+    env = SimpleNamespace(**identity)
+    mapped = await policy.public_loop_event(env)({"type": "tool_started", "name": "commit_interview_turn", "args": {"x": 1}})
+    assert mapped["args"] == {"intent": "评估第 1 题的回答，准备第 2 题"}
+
+
