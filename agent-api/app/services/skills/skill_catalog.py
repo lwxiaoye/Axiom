@@ -24,6 +24,13 @@
 ACL：系统技能全员可见；个人技能仅属主可见。token → 用户走 `user_from_token`（带缓存），
 解析不到用户时只返回系统技能——演示文稿助手的硬门槛（ppt-studio 可见）不能被 auth-api
 抖动误判成「技能不存在」。
+
+分发与隔离（2026-09-19，产品决定）：每个用户的 Skill 广场彼此隔离，**管理员也看不到别人的个人
+技能**（隐私，无任何 admin 旁路）；管理员只能把自己上传的技能「分发到全平台」
+（source→system + distributed_by_user_id），撤回则回到他自己的个人广场。内置技能
+（builtin=1：随代码发布的包与启动期播种的 sys-skill-*）不可撤回/删除/编辑。权限判定
+（can_edit / can_delete / can_distribute / can_revoke）只在本模块定义一次，路由做校验与
+列表出 canXxx 字段都引用这里，前后端口径不会分叉。
 """
 from __future__ import annotations
 
@@ -141,11 +148,15 @@ def builtin_package_files(slug: str) -> tuple[dict[str, bytes], Optional[str]]:
 
 
 def builtin_slug_of_version(version: Optional[AgentSkillVersion]) -> Optional[str]:
-    """版本行是否指向内置包：`import_source_json.builtin` 即目录名。"""
-    if version is None or not version.import_source_json:
+    """版本行是否指向内置包：`import_source_json.builtin` 即目录名。
+
+    用 getattr 而不是直接取属性：这是个「是不是内置包」的探针，调用方（挂载路径、测试替身）
+    可能只给一个带 package_b64/content 的轻量对象，缺字段就当「不是内置」而不是炸掉。"""
+    raw_meta = getattr(version, "import_source_json", None) if version is not None else None
+    if not raw_meta:
         return None
     try:
-        meta = json.loads(version.import_source_json)
+        meta = json.loads(raw_meta)
     except Exception:  # noqa: BLE001
         return None
     slug = str((meta or {}).get("builtin") or "").strip() if isinstance(meta, dict) else ""
@@ -209,6 +220,7 @@ async def ensure_builtin_skills_seeded(*, force: bool = False) -> None:
                     category_json=json.dumps(manifest["category"], ensure_ascii=False),
                     creation_status="ready",
                     owner_user_id="system",
+                    builtin=1,
                 )
                 session.add(skill)
             else:
@@ -218,6 +230,9 @@ async def ensure_builtin_skills_seeded(*, force: bool = False) -> None:
                 skill.category_json = json.dumps(manifest["category"], ensure_ascii=False)
                 skill.creation_status = "ready"
                 skill.creation_error = None
+                # 存量行（加 builtin 列之前播的）补标记；随代码发布的包永远是内置，不可撤回/删除
+                skill.builtin = 1
+                skill.distributed_by_user_id = None
             if not up_to_date:
                 version = AgentSkillVersion(
                     id=uuid.uuid4().hex,
@@ -236,13 +251,103 @@ async def ensure_builtin_skills_seeded(*, force: bool = False) -> None:
     _builtin_seeded = True
 
 
+# ---------------------------------------------------------------- 权限（唯一事实）
+def is_builtin(skill: AgentSkill) -> bool:
+    """内置技能：随代码发布的包（ppt-studio）与启动期播种的 sys-skill-*。"""
+    return bool(getattr(skill, "builtin", 0))
+
+
+def can_edit(skill: AgentSkill, user_id: Optional[str]) -> bool:
+    """只有属主能改，内置不可改。分发出去的（source=system 但 owner 是自己）仍归属主管。"""
+    return bool(user_id) and not is_builtin(skill) and skill.owner_user_id == user_id
+
+
+def can_delete(skill: AgentSkill, user_id: Optional[str]) -> bool:
+    return can_edit(skill, user_id)
+
+
+def can_distribute(skill: AgentSkill, user_id: Optional[str], *, is_admin: bool) -> bool:
+    """分发到全平台：仅管理员、仅自己上传的、仅尚未分发的个人技能。
+    不允许分发别人的技能——那等于把学生的私有技能未经同意公开（而且管理员本来就看不到它）。"""
+    return (
+        is_admin
+        and bool(user_id)
+        and not is_builtin(skill)
+        and skill.owner_user_id == user_id
+        and skill.source == "personal"
+    )
+
+
+def can_revoke(skill: AgentSkill, user_id: Optional[str], *, is_admin: bool) -> bool:
+    """撤回分发：仅管理员、仅 source=system 且非内置的。平台只有一个管理员，所以不按
+    distributed_by_user_id 收窄——存量「source=system 但没记分发人」的行也能被收回。"""
+    return is_admin and skill.source == "system" and not is_builtin(skill)
+
+
 # ---------------------------------------------------------------- 目录（库表）
-def serialize_skill(skill: AgentSkill, version: Optional[AgentSkillVersion] = None) -> dict:
+def _builtin_file_count(slug: str) -> int:
+    """内置包文件数：只数不读（列表页每次都算，不该为此把 ppt-studio 整包读进内存）。"""
+    root = builtin_skill_dir(slug)
+    if root is None:
+        return 0
+    count = 0
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel_parts = path.relative_to(root).parts
+        if any(part in _BUILTIN_SKIP_DIRS for part in rel_parts[:-1]):
+            continue
+        count += 1
+    return count
+
+
+def package_file_count(version: Optional[AgentSkillVersion]) -> int:
+    """包内文件数（列表字段 fileCount）：内容型技能为 0；内置包数磁盘；导入包优先用入库时记在
+    import_source_json.fileCount 的值，没有（存量行）才解一次 base64 数 zip 中央目录。"""
+    if version is None:
+        return 0
+    slug = builtin_slug_of_version(version)
+    if slug:
+        return _builtin_file_count(slug)
+    package_b64 = getattr(version, "package_b64", None)
+    if not package_b64:
+        return 0
+    raw_meta = getattr(version, "import_source_json", None)
+    if raw_meta:
+        try:
+            meta = json.loads(raw_meta)
+            if isinstance(meta, dict) and isinstance(meta.get("fileCount"), int):
+                return max(0, int(meta["fileCount"]))
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        import base64
+        import io
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(package_b64))) as archive:
+            return sum(1 for name in archive.namelist() if not name.endswith("/"))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def serialize_skill(
+    skill: AgentSkill,
+    version: Optional[AgentSkillVersion] = None,
+    *,
+    viewer_user_id: Optional[str] = None,
+    viewer_is_admin: bool = False,
+) -> dict:
     """技能记录的唯一序列化：`/agent-api/skill/*` 路由与进程内目录共用，字段不会分叉。
 
     `enabled`：说明书生成完成且有当前版本才算可用（creating/failed 的个人技能不可用）。
     `skillId`/`recordId` 与 `id` 同值——旧 auth-api 目录里「技能 id」与「记录 id」是两个字段，
     下游按 `skillId or id` 取技能 id、按 `id` 取记录 id，这里三者相同即可兼容。
+
+    2026-09-19 追加（Skill 广场隔离/分发契约，前端已按这些字段名编码，不能改）：
+    `ownerUserId` / `distributedByUserId` / `builtin` / `canEdit` / `canDelete` / `canDistribute` /
+    `canRevoke` / `fileCount` / `updatedAt`。canXxx 按 viewer 算：进程内目录（@Skill 注入）不带
+    viewer，四个都是 False——那条路只消费 enabled，不做管理动作。
     """
     try:
         category = json.loads(skill.category_json or "[]")
@@ -250,6 +355,7 @@ def serialize_skill(skill: AgentSkill, version: Optional[AgentSkillVersion] = No
         category = []
     enabled = 1 if (skill.creation_status == "ready" and skill.current_version_id) else 0
     version_name = str(version.version_name or "").strip() if version is not None else ""
+    update_time = skill.update_time.isoformat(sep=" ", timespec="seconds") if skill.update_time else None
     return {
         "id": skill.id,
         "skillId": skill.id,
@@ -267,7 +373,17 @@ def serialize_skill(skill: AgentSkill, version: Optional[AgentSkillVersion] = No
         "version": version_name or None,
         "versionName": version_name or None,
         "createTime": skill.create_time.isoformat(sep=" ", timespec="seconds") if skill.create_time else None,
-        "updateTime": skill.update_time.isoformat(sep=" ", timespec="seconds") if skill.update_time else None,
+        "updateTime": update_time,
+        # ---- 隔离/分发契约（2026-09-19）----
+        "ownerUserId": skill.owner_user_id,
+        "distributedByUserId": getattr(skill, "distributed_by_user_id", None) or None,
+        "builtin": is_builtin(skill),
+        "canEdit": can_edit(skill, viewer_user_id),
+        "canDelete": can_delete(skill, viewer_user_id),
+        "canDistribute": can_distribute(skill, viewer_user_id, is_admin=viewer_is_admin),
+        "canRevoke": can_revoke(skill, viewer_user_id, is_admin=viewer_is_admin),
+        "fileCount": package_file_count(version),
+        "updatedAt": update_time,
     }
 
 

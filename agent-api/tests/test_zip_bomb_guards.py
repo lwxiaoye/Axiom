@@ -273,6 +273,17 @@ class TestSkillPackageZipGuard:
             async def refresh(self, obj):
                 return None
 
+            async def execute(self, *_args, **_kwargs):
+                # 导入前的同名检查（_ensure_name_unique）会查一次库：替身回「没有重名」
+                class _Result:
+                    def scalars(self):
+                        return self
+
+                    def first(self):
+                        return None
+
+                return _Result()
+
         with patch.object(agent_skill, "async_session", _FakeSession):
             result = await agent_skill.import_skill(file=self._upload(raw), user=user)
 
@@ -280,13 +291,19 @@ class TestSkillPackageZipGuard:
         version = [o for o in captured["added"] if hasattr(o, "package_b64")][0]
         assert "# 测试技能" in (version.content or "")
         assert '"hasScripts": true' in version.import_source_json
+        assert '"fileCount": 3' in version.import_source_json
+        assert result["fileCount"] == 3
 
+    # 挂载路径的版本替身：d634efb 起 _extract_skill_files 先用 import_source_json 判「是不是内置包」，
+    # 替身要带上这个字段（None = 普通导入包），否则测的就不是真实 ORM 行的形状。
     def test_mount_path_fails_loudly_on_bomb(self):
         """挂载路径（每次挂技能都重新解包）超限必须明确抛错，不静默截断。"""
         from app.routers import agent_skill
 
         raw = _bomb_zip("payload.bin", 60 * 1024 * 1024)
-        version = SimpleNamespace(package_b64=base64.b64encode(raw).decode("ascii"), content="# 说明书")
+        version = SimpleNamespace(
+            package_b64=base64.b64encode(raw).decode("ascii"), content="# 说明书", import_source_json=None
+        )
         with pytest.raises(zip_guard.ZipBombError):
             agent_skill._extract_skill_files(version)
 
@@ -297,7 +314,9 @@ class TestSkillPackageZipGuard:
             "my-skill/SKILL.md": b"# hi",
             "my-skill/entrypoint.sh": b"echo ok",
         })
-        version = SimpleNamespace(package_b64=base64.b64encode(raw).decode("ascii"), content=None)
+        version = SimpleNamespace(
+            package_b64=base64.b64encode(raw).decode("ascii"), content=None, import_source_json=None
+        )
         files, entrypoint = agent_skill._extract_skill_files(version)
         assert set(files) == {"SKILL.md", "entrypoint.sh"}  # 公共顶层目录被剥掉
         assert entrypoint == "entrypoint.sh"
