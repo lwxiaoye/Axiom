@@ -621,13 +621,14 @@ async def test_committed_text_mapper_uses_policy_phase_projection():
 
 
 @pytest.mark.asyncio
-async def test_interview_turn_context_policy(monkeypatch):
-    """面试自带上下文（不建沙箱/不重复注入简历/不叠通用契约），阶段句与执行卡文案来自冻结动作。"""
+async def test_interview_turn_context_policy_and_terminal_failure(monkeypatch):
+    """面试自带上下文（不建沙箱/不重复注入简历/不叠通用契约），模型失败改判为可读终态。"""
+    from app.services.agent_harness.public_errors import TerminalRunError
     from app.services.chat.builtin_assistants.interview import runtime, service
 
     policy = runtime.INTERVIEW_RUNTIME_POLICY
     assert policy.owns_turn_context is True
-    assert policy.initial_observation and policy.turn_opening and policy.public_loop_event
+    assert policy.initial_observation and policy.turn_opening and policy.public_loop_event and policy.terminal_failure
 
     state = {
         "version": 1, "status": "active", "input": {"action": "answer", "expected_version": 1, "question_id": "q1",
@@ -642,4 +643,42 @@ async def test_interview_turn_context_policy(monkeypatch):
     mapped = await policy.public_loop_event(env)({"type": "tool_started", "name": "commit_interview_turn", "args": {"x": 1}})
     assert mapped["args"] == {"intent": "评估第 1 题的回答，准备第 2 题"}
 
+    failure = await policy.terminal_failure(env, RuntimeError("模型调用失败: 502 upstream body"))
+    assert isinstance(failure, TerminalRunError)
+    assert "模型服务返回 502" in failure.public_message
+    assert "重新发送这份回答" in failure.public_message
+    assert "upstream body" not in failure.public_message
+    timeout = await policy.terminal_failure(env, TimeoutError("read timeout"))
+    assert "模型响应超时" in timeout.public_message
+    state["input"]["action"] = "start"
+    start_failure = await policy.terminal_failure(env, RuntimeError("boom"))
+    assert "继续准备" in start_failure.public_message
 
+
+@pytest.mark.asyncio
+async def test_tool_loop_failure_is_converted_by_policy_before_recovery():
+    """main_tool_turn 的通用异常分支先问助手策略：面试把模型失败抛成 TerminalRunError；
+    已是终态的不改判、策略抛错不吞原异常、普通助手（无钩子）沿用恢复路径。"""
+    from app.services.agent_harness.public_errors import ConfigurationRunError, TerminalRunError
+    from app.services.chat.main_tool_turn import convert_loop_failure
+    from app.services.chat.builtin_assistants.interview import runtime
+
+    seen = {}
+
+    async def fake_terminal_failure(env, exc):
+        seen["exc"] = exc
+        return runtime.InterviewTurnFailed("面试助手这一轮没有完成：模型响应超时。请重新发送这份回答。")
+
+    policy = replace(runtime.INTERVIEW_RUNTIME_POLICY, terminal_failure=fake_terminal_failure)
+    env = SimpleNamespace(user_id="u", thread_id="t", run_id="r")
+    converted = await convert_loop_failure(policy, env, RuntimeError("boom"))
+    assert isinstance(converted, TerminalRunError)
+    assert converted.public_message.startswith("面试助手这一轮没有完成")
+    assert isinstance(seen["exc"], RuntimeError)
+    assert await convert_loop_failure(policy, env, ConfigurationRunError("配置缺失")) is None
+    assert await convert_loop_failure(None, env, RuntimeError("boom")) is None
+
+    async def broken(_env, _exc):
+        raise ValueError("hook broke")
+
+    assert await convert_loop_failure(replace(policy, terminal_failure=broken), env, RuntimeError("boom")) is None

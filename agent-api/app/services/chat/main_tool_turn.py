@@ -400,6 +400,26 @@ def _append_tool_result_trace(out: dict, ev: dict) -> dict:
     return item
 
 
+async def convert_loop_failure(runtime_policy, env, error: BaseException):
+    """交互式内置助手（面试）可把已耗尽重试的模型失败改判为终态错误。
+
+    否则任何非 TerminalRunError 都进 `_pump_background_run` 的恢复路径：waiting_system →
+    无限退避重排，用户只看到「正在自动恢复…」，作答框一直锁着。改判后是可读原因 + 可重发。
+    已是终态错误的不改判；策略自身抛错时按未改判处理，绝不吞掉原异常。
+    """
+    if not runtime_policy or not getattr(runtime_policy, "terminal_failure", None):
+        return None
+    from app.services.agent_harness.public_errors import TerminalRunError
+    if isinstance(error, TerminalRunError):
+        return None
+    try:
+        converted = await runtime_policy.terminal_failure(env, error)
+    except Exception:  # noqa: BLE001
+        logger.warning("builtin terminal_failure hook failed; keep recovery path", exc_info=True)
+        return None
+    return converted if isinstance(converted, TerminalRunError) else None
+
+
 async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, tool_meta: Optional[dict] = None,
                                ctx_window: int = 0, strict_ppt_publish: bool = False,
                                subagent_icons: Optional[dict] = None,
@@ -2006,6 +2026,9 @@ async def run_agent_turn(env):
                     record_tool_observations=task_run_service.record_tool_observations,
                     error=e,
                 )
+                converted = await convert_loop_failure(runtime_policy, env, e)
+                if converted is not None:
+                    raise converted from e
                 raise
     # 深扫修复(2026-07-20 P0):此置位在 skeleton 脚本重放中因缩进不匹配被静默丢失——
     # 缺它则骨架恒 return,直答回退成死代码:普通对话在首个正文 token 前遇异常时

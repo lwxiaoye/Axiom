@@ -70,6 +70,10 @@ class BuiltinRuntimePolicy:
     # 执行卡事件的公开投影工厂：入参为 TurnEnv，返回把内部 tool 事件改写成用户可读阶段的函数。
     # 结构化提交型助手（project_answer 非空）用它隐藏草稿、评分与工具参数。
     public_loop_event: Callable[[Any], Callable[[dict], dict]] | None = None
+    # 模型/工具循环抛出非终态异常时的改判：返回 TerminalRunError 则本轮以可读原因结束
+    # （run.failed），不进入「waiting_system + 无限退避重排」；返回 None 沿用平台恢复路径。
+    # 面试这类交互式回合用它：受理的输入幂等且已保存，用户重发一次比无限转圈便宜得多。
+    terminal_failure: Callable[[Any, BaseException], Awaitable[BaseException | None]] | None = None
 
     def bound_tools(self, tools: list) -> list:
         """Filter full assembly, then enforce the same boundary used on resume."""

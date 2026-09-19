@@ -1,7 +1,10 @@
 """Interview policy adapters for first turns, resumed turns and final projection."""
 
+import asyncio
+
 from fastapi import HTTPException
 
+from app.services.agent_harness.public_errors import TerminalRunError
 from app.services.chat.builtin_assistants.runtime_types import BuiltinRuntimePolicy
 from app.services.chat.types import TurnContext
 from .contracts import InterviewDomainError
@@ -115,6 +118,49 @@ def public_loop_event(env):
     return mapper
 
 
+class InterviewTurnFailed(TerminalRunError):
+    """面试回合的模型失败以可读原因结束本轮，而不是无限自动恢复。
+
+    面试输入受理时已幂等保存（简历/JD/回答都在库里），重发一次的代价远小于让用户对着
+    「正在自动恢复…」干等；所以模型在平台重试用尽后仍失败时，这里直接给出原因和下一步。
+    public_message 是面向学生的中文，不含异常类型、栈或渠道返回体。
+    """
+
+    def __init__(self, public_message: str):
+        self.public_message = str(public_message or "").strip() or TerminalRunError.public_message
+        super().__init__(self.public_message)
+
+
+def _failure_reason(exc: BaseException) -> str:
+    text = str(exc or "")
+    if isinstance(exc, asyncio.TimeoutError) or type(exc).__name__.endswith(("Timeout", "TimeoutException", "TimeoutError")) or "timeout" in text.lower() or "超时" in text:
+        return "模型响应超时"
+    if text.startswith("模型调用失败: "):
+        status = text[len("模型调用失败: "):].split(" ", 1)[0].strip()
+        if status.isdigit():
+            return f"模型服务返回 {status}"
+    return "模型服务暂时不可用"
+
+
+async def terminal_failure(env, exc: BaseException) -> BaseException | None:
+    reason = _failure_reason(exc)
+    action = "answer"
+    try:
+        state = await _accepted_state({key: str(getattr(env, key, "") or "") for key in ("user_id", "thread_id", "run_id")})
+        action = str((state or {}).get("input", {}).get("action") or action)
+    except Exception:  # noqa: BLE001
+        pass
+    if action == "start":
+        next_step = "你的简历、岗位 JD 和设置都已保存，点「继续准备」即可重试。"
+    elif action == "finish":
+        next_step = "已答记录都在，请再点一次「结束面试」生成复盘。"
+    elif action in {"pause", "resume", "retry", "hint", "skip"}:
+        next_step = "面试进度没有变化，请再操作一次。"
+    else:
+        next_step = "你的回答已保存，但本轮没有产生评价和下一题；请重新发送这份回答。"
+    return InterviewTurnFailed(f"面试助手这一轮没有完成：{reason}。{next_step}")
+
+
 async def project_answer(env, _answer: str) -> str:
     result = await service.get_committed_turn(**{
         key: str(getattr(env, key, "") or "") for key in ("user_id", "thread_id", "run_id")
@@ -144,4 +190,5 @@ INTERVIEW_RUNTIME_POLICY = BuiltinRuntimePolicy(
     # 不建沙箱、不重复注入简历、不叠通用目标契约；状态随消息给出，首个模型调用即可提交。
     owns_turn_context=True, initial_observation=initial_observation,
     turn_opening=turn_opening, public_loop_event=public_loop_event,
+    terminal_failure=terminal_failure,
 )
