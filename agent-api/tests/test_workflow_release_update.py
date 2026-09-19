@@ -163,15 +163,14 @@ class WorkflowOwnerRollbackTests(IsolatedAsyncioTestCase):
         owner = UserContext(user_id="owner-1", username="owner")
 
         with mock.patch.object(wf, "_next_version_no", new=mock.AsyncMock(return_value=6)):
-            with mock.patch.object(wf.presentation_service, "promote_published_assignment", new=mock.AsyncMock()):
-                with mock.patch.object(wf, "sync_app_info_for_approved_version", new=mock.AsyncMock()):
-                    new_version, should_invalidate_api = await wf._rollback_to_version(
-                        session,
-                        app,
-                        2,
-                        owner,
-                        review_comment="所有者回滚",
-                    )
+            with mock.patch.object(wf, "sync_app_info_for_approved_version", new=mock.AsyncMock()):
+                new_version, should_invalidate_api = await wf._rollback_to_version(
+                    session,
+                    app,
+                    2,
+                    owner,
+                    review_comment="所有者回滚",
+                )
 
         self.assertEqual(new_version, 6)
         self.assertFalse(should_invalidate_api)

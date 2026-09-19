@@ -128,11 +128,7 @@ class WorkflowReviewSummaryTests(IsolatedAsyncioTestCase):
         session = _SubmitWithPendingSession(definition, [pending])
         owner = UserContext(user_id="owner-1", username="owner")
 
-        # 运行页外观分配（presentation_service.sync_draft_assignment）不是本用例的对象：它会先查
-        # 一次 assignment 并比对 app/user 的 tenant_id，而这里的假 session 只按「定义 → 待审版本」
-        # 两次 execute 编排、app 也没有 tenant_id，所以和发布前校验一样整体 mock 掉。
         with (
-            mock.patch.object(wf.presentation_service, "sync_draft_assignment", new=mock.AsyncMock()),
             mock.patch.object(wf, "_validate_before_publish", new=mock.AsyncMock()),
             mock.patch.object(wf, "_next_version_no", new=mock.AsyncMock(return_value=6)),
         ):

@@ -82,17 +82,18 @@ def test_publish_promotes_draft_without_rewriting_history():
     assert "rollback_from=" in rollback_src
 
 
-def test_main_chat_skin_is_part_of_release_hash_but_not_harness_snapshot():
+def test_main_chat_skin_is_gone_from_release_pipeline():
+    """皮肤系统已删除：发布哈希、快照与配置服务都不再认识 main_chat_skin_id。"""
     base = dict(
         model_id="m1",
         official_domains=[],
         knowledge_bindings=[{"knowledge_id": "kb1", "enabled": True}],
         policy_version="campus-policy-v1",
     )
-    standard = config_service.compute_config_hash(**base, main_chat_skin_id=None)
-    skinned = config_service.compute_config_hash(**base, main_chat_skin_id="mcs_1")
-
-    assert standard != skinned
+    assert config_service.compute_config_hash(**base) == config_service.compute_config_hash(**base)
+    with pytest.raises(TypeError):
+        config_service.compute_config_hash(**base, main_chat_skin_id="mcs_1")
+    assert "main_chat_skin_id" not in inspect.getsource(config_service)
     assert "main_chat_skin_id" not in inspect.getsource(snapshot_from_release)
 
 
@@ -101,11 +102,7 @@ async def test_publish_validation_requires_an_official_domain(monkeypatch):
     async def _model_available(_session, _model_id):
         return True
 
-    async def _skin_available(*_args, **_kwargs):
-        return None
-
     monkeypatch.setattr(config_service, "_model_available", _model_available)
-    monkeypatch.setattr(config_service, "validate_skin_selection", _skin_available)
     result = await config_service.validate_payload(
         SimpleNamespace(access_token="", tenant_id="tenant-1"),
         model_id="m1",

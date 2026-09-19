@@ -1,5 +1,5 @@
 from sqlalchemy import BigInteger, Boolean, Column, Float, Index, String, Text, DateTime, ForeignKey, Integer, SmallInteger, UniqueConstraint, func, or_
-from sqlalchemy.dialects.mysql import LONGBLOB, MEDIUMTEXT
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 
 from app.core.database import Base
 
@@ -773,9 +773,6 @@ class CampusAssistantRelease(Base):
     base_release_id = Column(String(64), nullable=True)
     rollback_from_release_id = Column(String(64), nullable=True)
     model_id = Column(String(255), nullable=False)
-    # 主对话皮肤是校园百事通发布快照的一部分，但不进入 Agent Harness Run。
-    # 这里固定引用一个不可变的 main_chat 皮肤版本；子智能体外观仍走下方独立表。
-    main_chat_skin_id = Column(String(64), nullable=True, index=True)
     official_domains_json = Column(MEDIUMTEXT, nullable=False)
     policy_version = Column(String(32), nullable=False)
     change_note = Column(String(1024), nullable=True)
@@ -801,170 +798,6 @@ class CampusAssistantReleaseKb(Base):
     department = Column(String(128), nullable=True)
     priority = Column(Integer, nullable=False, default=100)
     enabled = Column(SmallInteger, nullable=False, default=1)
-
-
-class MainChatSkin(Base):
-    """Tenant-installed, immutable portable skin version for `/center/chat`.
-
-    The JSON is server-normalized declarative data.  It can never carry HTML/CSS/JavaScript or
-    source paths.  A new package version creates a new row rather than mutating a published skin.
-    """
-
-    __tablename__ = "agent_main_chat_skin"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "skin_key", "version", name="uq_main_chat_skin_version"),
-        UniqueConstraint("tenant_id", "content_hash", name="uq_main_chat_skin_content"),
-        {"mysql_charset": "utf8mb4"},
-    )
-
-    id = Column(String(64), primary_key=True)
-    tenant_id = Column(String(64), nullable=False, index=True)
-    skin_key = Column(String(64), nullable=False)
-    version = Column(String(32), nullable=False)
-    schema_version = Column(Integer, nullable=False, default=1)
-    name = Column(String(128), nullable=False)
-    description = Column(String(512), default="")
-    renderer_key = Column(String(64), nullable=False)
-    manifest_json = Column(MEDIUMTEXT, nullable=False)
-    content_hash = Column(String(64), nullable=False)
-    source_type = Column(String(24), nullable=False, default="imported")
-    status = Column(String(16), nullable=False, default="active", index=True)
-    installed_by = Column(String(64), nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class MainChatSkinAsset(Base):
-    """Raster bytes installed with one immutable main-chat skin version."""
-
-    __tablename__ = "agent_main_chat_skin_asset"
-    __table_args__ = (
-        UniqueConstraint("skin_id", "asset_key", name="uq_main_chat_skin_asset_key"),
-        UniqueConstraint("skin_id", "asset_path", name="uq_main_chat_skin_asset_path"),
-        {"mysql_charset": "utf8mb4"},
-    )
-
-    id = Column(String(64), primary_key=True)
-    skin_id = Column(String(64), nullable=False, index=True)
-    asset_key = Column(String(64), nullable=False)
-    asset_path = Column(String(255), nullable=False)
-    mime_type = Column(String(64), nullable=False)
-    sha256 = Column(String(64), nullable=False)
-    byte_size = Column(Integer, nullable=False)
-    content = Column(LONGBLOB, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
-
-
-class SubAgentSkin(Base):
-    """Globally installed immutable portable skin for `/agent/run/:appId`."""
-
-    __tablename__ = "agent_sub_agent_skin"
-    __table_args__ = (
-        UniqueConstraint("skin_key", "version", name="uq_sub_agent_skin_version"),
-        UniqueConstraint("assignment_key", name="uq_sub_agent_skin_assignment"),
-        UniqueConstraint("content_hash", name="uq_sub_agent_skin_content"),
-        {"mysql_charset": "utf8mb4"},
-    )
-
-    id = Column(String(64), primary_key=True)
-    skin_key = Column(String(64), nullable=False)
-    version = Column(String(32), nullable=False)
-    # Workflow presentation.preset stores this local, versioned lookup key.  Package identity remains
-    # the portable skin_key + version pair and is never coupled to a database id.
-    assignment_key = Column(String(128), nullable=False)
-    schema_version = Column(Integer, nullable=False, default=1)
-    name = Column(String(128), nullable=False)
-    description = Column(String(512), default="")
-    renderer_key = Column(String(64), nullable=False)
-    manifest_json = Column(MEDIUMTEXT, nullable=False)
-    content_hash = Column(String(64), nullable=False)
-    source_type = Column(String(24), nullable=False, default="imported")
-    status = Column(String(16), nullable=False, default="active", index=True)
-    installed_by = Column(String(64), nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class SubAgentSkinAsset(Base):
-    """Raster bytes installed with one immutable sub-agent skin version."""
-
-    __tablename__ = "agent_sub_agent_skin_asset"
-    __table_args__ = (
-        UniqueConstraint("skin_id", "asset_key", name="uq_sub_agent_skin_asset_key"),
-        UniqueConstraint("skin_id", "asset_path", name="uq_sub_agent_skin_asset_path"),
-        {"mysql_charset": "utf8mb4"},
-    )
-
-    id = Column(String(64), primary_key=True)
-    skin_id = Column(String(64), nullable=False, index=True)
-    asset_key = Column(String(64), nullable=False)
-    asset_path = Column(String(255), nullable=False)
-    mime_type = Column(String(64), nullable=False)
-    sha256 = Column(String(64), nullable=False)
-    byte_size = Column(Integer, nullable=False)
-    content = Column(LONGBLOB, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
-
-
-class AgentPresentationPreset(Base):
-    """运行页外观（“衣服”）目录。
-
-    这里只登记全局稳定的渲染 key；真正的 Vue 组件和位图素材仍随前端代码发布，
-    运行时必须同时命中后端目录和前端注册表，数据库不能注入任意 CSS/HTML。
-    """
-
-    __tablename__ = "agent_presentation_preset"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    preset_key = Column(String(64), primary_key=True)
-    version_no = Column(Integer, nullable=False, default=1)
-    name = Column(String(128), nullable=False)
-    description = Column(String(512), default="")
-    source_type = Column(String(24), nullable=False, default="builtin")
-    renderer_key = Column(String(64), nullable=False)
-    status = Column(String(16), nullable=False, default="active", index=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class AgentPresentationPresetAsset(Base):
-    """外观素材清单；resource_ref 是内部引用，不直接返回给浏览器。"""
-
-    __tablename__ = "agent_presentation_preset_asset"
-    __table_args__ = (
-        UniqueConstraint("preset_key", "asset_key", name="uq_presentation_preset_asset"),
-        {"mysql_charset": "utf8mb4"},
-    )
-
-    id = Column(String(64), primary_key=True)
-    preset_key = Column(String(64), nullable=False, index=True)
-    asset_key = Column(String(64), nullable=False)
-    asset_kind = Column(String(24), nullable=False, default="image")
-    resource_ref = Column(String(512), nullable=False)
-    sha256 = Column(String(64), nullable=False)
-    status = Column(String(16), nullable=False, default="active")
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class AgentPresentationAssignment(Base):
-    """智能体穿衣记录，草稿与线上分别保存，避免改草稿立即影响已发布页面。"""
-
-    __tablename__ = "agent_presentation_assignment"
-    __table_args__ = (
-        UniqueConstraint("app_id", name="uq_presentation_assignment_app"),
-        {"mysql_charset": "utf8mb4"},
-    )
-
-    id = Column(String(64), primary_key=True)
-    app_id = Column(String(64), nullable=False, index=True)
-    tenant_id = Column(String(64), nullable=False, index=True)
-    draft_preset_key = Column(String(64), nullable=False, default="default")
-    published_preset_key = Column(String(64), nullable=False, default="default")
-    draft_updated_by = Column(String(64), nullable=True)
-    published_version = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 # ─── 原 JeecgBoot(Java) 业务库表 ────────────────────────────────────────────

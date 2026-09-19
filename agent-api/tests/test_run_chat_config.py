@@ -109,7 +109,7 @@ class RunChatConfigTests(unittest.TestCase):
             "deepseek-v4-flash-vision-exp",
         )
 
-    def test_extracts_declarative_presentation_without_unsafe_style_fields(self):
+    def test_presentation_keeps_only_safe_copy_and_drops_preset_and_style_fields(self):
         workflow_json = json.dumps({
             "chatConfig": {
                 "presentation": {
@@ -122,6 +122,7 @@ class RunChatConfigTests(unittest.TestCase):
                     },
                     "css": "body { display: none }",
                     "backgroundUrl": "https://example.invalid/tracker.png",
+                    "portableSkin": {"key": "x"},
                 }
             }
         }, ensure_ascii=False)
@@ -129,17 +130,31 @@ class RunChatConfigTests(unittest.TestCase):
         result = _extract_run_chat_config(workflow_json)
 
         self.assertEqual(result["presentation"], {
-            "schemaVersion": 1,
-            "preset": "campus-welcome-v1",
             "copy": {
                 "welcomeTitle": "欢迎来到校园",
                 "composerPlaceholder": "问问迎新助手",
             },
         })
 
-    def test_ignores_invalid_presentation_preset(self):
+    def test_presentation_copy_is_length_capped(self):
         workflow_json = json.dumps({
-            "chatConfig": {"presentation": {"preset": "../../unsafe"}}
-        })
+            "chatConfig": {
+                "presentation": {"copy": {"welcomeTitle": "标" * 100, "composerPlaceholder": "占" * 150}}
+            }
+        }, ensure_ascii=False)
 
-        self.assertNotIn("presentation", _extract_run_chat_config(workflow_json))
+        copy = _extract_run_chat_config(workflow_json)["presentation"]["copy"]
+
+        self.assertEqual(len(copy["welcomeTitle"]), 80)
+        self.assertEqual(len(copy["composerPlaceholder"]), 120)
+
+    def test_presentation_is_omitted_when_only_a_legacy_preset_is_present(self):
+        # 旧草稿里可能还留着 preset key；现在只有一套默认外观，没有文案就不返回 presentation。
+        for source in (
+            {"preset": "campus-welcome-v1"},
+            {"preset": "../../unsafe"},
+            {"copy": {"welcomeTitle": "   "}},
+            "not-an-object",
+        ):
+            workflow_json = json.dumps({"chatConfig": {"presentation": source}})
+            self.assertNotIn("presentation", _extract_run_chat_config(workflow_json))

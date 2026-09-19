@@ -89,11 +89,9 @@ class WorkflowPublishActivationTests(IsolatedAsyncioTestCase):
                 with mock.patch.object(wf, "sync_app_info_for_approved_version", new=catalog_sync):
                     with mock.patch.object(wf.capability_registry, "sync_from_app", new=mock.AsyncMock()):
                         with mock.patch.object(wf, "_version_dict", return_value={"id": "version-1"}):
-                            # 上线时会再次核对外观分配（皮肤可能在审核期间被删，走库）；本用例只钉状态机
-                            with mock.patch.object(wf.presentation_service, "promote_published_assignment", new=mock.AsyncMock()):
-                                result = await wf.review_approve(
-                                    wf.ReviewActionRequest(versionId="version-1"), reviewer
-                                )
+                            result = await wf.review_approve(
+                                wf.ReviewActionRequest(versionId="version-1"), reviewer
+                            )
 
         self.assertEqual(app.status, "published")
         self.assertEqual(definition.published_version, 7)
@@ -119,9 +117,7 @@ class WorkflowPublishActivationTests(IsolatedAsyncioTestCase):
         with mock.patch.object(wf, "_validate_before_publish", new=mock.AsyncMock()):
             with mock.patch.object(wf, "_upsert_definition", new=mock.AsyncMock(return_value=definition)):
                 with mock.patch.object(wf, "sync_app_info_for_approved_version", new=catalog_sync):
-                    with mock.patch.object(wf.presentation_service, "sync_draft_assignment", new=mock.AsyncMock()):
-                        with mock.patch.object(wf.presentation_service, "promote_published_assignment", new=mock.AsyncMock()):
-                            await wf._do_publish_now(session, app, '{"nodes":[]}', None, publisher)
+                    await wf._do_publish_now(session, app, '{"nodes":[]}', None, publisher)
 
         self.assertEqual(app.status, "published")
         catalog_sync.assert_awaited_once()
@@ -140,9 +136,7 @@ class WorkflowPublishActivationTests(IsolatedAsyncioTestCase):
 
         with mock.patch.object(wf, "_validate_before_publish", new=mock.AsyncMock()):
             with mock.patch.object(wf, "_next_version_no", new=mock.AsyncMock(return_value=5)):
-                # 提交审核会顺手校验并同步草稿的外观分配（走库、读 app.tenant_id）；本用例只钉状态机
-                with mock.patch.object(wf.presentation_service, "sync_draft_assignment", new=mock.AsyncMock()):
-                    version = await wf._do_submit_review(session, app, '{"nodes":[]}', None, owner)
+                version = await wf._do_submit_review(session, app, '{"nodes":[]}', None, owner)
 
         self.assertEqual(version.status, "pending_review")
         self.assertEqual(app.status, "unpublished")

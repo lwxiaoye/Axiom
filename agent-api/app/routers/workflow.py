@@ -11,8 +11,7 @@ import uuid
 from typing import Any, Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import and_, func, or_, select, text
@@ -39,8 +38,6 @@ from app.services.agents.published_visibility import load_published_visibility_v
 from app.services.platform.user_display_name import load_user_display_names
 from app.services.workflows.workflow_model_requirements import missing_required_models
 from app.services.workflows import marketplace_catalog_service
-from app.services.workflows import presentation_service
-from app.services.workflows import sub_agent_skin_service
 from app.services.workflows.builtin_app_admin_service import (
     build_builtin_admin_detail,
     get_managed_builtin,
@@ -52,7 +49,6 @@ from app.services.workflows.admin_governance_service import (
     build_version_diff,
     record_app_audit,
 )
-from app.services.campus_assistant.main_chat_skin_package import MAX_PACKAGE_BYTES
 from app.services.workflows.workflow_engine import (
     RunContext,
     SUPPORTED_NODE_TYPES,
@@ -100,11 +96,6 @@ class AppUpsertRequest(BaseModel):
     appCategory: Optional[str] = None
     appIcon: Optional[str] = None
     configJson: Optional[str] = None
-
-
-class SubAgentSkinMetadataUpdateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    description: str = Field(default="", max_length=512)
 
 
 class RouteMetadata(BaseModel):
@@ -685,46 +676,18 @@ def _extract_run_chat_config(workflow_json: Optional[str], user: Optional[UserCo
         "ttsConfig": {"type": tts_type},
         "chatModel": _first_workflow_chat_model(graph),
     }
+    # 运行页只有一套默认外观；presentation 仅保留受限长度的欢迎语 / 输入框占位符文案，
+    # 不透传预设 key、CSS、HTML 或任意资源地址。没有文案时整个字段不返回。
     presentation_source = chat_config.get("presentation")
-    if isinstance(presentation_source, dict):
-        preset = str(presentation_source.get("preset") or "").strip()
-        # 运行接口只透传声明式预设 key 与受限文案，不接收 CSS、HTML 或任意资源地址。
-        if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", preset):
-            presentation = {"schemaVersion": 1, "preset": preset}
-            copy_source = presentation_source.get("copy")
-            if isinstance(copy_source, dict):
-                copy = {}
-                for key, max_length in (("welcomeTitle", 80), ("composerPlaceholder", 120)):
-                    value = str(copy_source.get(key) or "").strip()
-                    if value:
-                        copy[key] = value[:max_length]
-                if copy:
-                    presentation["copy"] = copy
-            result["presentation"] = presentation
-    return result
-
-
-async def _verified_run_chat_config(
-    session,
-    app: WorkflowApp,
-    workflow_json: Optional[str],
-    user: UserContext,
-    *,
-    presentation_scope: str,
-) -> dict:
-    """Combine ordinary chat config with a server-verified installed presentation preset."""
-    result = _extract_run_chat_config(workflow_json, user)
-    # `_extract_run_chat_config` is intentionally a pure legacy-compatible parser.  Its result is
-    # never authoritative for styling: remove it and re-add only after catalog/assignment checks.
-    result.pop("presentation", None)
-    presentation = await presentation_service.resolve_runtime_presentation(
-        session,
-        app,
-        workflow_json,
-        scope=presentation_scope,
-    )
-    if presentation:
-        result["presentation"] = presentation
+    copy_source = presentation_source.get("copy") if isinstance(presentation_source, dict) else None
+    if isinstance(copy_source, dict):
+        copy = {}
+        for key, max_length in (("welcomeTitle", 80), ("composerPlaceholder", 120)):
+            value = str(copy_source.get(key) or "").strip()
+            if value:
+                copy[key] = value[:max_length]
+        if copy:
+            result["presentation"] = {"copy": copy}
     return result
 
 
@@ -954,7 +917,6 @@ async def delete_app(id: str, user: UserContext = Depends(current_user)):
         app, _ = await _require_permission(session, id, user, owner=True)
         record_app_audit(session, app=app, action="delete", actor=user, before=_app_audit_snapshot(app))
         await retire_app_info_catalog_entry(session, id)
-        await presentation_service.delete_assignment(session, id)
         await session.execute(sa_delete(WorkflowDefinition).where(WorkflowDefinition.app_id == id))
         await session.execute(sa_delete(WorkflowAcl).where(WorkflowAcl.app_id == id))
         await session.execute(sa_delete(WorkflowApp).where(WorkflowApp.id == id))
@@ -1006,154 +968,6 @@ async def cancel_publish_app(id: str, user: UserContext = Depends(current_user))
     await _mark_agent_api_access_invalidation_after_commit(id, "app_unpublished")
     await capability_registry.sync_from_app(id)  # 下架 → 从路由候选移除
     return result
-
-
-# ---------- 运行页外观（全局皮肤目录 / 智能体分配） ----------
-
-@router.get("/presentation/presets")
-async def list_presentation_presets(
-    appId: Optional[str] = None,
-    user: UserContext = Depends(current_user),
-):
-    """“试衣间”目录：所有智能体共用同一份已安装皮肤目录。"""
-    async with async_session() as session:
-        if appId:
-            await _require_permission(session, appId, user)
-        return {"records": await presentation_service.list_available_presets(session)}
-
-
-@router.get("/presentation/admin/presets")
-async def list_admin_presentation_presets(
-    user: UserContext = Depends(current_user),
-):
-    _require_platform_admin(user)
-    async with async_session() as session:
-        return {"records": await presentation_service.list_admin_presets(session)}
-
-
-@router.post("/presentation/admin/skins/import")
-async def import_sub_agent_skin(
-    file: UploadFile = File(...),
-    user: UserContext = Depends(current_user),
-):
-    """Install a safe, portable run-page skin into the global sub-agent catalog."""
-    _require_platform_admin(user)
-    filename = str(file.filename or "").strip()
-    if filename and not filename.lower().endswith((".axiomskin", ".zip")):
-        raise HTTPException(status_code=415, detail="请选择 .axiomskin 皮肤包")
-    content = await file.read(MAX_PACKAGE_BYTES + 1)
-    if len(content) > MAX_PACKAGE_BYTES:
-        raise HTTPException(status_code=413, detail="皮肤包超过 12 MiB 限制")
-    async with async_session() as session:
-        try:
-            skin, installed = await sub_agent_skin_service.import_skin_package(
-                session, user, content,
-            )
-            await session.commit()
-        except sub_agent_skin_service.SubAgentSkinError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-        return {
-            "installed": installed,
-            "skin": sub_agent_skin_service.serialize_skin(skin),
-        }
-
-
-@router.get("/presentation/admin/skins/{skin_id}")
-async def get_sub_agent_skin(
-    skin_id: str,
-    user: UserContext = Depends(current_user),
-):
-    _require_platform_admin(user)
-    async with async_session() as session:
-        try:
-            return await sub_agent_skin_service.get_skin_detail(session, user, skin_id)
-        except sub_agent_skin_service.SubAgentSkinError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.patch("/presentation/admin/skins/{skin_id}")
-async def update_sub_agent_skin(
-    skin_id: str,
-    payload: SubAgentSkinMetadataUpdateRequest,
-    user: UserContext = Depends(current_user),
-):
-    _require_platform_admin(user)
-    async with async_session() as session:
-        try:
-            result = await sub_agent_skin_service.update_skin_metadata(
-                session,
-                user,
-                skin_id,
-                name=payload.name,
-                description=payload.description,
-            )
-            await session.commit()
-            return result
-        except sub_agent_skin_service.SubAgentSkinError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.delete("/presentation/admin/skins/{skin_id}")
-async def delete_sub_agent_skin(
-    skin_id: str,
-    user: UserContext = Depends(current_user),
-):
-    _require_platform_admin(user)
-    async with async_session() as session:
-        try:
-            result = await sub_agent_skin_service.delete_skin(session, user, skin_id)
-            await session.commit()
-            return result
-        except sub_agent_skin_service.SubAgentSkinError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.get("/presentation/admin/skins/{skin_id}/export")
-async def export_sub_agent_skin(
-    skin_id: str,
-    user: UserContext = Depends(current_user),
-):
-    _require_platform_admin(user)
-    async with async_session() as session:
-        try:
-            skin, package = await sub_agent_skin_service.export_skin_package(session, user, skin_id)
-        except sub_agent_skin_service.SubAgentSkinError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    safe_key = re.sub(r"[^a-z0-9-]", "-", skin.skin_key.lower()).strip("-") or "sub-agent-skin"
-    safe_version = re.sub(r"[^0-9.]", "", skin.version) or "1.0.0"
-    return Response(
-        content=package,
-        media_type="application/vnd.axiom.skin+zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{safe_key}-{safe_version}.axiomskin"',
-            "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
-
-
-@router.get("/presentation/skins/{skin_id}/assets/{asset_key}")
-async def get_sub_agent_skin_asset(
-    skin_id: str,
-    asset_key: str,
-    user: UserContext = Depends(current_user),
-):
-    async with async_session() as session:
-        try:
-            asset = await sub_agent_skin_service.read_skin_asset(
-                session, skin_id, asset_key,
-            )
-        except sub_agent_skin_service.SubAgentSkinError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    return Response(
-        content=bytes(asset.content),
-        media_type=asset.mime_type,
-        headers={
-            "Cache-Control": "private, max-age=31536000, immutable",
-            "ETag": f'"{asset.sha256}"',
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
 
 
 # ---------- 定义 ----------
@@ -1214,9 +1028,6 @@ async def save_definition(payload: DefinitionSaveRequest, user: UserContext = De
         ).scalar_one_or_none()
         had_draft = bool(previous_definition and previous_definition.draft_json)
         draft_changed = (previous_definition.draft_json if previous_definition else None) != payload.workflowJson
-        # 保存草稿即完成一次“给智能体穿衣”：同时校验全局皮肤安装状态、智能体归属和素材清单，
-        # 再把草稿选择写入独立 assignment；不能只信 Vue 提交的 preset key。
-        await presentation_service.sync_draft_assignment(session, app, payload.workflowJson, user)
         if draft_changed:
             record_app_audit(
                 session,
@@ -1599,12 +1410,6 @@ async def _validate_before_publish(session, user, workflow_json: str, app_id: st
             400,
             {"message": "工作流校验未通过，无法提交发布", "code": "definition_invalid", "problems": problems},
         )
-    await presentation_service.validate_definition_for_app(
-        session,
-        app,
-        workflow_json,
-        user=user,
-    )
 
 
 async def _do_submit_review(
@@ -1630,7 +1435,6 @@ async def _do_submit_review(
     await _validate_before_publish(session, user, workflow_json, app_id)
     if bool(getattr(app, "api_enabled", False)):
         validate_api_workflow_capabilities(workflow_json, external_context_ready=True)
-    await presentation_service.sync_draft_assignment(session, app, workflow_json, user)
 
     definition = (
         await session.execute(select(WorkflowDefinition).where(WorkflowDefinition.app_id == app_id))
@@ -1711,16 +1515,9 @@ async def _do_publish_now(
     await _validate_before_publish(session, user, workflow_json, app.id)
     if bool(getattr(app, "api_enabled", False)):
         validate_api_workflow_capabilities(workflow_json, external_context_ready=True)
-    await presentation_service.sync_draft_assignment(session, app, workflow_json, user)
     # 重新提交发布是明确的“上线”意图。app_info.status=0 只表示此前被下架，
     # 不能在新的已通过版本上继续把应用锁死为停用，否则前端会显示“通过”却始终“已下架”。
     definition = await _upsert_definition(session, app.id, workflow_json, publish=True)
-    await presentation_service.promote_published_assignment(
-        session,
-        app,
-        workflow_json,
-        version_no=definition.published_version,
-    )
     version = WorkflowVersion(
         id=uuid.uuid4().hex,
         app_id=app.id,
@@ -1984,13 +1781,6 @@ async def review_approve(payload: ReviewActionRequest, user: UserContext = Depen
             raise HTTPException(404, "应用不存在")
         if bool(getattr(app, "api_enabled", False)):
             validate_api_workflow_capabilities(version.definition_json or "", external_context_ready=True)
-        # 皮肤可能在“提交审核 → 审核通过”之间被删除，上线动作必须再次检查。
-        await presentation_service.promote_published_assignment(
-            session,
-            app,
-            version.definition_json or "",
-            version_no=version.version_no,
-        )
         definition = (
             await session.execute(select(WorkflowDefinition).where(WorkflowDefinition.app_id == version.app_id))
         ).scalar_one_or_none()
@@ -2210,12 +2000,6 @@ async def _rollback_to_version(
         published_at=func.now(),
     )
     session.add(new_version)
-    await presentation_service.promote_published_assignment(
-        session,
-        app,
-        target.definition_json or "",
-        version_no=new_no,
-    )
     definition.published_json = target.definition_json
     definition.published_version = new_no
     definition.status = "published"
@@ -2581,7 +2365,6 @@ async def admin_delete(id: str, user: UserContext = Depends(current_user)):
         app = await _get_app(session, id)
         record_app_audit(session, app=app, action="delete", actor=user, before=_app_audit_snapshot(app))
         await retire_app_info_catalog_entry(session, id)
-        await presentation_service.delete_assignment(session, id)
         await session.execute(sa_delete(WorkflowVersion).where(WorkflowVersion.app_id == id))
         await session.execute(sa_delete(WorkflowDefinition).where(WorkflowDefinition.app_id == id))
         await session.execute(sa_delete(WorkflowAcl).where(WorkflowAcl.app_id == id))
@@ -2817,30 +2600,14 @@ async def run_app_meta(
             workflow_json = await _load_draft_preview_workflow(session, appId, user)
             data = _app_dict(app, "EDITOR")
             data["previewMode"] = True
-            data.update(
-                await _verified_run_chat_config(
-                    session,
-                    app,
-                    workflow_json,
-                    user,
-                    presentation_scope="draft",
-                )
-            )
+            data.update(_extract_run_chat_config(workflow_json, user))
             return data
         if previewVersionId:
             app = await _get_app(session, appId)
             workflow_json = await _load_review_preview_workflow(session, appId, previewVersionId, user)
             data = _app_dict(app, "REVIEWER")
             data["previewMode"] = True
-            data.update(
-                await _verified_run_chat_config(
-                    session,
-                    app,
-                    workflow_json,
-                    user,
-                    presentation_scope="version",
-                )
-            )
+            data.update(_extract_run_chat_config(workflow_json, user))
             return data
         app = await _require_run_access(session, appId, user)
         permission = await _share_permission(session, app, user) or "RUNNER"
@@ -2848,15 +2615,7 @@ async def run_app_meta(
             await session.execute(select(WorkflowDefinition).where(WorkflowDefinition.app_id == appId))
         ).scalar_one_or_none()
         data = _app_dict(app, permission)
-        data.update(
-            await _verified_run_chat_config(
-                session,
-                app,
-                definition.published_json if definition else None,
-                user,
-                presentation_scope="published",
-            )
-        )
+        data.update(_extract_run_chat_config(definition.published_json if definition else None, user))
         return data
 
 

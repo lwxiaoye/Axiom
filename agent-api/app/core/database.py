@@ -23,7 +23,7 @@ Base = declarative_base()
 # 「两条迁移命令只跑了 -n runtime 那条」——库里停在旧 revision 照样绿灯，与 migrations/README.md
 # 承诺的 fail fast 不符。与 runtime_db.RUNTIME_SCHEMA_HEAD 同款语义、同款严格度。
 # 新增 mysql 迁移后必须同步改这里；忘了会被 tests/test_schema_head_sync.py 拦下。
-MYSQL_SCHEMA_HEAD = "mysql_0022_merge_work_folders"
+MYSQL_SCHEMA_HEAD = "mysql_0023_drop_skins"
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

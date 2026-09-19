@@ -243,13 +243,8 @@ async def test_real_acceptance_uses_module_policy_and_preserves_shared_job_path(
 
 @pytest.mark.parametrize(("method", "path", "payload"), [
     ("GET", "/campus-assistant/admin/config", {}),
-    ("GET", "/campus-assistant/admin/skins", {}),
-    ("GET", "/campus-assistant/admin/skins/mcs_1", {}),
-    ("PATCH", "/campus-assistant/admin/skins/mcs_1", {"json": {"name": "name"}}),
-    ("DELETE", "/campus-assistant/admin/skins/mcs_1", {}),
-    ("POST", "/campus-assistant/admin/skins/import", {
-        "files": {"file": ("skin.axiomskin", b"invalid", "application/zip")},
-    }),
+    ("POST", "/campus-assistant/admin/draft", {}),
+    ("GET", "/campus-assistant/admin/releases", {}),
 ])
 @pytest.mark.asyncio
 async def test_admin_boundary_is_unchanged_using_asgi_transport(method, path, payload):
