@@ -54,10 +54,11 @@ async def _require_access(knowledge_id: str, user: UserContext) -> dict[str, Any
     base = await _load(knowledge_id, user)
     if base is None:
         raise HTTPException(404, "知识库不存在")
-    # permission_for 把「所有者 / 管理员 / ACL 命中」统一成一个权限值，
-    # None 就是无权访问。
+    # permission_for 把「所有者 / ACL 命中」统一成一个权限值，None 就是无权访问。
+    # 回 404 而不是 403：知识库是用户隐私，与会话、文件、技能同一口径——不向无权者
+    # 暴露「存在」这个事实。
     if base.get("currentPermission") is None:
-        raise HTTPException(403, "没有该知识库的访问权限")
+        raise HTTPException(404, "知识库不存在")
     return base
 
 

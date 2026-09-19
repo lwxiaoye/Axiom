@@ -205,11 +205,13 @@ async def permission_for(
 ) -> Optional[str]:
     """返回 user 对该库的权限；None 表示无权访问。
 
-    所有者恒为 OWNER（不依赖 ACL 表里那条 OWNER 记录是否还在），管理员按
-    OWNER 处理，其余看 ACL。
+    所有者恒为 OWNER（不依赖 ACL 表里那条 OWNER 记录是否还在），其余看 ACL。
+    **管理员没有旁路**：用户的知识库是隐私（2026-09-19 拍板，与技能同一口径），
+    管理员只能看到自己建的和别人显式授权给他的。is_admin 形参保留只为兼容调用方，
+    不再参与判定。
     """
     uid = str(user_id)
-    if str(row.owner_user_id) == uid or is_admin:
+    if str(row.owner_user_id) == uid:
         return "OWNER"
     async with async_session() as session:
         permission = (await session.execute(
