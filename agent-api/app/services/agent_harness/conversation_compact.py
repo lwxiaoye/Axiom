@@ -71,7 +71,12 @@ COMPACT_USER_MESSAGE_MAX_TOKENS = 20_000
 COMPACT_TURN_TIMEOUT_SECONDS = 90
 COMPACT_MAX_OUTPUT_TOKENS = 4_096
 # Each segment has one audited physical request; overflow never discards source and retries.
-MAX_PROVIDER_ATTEMPTS = 1
+# 第二次只用于「finish_reason=length」：思考型模型（deepseek 等）的推理 token 也算在
+# max_tokens 里，4K 预算常常还没写到摘要正文就被截断，整段压缩永远失败、每步都重来
+# （2026-09-19 线上 deepseek-flash 会话每 40s 一条 compaction failed: length）。
+MAX_PROVIDER_ATTEMPTS = 2
+COMPACT_LENGTH_RETRY_BOOST = 4
+COMPACT_LENGTH_RETRY_CAP = 16_384
 COMPACTION_FAILURE_DEDUP_SECONDS = 300.0
 _COMPACTION_FAILURES: dict[str, float] = {}
 
@@ -384,6 +389,7 @@ async def _generate_compaction_segment(
     selected_attempt_id = ""
     try:
         async with httpx.AsyncClient(timeout=float(COMPACT_TURN_TIMEOUT_SECONDS)) as client:
+            output_limit = _compaction_output_limit(model)
             for attempt in range(MAX_PROVIDER_ATTEMPTS):
                 prompt_messages = list(working)
                 prompt_messages.append({"role": "user", "content": SUMMARIZATION_PROMPT + extra_instructions})
@@ -393,7 +399,7 @@ async def _generate_compaction_segment(
                         "input": messages_to_responses_input(prompt_messages),
                         "stream": False,
                         "store": False,
-                        "max_output_tokens": _compaction_output_limit(model),
+                        "max_output_tokens": output_limit,
                     }
                     endpoint = "responses"
                 else:
@@ -401,7 +407,7 @@ async def _generate_compaction_segment(
                         "model": model,
                         "messages": prompt_messages,
                         "stream": False,
-                        "max_tokens": _compaction_output_limit(model),
+                        "max_tokens": output_limit,
                     }
                     endpoint = "chat/completions"
                 current_attempt = await model_usage_audit.begin_attempt(
@@ -469,7 +475,12 @@ async def _generate_compaction_segment(
                             error_code=f"chat_{reason or 'missing_finish_reason'}", committed=False,
                         )
                         current_finished = True
-                        raise RuntimeError(f"compaction Chat request did not complete: {reason or 'missing_finish_reason'}")
+                        last_error = RuntimeError(f"compaction Chat request did not complete: {reason or 'missing_finish_reason'}")
+                        if reason == "length" and attempt + 1 < MAX_PROVIDER_ATTEMPTS:
+                            previous_attempt_id = selected_attempt_id
+                            output_limit = min(COMPACT_LENGTH_RETRY_CAP, output_limit * COMPACT_LENGTH_RETRY_BOOST)
+                            continue
+                        raise last_error
                 if use_responses and response_status != "completed":
                     terminal_status = (
                         response_status
