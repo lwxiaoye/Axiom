@@ -2331,7 +2331,7 @@ export async function decideGatewayApproval(
   callId: string,
   approved: boolean,
 ): Promise<{ status: string }> {
-  return requestAgentApi(`/workflow/gateway/${approved ? 'approve' : 'reject'}`, {
+  return requestAgentApi(`/gateway/${approved ? 'approve' : 'reject'}`, {
     method: 'POST',
     body: JSON.stringify({ callId }),
   });
