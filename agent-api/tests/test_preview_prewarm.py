@@ -35,18 +35,19 @@ class PreviewPrewarmTests(unittest.TestCase):
         asyncio.run(_outer())
 
     def test_supported_format_triggers_conversion(self):
-        """docx/pptx/xlsx:后台预转被触发一次。"""
+        """docx/pptx:后台预转被触发一次。"""
         self._install()
-        # 实际支持集 = _PREVIEW_PDF_EXTS = {.doc/.docx/.ppt/.pptx/.xls/.xlsx}
-        for name in ("方案.docx", "旧版.doc", "汇报.pptx", "旧版.ppt", "数据.xlsx", "旧版.xls"):
+        # 实际支持集 = _PREVIEW_PDF_EXTS = {.doc/.docx/.ppt/.pptx}
+        for name in ("方案.docx", "旧版.doc", "汇报.pptx", "旧版.ppt"):
             self.calls.clear()
             self._drive(lambda n=name: ufs.schedule_preview_prewarm("u1", "F1", n))
             self.assertEqual(self.calls, [("u1", "F1")], f"{name} 应触发预转")
 
     def test_unsupported_format_skipped(self):
-        """图片/纯文本/无扩展名:直接跳过,不起沙箱。"""
+        """图片/纯文本/表格/无扩展名:直接跳过,不起沙箱。
+        表格前端走 @vue-office / 解析文本缩略，不请求 PDF，预转只会白起沙箱。"""
         self._install()
-        for name in ("图表.png", "说明.txt", "笔记.md", "无扩展名", ""):
+        for name in ("图表.png", "说明.txt", "笔记.md", "数据.xlsx", "旧版.xls", "无扩展名", ""):
             self._drive(lambda n=name: ufs.schedule_preview_prewarm("u1", "F1", n))
         self.assertEqual(self.calls, [], "非版式格式不应触发预转")
 

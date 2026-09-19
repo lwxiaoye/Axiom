@@ -1954,7 +1954,9 @@ async def delete_file(user_id: str, file_id: str) -> None:
 # docx/pptx 的纯前端渲染保真度有限（浏览器缺字体出 tofu 乱码符号、复杂版式走样）。
 # 这里经沙箱 LibreOffice 转 PDF（字体在沙箱内嵌入渲染），浏览器原生展示 PDF——
 # 与文档工厂同一转换内核（doc_factory 已验 Word→PDF 含中文）。
-_PREVIEW_PDF_EXTS = {".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}
+# 表格不在此列：xlsx 前端走 @vue-office 交互表格、缩略图用解析后的表格文本，.xls 直接引导
+# 下载，没有任何入口请求它们的 PDF——留在集合里只会在每次保存时白起一个 LibreOffice 沙箱。
+_PREVIEW_PDF_EXTS = {".doc", ".docx", ".ppt", ".pptx"}
 _PREVIEW_CONVERT_TIMEOUT_MS = 120_000
 
 
