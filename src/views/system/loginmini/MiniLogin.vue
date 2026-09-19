@@ -246,7 +246,12 @@
     if (!body?.success) throw new Error(body?.message || '注册失败');
     const data = body.result;
     if (!data?.token) throw new Error('注册成功但未返回登录凭证，请改用登录');
-    $ls.set(REMEMBER_USERNAME_KEY, form.username);
+    // 注册和登录一个口径：勾了「记住我」才记，公用电脑上别把上一个注册者的账号留给下一个人
+    if (remember.value) {
+      $ls.set(REMEMBER_USERNAME_KEY, form.username);
+    } else {
+      $ls.remove(REMEMBER_USERNAME_KEY);
+    }
     await userStore.afterLoginAction(true, data);
   }
 
