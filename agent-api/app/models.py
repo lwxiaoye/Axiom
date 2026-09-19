@@ -153,131 +153,6 @@ class EmbeddingModel(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
-class AgentIndexEvent(Base):
-    """索引事件幂等表，防止重复处理。"""
-    __tablename__ = "ai_agent_index_event"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    event_id = Column(String(64), primary_key=True)
-    event_type = Column(String(32))
-    agent_id = Column(String(64))
-    source_version = Column(BigInteger)
-    processed_at = Column(DateTime, server_default=func.now())
-
-
-class WorkflowApp(Base):
-    """工作台 AI 应用（智能体/工具），运行时归 agent-api，独立于 Java app_info。"""
-    __tablename__ = "agent_workflow_app"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    id = Column(String(64), primary_key=True)
-    tenant_id = Column(String(32), default="0")
-    # simple / chatAgent / workflow / workflowTool / httpToolSet（对齐 v1.9 §10.5.2）
-    ai_app_type = Column(String(32), nullable=False, default="workflow")
-    name = Column(String(128), nullable=False)
-    description = Column(String(512), default="")
-    app_category = Column(String(64), nullable=True)
-    app_icon = Column(String(512), default="")
-    config_json = Column(Text, nullable=True)
-    status = Column(String(32), nullable=False, default="draft")  # draft/published/unpublished
-    owner_user_id = Column(String(64), index=True, nullable=False)
-    owner_username = Column(String(128), default="")
-    published_at = Column(DateTime, nullable=True)
-    published_by = Column(String(64), nullable=True)
-    # 公开调用是应用级配置；发布本身始终进入智能体广场。
-    api_enabled = Column(Boolean, nullable=False, default=False)
-    iframe_embed_enabled = Column(Boolean, nullable=False, default=False)
-    create_time = Column(DateTime, server_default=func.now())
-    update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class WorkflowDefinition(Base):
-    """工作流定义：draft/published 双份 JSON（持久化信封含 fastgpt 画布模型）。"""
-    __tablename__ = "agent_workflow_definition"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    id = Column(String(64), primary_key=True)
-    app_id = Column(String(64), index=True, unique=True, nullable=False)
-    draft_json = Column(MEDIUMTEXT, nullable=True)
-    published_json = Column(MEDIUMTEXT, nullable=True)
-    published_version = Column(Integer, default=0)
-    status = Column(String(32), default="draft")
-    create_time = Column(DateTime, server_default=func.now())
-    update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class WorkflowVersion(Base):
-    """工作流 / 对话 Agent 发布版本快照（不可变）+ 审批状态机（WS2/WS3）。
-
-    每次「提交发布」冻结当前草稿为一条 pending_review 版本；审核通过即提升为线上
-    （写回 definition.published_json + published_version 指针）。历史版本保留、可回滚。
-    回滚 = 克隆目标历史版本为新 approved 版本并立即上线（版本号单调递增、留审计）。
-    """
-
-    __tablename__ = "agent_workflow_version"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    id = Column(String(64), primary_key=True)
-    app_id = Column(String(64), index=True, nullable=False)
-    version_no = Column(Integer, nullable=False)            # 应用内单调递增
-    ai_app_type = Column(String(32), default="workflow")   # 快照类型，便于审核台/管理台展示
-    definition_json = Column(MEDIUMTEXT, nullable=True)     # 不可变画布快照
-    config_json = Column(Text, nullable=True)              # 提交时应用级配置快照
-    # pending_review / approved / rejected / cancelled / archived
-    status = Column(String(24), nullable=False, default="pending_review", index=True)
-    change_note = Column(String(1024), default="")
-    visible_role_ids = Column(Text, nullable=True)          # JSON array，提交发布时选择的可见角色
-    visible_dept_ids = Column(Text, nullable=True)          # JSON array，提交发布时选择的可见部门
-    # 发布通道和嵌入源随审批版本冻结；旧版本由迁移回填 marketplace，写入侧在发布策略统一校验。
-    publish_channels = Column(Text, nullable=True)          # JSON array: marketplace / api
-    embed_origins_json = Column(Text, nullable=True)        # JSON array: exact HTTPS origins
-    # 路由元数据快照（语义发现升级 §八/§九）：{routeDescription, triggerExamples,
-    # negativeExamples, tags}。随版本冻结、不可变；仅 approved 成为线上后才同步进
-    # CapabilityRegistry/Qdrant；回滚即恢复该版本的 routing_json 并重建路由索引。
-    routing_json = Column(MEDIUMTEXT, nullable=True)
-    submitted_by = Column(String(64), nullable=True, index=True)
-    submitted_by_name = Column(String(128), default="")
-    submitted_at = Column(DateTime, server_default=func.now())
-    reviewed_by = Column(String(64), nullable=True)
-    reviewed_by_name = Column(String(128), default="")
-    reviewed_at = Column(DateTime, nullable=True)
-    review_comment = Column(String(1024), default="")
-    published_at = Column(DateTime, nullable=True)          # 成为线上的时间
-    create_time = Column(DateTime, server_default=func.now())
-
-
-class WorkflowAcl(Base):
-    """应用授权：按用户/角色/部门授予查看或编辑权限。"""
-    __tablename__ = "agent_workflow_acl"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    id = Column(String(64), primary_key=True)
-    app_id = Column(String(64), index=True, nullable=False)
-    subject_type = Column(String(16), nullable=False)  # USER / ROLE / DEPARTMENT
-    subject_id = Column(String(64), nullable=False)
-    permission = Column(String(16), nullable=False, default="VIEWER")  # VIEWER / EDITOR
-    create_time = Column(DateTime, server_default=func.now())
-
-
-class WorkflowAdminAudit(Base):
-    """工作台应用的关键操作审计（所有者、编辑者、审核员与管理员）。"""
-
-    __tablename__ = "agent_workflow_admin_audit"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    id = Column(String(64), primary_key=True)
-    tenant_id = Column(String(32), nullable=False, default="0", index=True)
-    app_id = Column(String(64), nullable=False, index=True)
-    action = Column(String(32), nullable=False, index=True)
-    actor_user_id = Column(String(64), nullable=False)
-    actor_username = Column(String(128), default="")
-    target_user_id = Column(String(64), nullable=True)
-    reason = Column(String(512), default="")
-    before_json = Column(Text, nullable=True)
-    after_json = Column(Text, nullable=True)
-    create_time = Column(DateTime, server_default=func.now(), index=True)
-
-
 class AuditEvent(Base):
     """Append-only user-facing audit ledger for cross-domain critical actions.
 
@@ -350,42 +225,10 @@ class AgentSkillVersion(Base):
     create_time = Column(DateTime, server_default=func.now())
 
 
-class CapabilityRegistry(Base):
-    """Capability Registry（Phase 7，§12）：自动路由候选与能力元数据的 agent-api 自托管版。
-
-    权威版是 Java/MySQL `app_info_capability_registry`（跨团队）；本表按发布态同步工作台智能体，
-    路由候选按 source_system/execution_scope/runtime_type/enabled/health/published_version 强过滤。
-    external_app 第三方条目由外部注册（默认无，R6 兜底就绪但内部 unmatched 前不启用）。
-    """
-
-    __tablename__ = "agent_capability_registry"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    app_id = Column(String(64), primary_key=True)
-    tenant_id = Column(String(32), nullable=False, default="0", server_default="0")
-    name = Column(String(128), nullable=False)
-    description = Column(String(512), default="")
-    ai_app_type = Column(String(32), default="workflow")
-    source_system = Column(String(32), default="agent_workbench", index=True)  # agent_workbench / external_app
-    execution_scope = Column(String(32), default="campus_internal")
-    runtime_type = Column(String(32), default="python_workflow")
-    published_version = Column(Integer, default=0)
-    enabled = Column(SmallInteger, default=1)
-    health = Column(String(16), default="healthy")  # healthy / degraded / down
-    capabilities_json = Column(Text, default="{}")  # {tools:[], knowledge:[], skills:[], nodeTypes:[]}
-    # 路由元数据（线上 approved 版本的 routing_json 副本，语义发现召回用）
-    routing_json = Column(MEDIUMTEXT, nullable=True)
-    # 最终路由文本（_route_text 产物）的 sha256：变更检测/避免无谓重建 embedding
-    route_text_hash = Column(String(64), nullable=True)
-    index_version = Column(Integer, nullable=False, default=1, server_default="1")
-    owner_user_id = Column(String(64), index=True)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
 class ToolGatewayCall(Base):
     """Tool Gateway（Phase 7，§11）：工具调用幂等去重 + 敏感工具审批的网关层记录。
 
-    业务工具本体在子智能体/其它团队；本表只记我方网关的幂等键与审批状态，
+    本表只记网关的幂等键与审批状态（主对话敏感工具的审批卡据此放行/拒绝），
     幂等键命中已完成调用即返回缓存结果（防重放重复副作用）。
     """
 
@@ -406,54 +249,6 @@ class ToolGatewayCall(Base):
     approved_by = Column(String(64), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class AppInfoCapabilityRegistry(Base):
-    """Capability Registry 权威表（§12.1）——与 Java 业务库同库 `ai_boot`，关联 `app_info`。
-
-    设计上由 Java 发布/删除流程写入 + 发签名变更事件；Java 侧接管前，agent-api 暂代写入
-    （仅 external_catalog 广场应用，从 `app_info` 同步）+ 消费签名事件（§12.2）。
-    DDL 见 docs/sql/app_info_capability_registry.sql（已在 ai_boot 建表）。
-    """
-
-    __tablename__ = "app_info_capability_registry"
-    __table_args__ = {"mysql_charset": "utf8mb4"}
-
-    id = Column(String(36), primary_key=True)
-    app_info_id = Column(String(36), nullable=False, index=True)
-    tenant_id = Column(String(32), default="0")
-    capability_code = Column(String(64), nullable=False)
-    capability_name = Column(String(128))
-    source_system = Column(String(32))            # agent_workbench / external_catalog
-    source_app_id = Column(String(64))
-    source_published_version = Column(Integer, default=0)
-    route_description = Column(Text)
-    trigger_examples = Column(Text)               # JSON 数组
-    negative_examples = Column(Text)              # JSON 数组
-    tags = Column(String(255))
-    capability_type = Column(String(32))          # subagent / skill / knowledge
-    execution_scope = Column(String(32))          # campus_internal / external_app
-    provider = Column(String(64))
-    data_sharing_policy = Column(String(32))
-    launch_mode = Column(String(32))              # call_subagent / redirect / iframe
-    runtime_type = Column(String(32))             # python_workflow / external_link
-    endpoint = Column(String(500))
-    remote_app_id = Column(String(128))
-    secret_ref = Column(String(128))              # 仅引用，明文 Secret 不进本表
-    protocol_version = Column(String(32))
-    input_schema = Column(MEDIUMTEXT)
-    output_schema = Column(MEDIUMTEXT)
-    risk_level = Column(String(16))
-    approval_policy = Column(String(32))
-    enabled = Column(SmallInteger, default=1)
-    version = Column(Integer, default=1)
-    timeout_seconds = Column(Integer, default=30)
-    health_status = Column(String(16), default="unknown")
-    owner = Column(String(64))
-    create_by = Column(String(50))
-    create_time = Column(DateTime, server_default=func.now())
-    update_by = Column(String(50))
-    update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class PlatformConfig(Base):

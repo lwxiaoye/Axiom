@@ -144,4 +144,5 @@ def test_mysql_interview_and_admin_audit_merge_to_one_head():
         "mysql_0015_work_folders",
     )
     assert chain["mysql_0023_drop_skins"] == "mysql_0022_merge_work_folders"
-    assert head == "mysql_0023_drop_skins"
+    assert chain["mysql_0024_drop_orchestration"] == "mysql_0023_drop_skins"
+    assert head == "mysql_0024_drop_orchestration"

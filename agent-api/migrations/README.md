@@ -4,7 +4,9 @@
 的裸 SQL 段）收编进 Alembic：正式环境大表 ALTER 不再发生在应用启动锁窗口内，滚动发布多副本
 不再各自并发跑 DDL。
 
-2026-09-19 源码核对：MySQL head 为 `mysql_0023_drop_skins`，Runtime head 为 `runtime_0023_eval_runs`。这是迁移文件与代码常量的版本，不代表任何运行数据库已经升级。
+2026-09-19 源码核对：MySQL head 为 `mysql_0024_drop_orchestration`，Runtime head 为 `runtime_0024_drop_eval_runs`。这是迁移文件与代码常量的版本，不代表任何运行数据库已经升级。
+
+`mysql_0024_drop_orchestration` / `runtime_0024_drop_eval_runs` 是**删表迁移**（工作流编排整体下线：agent_workflow_* / agent_api_* / agent_external_* / agent_capability_registry / app_info_capability_registry / ai_agent_index_event，以及 Runtime 的 workflow_evaluation_runs）。upgrade 不可逆——downgrade 只重建空表结构，数据不可恢复；上线前先确认这些表里没有还需要的数据（产品口径：线上没有已发布的工作流应用），并按「删表迁移要手工跑」的约定由人执行，不要靠 `MIGRATE_ON_STARTUP=true` 兜底（启动期 create_all 不会删表）。
 
 两条独立迁移链（互不干扰，各自独立 version 表）：
 
@@ -89,7 +91,7 @@ MySQL DDL 一律走本目录 `mysql` 链。历史库若曾误 stamp 过旧链，
 | `mysql` | `MYSQL_SCHEMA_HEAD` | `app/core/database.py` |
 | `runtime` | `RUNTIME_SCHEMA_HEAD` | `app/core/runtime_db.py` |
 
-MySQL 的两条 `0012` 分支（面试与管理员审计）已经由 `mysql_0013_merge` 合流，再经过对话日志、工作文件夹迁移到当前 head；不要凭文件编号挑一条分支单独 stamp。Runtime `0020` 为工作流工具结果增加执行归属，不创建第二套主对话 Run。
+MySQL 的两条 `0012` 分支（面试与管理员审计）已经由 `mysql_0013_merge` 合流，再经过对话日志、工作文件夹、删皮肤、删编排迁移到当前 head；不要凭文件编号挑一条分支单独 stamp。历史迁移里创建/修改工作流、Agent API 表的脚本仍保留在链上（全新库会先建后删，存量库行为不变；`mysql_0018` 补了表存在性守卫）。Runtime `0020`–`0022` 给审计表加的 workflow_execution_id / external_* 归属列保留为可空列，编排删除后不再有写入方。
 
 新增迁移后**必须同步改对应常量**；忘了会被 `tests/test_schema_head_sync.py` 拦下（该测试读
 `versions/<target>/` 算出真实链头再断言），不会拖到部署期才炸。

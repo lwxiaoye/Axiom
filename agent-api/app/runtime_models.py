@@ -410,41 +410,6 @@ class AgentModelAttemptAudit(RuntimeBase):
 AgentModelAttempt = AgentModelAttemptAudit
 
 
-class WorkflowEvaluationRun(RuntimeBase):
-    """Durable developer-visible trace of one workflow execution.
-
-    ``run_id`` is deliberately the workflow engine's existing run identifier.
-    Model-attempt audit rows use the same key, so a trace can be joined to
-    usage without duplicating model payloads into this product-facing record.
-    """
-
-    __tablename__ = "workflow_evaluation_runs"
-    __table_args__ = (
-        Index("ix_workflow_evaluation_runs_app_started", "app_id", "started_at"),
-        Index("ix_workflow_evaluation_runs_app_status", "app_id", "status"),
-    )
-
-    id = Column(String(64), primary_key=True)
-    app_id = Column(String(64), index=True, nullable=False)
-    user_id = Column(String(64), index=True, nullable=False)
-    mode = Column(String(32), nullable=False, default="execute")  # execute / debug / debug_step
-    definition_hash = Column(String(64), nullable=False, default="")
-    preview_only = Column(Boolean, nullable=False, default=False)
-    status = Column(String(32), index=True, nullable=False, default="running")
-    input_text = Column(Text, nullable=True)
-    variables = Column(_RUNTIME_JSON_DOCUMENT, nullable=False, default=dict)
-    output = Column(Text, nullable=True)
-    error_message = Column(Text, nullable=True)
-    duration_ms = Column(BigInteger, nullable=True)
-    node_runs = Column(_RUNTIME_JSON_DOCUMENT, nullable=False, default=list)
-    outputs = Column(_RUNTIME_JSON_DOCUMENT, nullable=False, default=dict)
-    edges = Column(_RUNTIME_JSON_DOCUMENT, nullable=False, default=list)
-    started_at = Column(DateTime, nullable=False, server_default=func.now())
-    completed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
 class AgentToolResultBlob(RuntimeBase):
     """Durable full tool output addressed by an opaque, ACL-checked handle."""
 
