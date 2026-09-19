@@ -4,7 +4,7 @@
 的裸 SQL 段）收编进 Alembic：正式环境大表 ALTER 不再发生在应用启动锁窗口内，滚动发布多副本
 不再各自并发跑 DDL。
 
-2026-09-15 源码核对：MySQL head 为 `mysql_0022_merge_work_folders`，Runtime head 为 `runtime_0023_eval_runs`。这是迁移文件与代码常量的版本，不代表任何运行数据库已经升级。
+2026-09-19 源码核对：MySQL head 为 `mysql_0023_drop_skins`，Runtime head 为 `runtime_0023_eval_runs`。这是迁移文件与代码常量的版本，不代表任何运行数据库已经升级。
 
 两条独立迁移链（互不干扰，各自独立 version 表）：
 
