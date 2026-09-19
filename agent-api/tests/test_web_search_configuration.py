@@ -37,12 +37,15 @@ async def test_deployment_engine_override_and_saved_fallback(monkeypatch, field,
     displayed = await config.get_web_search_masked()
     used = await config.get_web_search_config()
 
-    assert displayed[field] == (env_value if stored is None else stored)
-    assert used[field] == (env_value or displayed[field])
+    # env 只是缺省值：页面上看到什么，运行时就用什么。此前 env 非空会反过来覆盖
+    # 库里保存的值，管理员改完引擎保存成功、检索却仍打旧引擎（2af2f19 修掉）。
+    expected = env_value if stored is None else stored
+    assert displayed[field] == expected
+    assert used[field] == expected
 
 
 @pytest.mark.asyncio
-async def test_deployment_endpoint_override_preserves_saved_engine_choice(monkeypatch):
+async def test_saved_values_win_over_deployment_defaults(monkeypatch):
     monkeypatch.setattr(config.settings, "WEB_SEARCH_SEARXNG_URL", "http://127.0.0.1:8085")
     monkeypatch.setattr(config.settings, "WEB_SEARCH_SEARXNG_ENGINES", "")
     monkeypatch.setattr(config.settings, "WEB_SEARCH_SEARXNG_IMAGE_ENGINES", "")
@@ -53,5 +56,6 @@ async def test_deployment_endpoint_override_preserves_saved_engine_choice(monkey
 
     used = await config.get_web_search_config()
 
-    assert used["searxngUrl"] == "http://127.0.0.1:8085"
+    # 保存过的地址与引擎都生效；env 里的地址不再在运行时覆盖它
+    assert used["searxngUrl"] == "http://search.internal:8085"
     assert used["searxngEngines"] == "saved-engine"
