@@ -38,6 +38,13 @@ def test_auth_api_bypasses_environment_proxy(monkeypatch):
         for key in ("NO_PROXY", "no_proxy"):
             monkeypatch.setenv(key, "")
         monkeypatch.setattr(auth.settings, "AUTH_API_BASE", f"http://127.0.0.1:{server.server_port}")
+        # 鉴权成功后会把 userInfo upsert 进 sys_user；本测试只关心代理，且不该往任何真实库写测试行
+        from app.services import sys_user_sync
+
+        async def _no_sync(_info):
+            return False
+
+        monkeypatch.setattr(sys_user_sync, "sync_sys_user_profile", _no_sync)
         user = asyncio.run(auth._verify_token_with_auth_api("test-token"))
         assert user.user_id == "test-user"
         assert received == [("/sys/user/getUserInfo", "test-token")]

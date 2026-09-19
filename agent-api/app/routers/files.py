@@ -205,15 +205,21 @@ async def download_file(file_id: str, user: UserContext = Depends(current_user))
 
 @router.get("/{file_id}/preview")
 async def preview_file(file_id: str, user: UserContext = Depends(current_user)):
-    """版式文档（doc/docx/ppt/pptx）高保真预览：沙箱 LibreOffice 转 PDF 回流。
+    """在线预览，按格式分两种响应（前端 `fetchUserFilePreview` 按 Content-Type 分流）：
 
-    首次转换起沙箱（约 10-30s），结果按 file_id 落盘缓存，之后秒回。
+    - 版式文档（doc/docx/ppt/pptx/xls/xlsx）：沙箱 LibreOffice 转 PDF 回流 `application/pdf`。
+      首次转换起沙箱（约 10-30s），结果按 file_id+内容哈希落盘缓存，之后秒回。
+    - 文本类（txt/md/json/csv/log/xml/yaml/html）：不需要转换，直接回 JSON
+      `{kind:"text", content, truncated, ...}`（原文上限 1MB，超出截断并标记）。
+    - 其余格式：400，detail 是带扩展名的可读原因，前端原样展示、不得静默。
     """
     try:
-        pdf = await user_file_service.get_preview_pdf(user.user_id, file_id)
+        result = await user_file_service.get_preview(user.user_id, file_id)
     except UserFileError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
-    return Response(content=pdf, media_type="application/pdf")
+    if result.get("kind") == "pdf":
+        return Response(content=result["data"], media_type="application/pdf")
+    return result
 
 
 @router.get("/{file_id}/versions")

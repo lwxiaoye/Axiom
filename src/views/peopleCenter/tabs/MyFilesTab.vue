@@ -462,6 +462,7 @@ import {
   saveArtifactFile,
   compileSlidesDeck,
   fetchUserFileBlobUrl,
+  fetchUserFilePreview,
   fetchUserFilePreviewPdfUrl,
   fetchUserFileText,
   getUserFileContent,
@@ -1156,9 +1157,15 @@ async function openPreview(item: UserFileItem) {
       previewOpen.value = false;
       return;
     } else if (kind === 'markdown') {
-      const text = await fetchUserFileText(item.id);
+      // 走 /preview 的文本分支（后端不再对 md 回 400「不支持转换」，直接回原文）；
+      // 渲染仍在前端 markdown-it 完成
+      const preview = await fetchUserFilePreview(item.id);
       if (stale()) return;
-      openArticleViewer(item, renderMarkdownDoc(text));
+      if (preview.kind !== 'text') {
+        URL.revokeObjectURL(preview.url);
+        throw new Error('后端返回了非文本预览，无法按 Markdown 渲染');
+      }
+      openArticleViewer(item, renderMarkdownDoc(preview.text));
       previewOpen.value = false;
       return;
     } else if (kind === 'html') {
@@ -1179,22 +1186,57 @@ async function openPreview(item: UserFileItem) {
       setDocViewer({ item, custom: { type: 'binary' } });
       previewOpen.value = false;
     } else if (kind === 'text') {
-      const data = await getUserFileContent(item.id);
-      if (stale()) return;
-      // 后端对无法解码的未知二进制回 kind=binary（不再回乱码文本）
-      if (data.kind === 'binary') {
-        setDocViewer({ item, custom: { type: 'binary' } });
-      } else {
-        setDocViewer({
-          item,
-          codeText: data.text || '（未解析出文本内容）',
-          metaNote: data.truncated ? '内容过长，仅展示前一部分；完整内容请下载查看' : undefined,
-        });
+      // 'text' 是兜底档（txt/json/csv 也含 .py/.sql 等未列举扩展名）：
+      // ① 先走 /preview 文本分支——txt/md/json/csv 这类不需要转换，后端直接回原文（上限 1MB）；
+      // ② 后端按扩展名判为「不支持在线预览」（400）时回落 /content：它会嗅探二进制并解析
+      //    pdf/docx 之类，未知代码文件也能当文本读；两条路都失败才把后端原因抛给弹窗。
+      let codeText: string | null = null;
+      let truncated = false;
+      let previewReason = '';
+      try {
+        const preview = await fetchUserFilePreview(item.id);
+        if (stale()) {
+          if (preview.kind === 'pdf') URL.revokeObjectURL(preview.url);
+          return;
+        }
+        if (preview.kind === 'text') {
+          codeText = preview.text;
+          truncated = preview.truncated;
+        } else {
+          URL.revokeObjectURL(preview.url);
+        }
+      } catch (e) {
+        if (stale()) return;
+        previewReason = e instanceof Error ? e.message : '';
       }
+      if (codeText === null) {
+        let data: Awaited<ReturnType<typeof getUserFileContent>>;
+        try {
+          data = await getUserFileContent(item.id);
+        } catch (e) {
+          // 两条路都失败：优先展示 /preview 给的「哪个格式为什么不行」，而不是笼统的请求失败
+          throw new Error(previewReason || (e instanceof Error ? e.message : '加载失败'));
+        }
+        if (stale()) return;
+        // 后端对无法解码的未知二进制回 kind=binary（不再回乱码文本）
+        if (data.kind === 'binary') {
+          setDocViewer({ item, custom: { type: 'binary' } });
+          previewOpen.value = false;
+          return;
+        }
+        codeText = data.text;
+        truncated = data.truncated;
+      }
+      setDocViewer({
+        item,
+        codeText: codeText || '（未解析出文本内容）',
+        metaNote: truncated ? '内容过长，仅展示前一部分；完整内容请下载查看' : undefined,
+      });
       previewOpen.value = false;
     }
   } catch (e) {
     if (stale()) return;
+    // 弹窗里原样展示后端 detail（如「.xyz 格式暂不支持在线预览，请下载后本地查看」），不得静默
     previewError.value = e instanceof Error ? e.message : '加载失败';
   }
 }

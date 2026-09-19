@@ -252,9 +252,16 @@ export async function fetchUserFileBlobUrl(id: string, mime?: string): Promise<s
   return URL.createObjectURL(new Blob([await response.arrayBuffer()], { type: mime }));
 }
 
-/** 版式文档（doc/docx/ppt/pptx）高保真预览：后端沙箱 LibreOffice 转 PDF。
-    首次转换约几秒~30s（按 file_id 缓存后秒回）；调用方负责 revokeObjectURL。 */
-export async function fetchUserFilePreviewPdfUrl(id: string): Promise<string> {
+/** `/preview` 的两种响应：版式文档回 PDF blob；文本类（txt/md/json/csv…）回原文 JSON。 */
+export type UserFilePreview =
+  | { kind: 'pdf'; url: string }
+  | { kind: 'text'; filename: string; mime: string; text: string; truncated: boolean };
+
+/** 在线预览统一入口，按响应 Content-Type 分流（后端 `preview_file`）：
+    - application/pdf → blob URL（调用方负责 revokeObjectURL）；
+    - application/json → `{kind:"text", content, truncated}`，文本类不经转换直接回原文。
+    失败时抛出的 Error.message 就是后端 detail（带扩展名的可读原因），调用方必须展示、不得吞掉。 */
+export async function fetchUserFilePreview(id: string): Promise<UserFilePreview> {
   const response = await fetch(`/agent-api/files/${id}/preview`, { headers: agentAuthHeaders() });
   if (!response.ok) {
     let message = `预览生成失败：${response.status}`;
@@ -266,7 +273,28 @@ export async function fetchUserFilePreviewPdfUrl(id: string): Promise<string> {
     }
     throw new Error(message);
   }
-  return URL.createObjectURL(await response.blob());
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await response.json();
+    return {
+      kind: 'text',
+      filename: String(data?.filename || ''),
+      mime: String(data?.mime || ''),
+      text: String(data?.content ?? ''),
+      truncated: Boolean(data?.truncated),
+    };
+  }
+  return { kind: 'pdf', url: URL.createObjectURL(await response.blob()) };
+}
+
+/** 版式文档（doc/docx/ppt/pptx）高保真预览：后端沙箱 LibreOffice 转 PDF。
+    首次转换约几秒~30s（按 file_id 缓存后秒回）；调用方负责 revokeObjectURL。
+    只该对版式文档调用；后端若回了文本（说明调用方判错了格式）这里明确报错，
+    不把 JSON 当 PDF 塞给 pdf.js 去报一句看不懂的「Invalid PDF structure」。 */
+export async function fetchUserFilePreviewPdfUrl(id: string): Promise<string> {
+  const preview = await fetchUserFilePreview(id);
+  if (preview.kind !== 'pdf') throw new Error('该文件是文本，无需转换为 PDF 预览');
+  return preview.url;
 }
 
 /** 经带鉴权头的 fetch 拿 blob 再触发浏览器下载（下载端点需要鉴权，不能裸 <a href>） */

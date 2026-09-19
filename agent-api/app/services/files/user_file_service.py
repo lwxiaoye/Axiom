@@ -1992,9 +1992,80 @@ async def get_preview_pdf(user_id: str, file_id: str) -> bytes:
     缓存，内容一变即不命中旧缓存，重编译后的 PPT 不会再读到过期版本。"""
     row, key = await get_file(user_id, file_id)
     if not preview_pdf_supported(row.filename):
-        raise UserFileError("该格式不支持转换预览", status_code=400)
+        raise UserFileError(_preview_unsupported_reason(row.filename), status_code=400)
     async with _preview_lock_for(str(file_id)):
         return await _get_preview_pdf_locked(user_id, file_id, row, key)
+
+
+# 文本类预览的原文上限：txt/md/json/csv 本来就不需要经 LibreOffice 转换，直接回原文即可；
+# 但「我的文件」允许几十 MB 的日志/CSV，整份塞进一个预览响应没意义（浏览器也渲不动），
+# 超过上限截断并打 truncated 标记，前端提示「完整内容请下载」。
+_PREVIEW_TEXT_MAX_BYTES = 1 * 1024 * 1024
+# 预览可当文本读的扩展名 = 可写文本类 _TEXT_EXTS + 常见代码/配置文件。
+# 单独一个集合而不是往 _TEXT_EXTS 里加：_TEXT_EXTS 同时是写工具（update/create）的白名单，
+# 预览放宽不该顺带放宽模型可直接改写的文件范围。
+_PREVIEW_TEXT_EXTS = _TEXT_EXTS | {
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".css", ".less", ".scss", ".sql", ".sh", ".bat",
+    ".ini", ".toml", ".conf", ".cfg", ".properties", ".java", ".go", ".rs", ".c", ".h", ".cpp",
+    ".rb", ".php", ".tex", ".rst", ".srt", ".vtt",
+}
+
+
+def _preview_text_supported(filename: str, mime: str = "") -> bool:
+    if _is_text_file(filename, mime):
+        return True
+    return os.path.splitext(str(filename or "").lower())[1] in _PREVIEW_TEXT_EXTS
+
+
+def _preview_unsupported_reason(filename: str) -> str:
+    """400 的 detail 要能直接给用户看：说清「哪个格式」「为什么不行」「该怎么办」，
+    而不是笼统的「不支持转换预览」——那句话对 .txt 这种根本不需要转换的文件是误导。"""
+    ext = os.path.splitext(str(filename or "").lower())[1] or "（无扩展名）"
+    return f"{ext} 格式暂不支持在线预览，请下载后本地查看"
+
+
+def _truncate_text_bytes(data: bytes, cap: int) -> tuple[bytes, bool]:
+    """按字节上限截断，并把截断点退到 UTF-8 字符边界。
+
+    直接 data[:cap] 可能切在多字节字符中间：_decode_text 先按 utf-8 严格解码会失败，
+    转而按 gbk「成功」解出一整篇乱码——所以截断后先回退最多 3 个字节找到合法边界。"""
+    if len(data) <= cap:
+        return data, False
+    chunk = data[:cap]
+    for _ in range(3):
+        try:
+            chunk.decode("utf-8")
+            break
+        except UnicodeDecodeError:
+            chunk = chunk[:-1]
+    return chunk, True
+
+
+async def get_preview(user_id: str, file_id: str) -> dict:
+    """「预览」端点的统一分发：按格式决定回 PDF 字节还是回原文。
+
+    返回 {"kind": "pdf", "data": bytes} 或 {"kind": "text", "content": str, "truncated": bool, ...}。
+    此前端点只走 Office → PDF 转换，txt/md/json/csv 这类文本被一刀切拒成 400「该格式不支持
+    转换预览」——它们根本不需要转换。现在文本类直接读字节回原文（md 由前端 markdown-it 渲染），
+    版式文档照旧转 PDF，其余格式给出带扩展名的可读原因。"""
+    row, key = await get_file(user_id, file_id)
+    if preview_pdf_supported(row.filename):
+        async with _preview_lock_for(str(file_id)):
+            pdf = await _get_preview_pdf_locked(user_id, file_id, row, key)
+        return {"kind": "pdf", "data": pdf, "filename": row.filename}
+    if _preview_text_supported(row.filename, row.mime):
+        data = await _storage().read_bytes(key)
+        chunk, truncated = _truncate_text_bytes(data, _PREVIEW_TEXT_MAX_BYTES)
+        return {
+            "kind": "text",
+            "id": row.id,
+            "filename": row.filename,
+            "mime": row.mime or "",
+            "size": row.size_bytes,
+            "content": _decode_text(chunk),
+            "truncated": truncated,
+        }
+    raise UserFileError(_preview_unsupported_reason(row.filename), status_code=400)
 
 
 async def _get_preview_pdf_locked(user_id: str, file_id: str, row, key: str) -> bytes:
