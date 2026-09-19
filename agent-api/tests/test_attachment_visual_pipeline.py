@@ -185,3 +185,53 @@ async def test_subagent_file_read_can_see_stored_image_instead_of_binary_fallbac
     assert content["kind"] == "image"
     assert "校园操场" in content["text"]
     parse_mock.assert_awaited_once()
+
+
+def _scan_pdf_bytes() -> bytes:
+    """纯图片 PDF（无文字层）= 扫描件。"""
+    output = io.BytesIO()
+    Image.new("RGB", (200, 120), "white").save(output, format="PDF")
+    return output.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_scanned_pdf_falls_back_to_vision_model_when_no_custom_endpoint():
+    """线上只配了视觉模型、没有自建 OCR 端点：扫描件必须走视觉模型，而不是报「未配置端点」。"""
+    seen: list[str] = []
+
+    async def describe(content, ext, newapi_key, conf, *, audit_context=None):
+        seen.append(ext)
+        assert conf["strategy"] == "multimodal_model"
+        return "重庆工程学院 图书馆 开放时间 8:00-22:00"
+
+    with (
+        patch.object(
+            document_parse_service.cfg,
+            "get_ocr_config",
+            AsyncMock(return_value={"enabled": True, "strategy": "multimodal_model", "model": "vision", "endpointUrl": ""}),
+        ),
+        patch.object(document_parse_service, "_describe_image", describe),
+    ):
+        parsed = await document_parse_service.parse_upload("scan.pdf", _scan_pdf_bytes(), newapi_key="key")
+
+    assert seen == ["png"]
+    assert parsed["status"] == "ok"
+    assert parsed["text"].startswith("【扫描版 PDF（OCR 识别）】")
+    assert "重庆工程学院" in parsed["text"] and "8:00" in parsed["text"]
+
+
+@pytest.mark.asyncio
+async def test_scanned_pdf_without_any_ocr_config_keeps_explicit_failure():
+    """两条路都没配：仍是明确的 failed + 原因，不能悄悄去调一个没配模型名的视觉端点。"""
+    with (
+        patch.object(
+            document_parse_service.cfg,
+            "get_ocr_config",
+            AsyncMock(return_value={"enabled": False, "strategy": "none", "model": "", "endpointUrl": ""}),
+        ),
+        patch.object(document_parse_service, "_describe_image", AsyncMock(side_effect=AssertionError("must not call vision"))),
+    ):
+        parsed = await document_parse_service.parse_upload("scan.pdf", _scan_pdf_bytes(), newapi_key="key")
+
+    assert parsed["status"] == "failed"
+    assert "未配置 OCR 端点" in str(parsed.get("note") or "")

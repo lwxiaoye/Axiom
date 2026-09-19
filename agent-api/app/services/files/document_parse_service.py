@@ -1,7 +1,7 @@
 """统一文档解析（ADR-040）：会话上传文件抽取为文本，供主对话作为上下文注入。
 
 支持：纯文本/代码/csv/json、pdf（pypdf 提文字层；无文字层的扫描件逐页渲染成 PNG
-走自建 OCR 端点，见 _ocr_pdf_scanned）、docx（python-docx）、pptx（python-pptx）、
+走自建 OCR 端点、没填端点则走视觉模型，见 _ocr_pdf_scanned）、docx（python-docx）、pptx（python-pptx）、
 图片（走 OCR 策略）。Word/PDF/PPT 中夹带的照片、截图和图表会额外走视觉识别。
 OCR 策略读 `agent_platform_config.ocr`：custom_endpoint（自建端点）或 multimodal_model
 （经 New API 调用多模态模型）。
@@ -269,18 +269,28 @@ def _render_pdf_pages(
 async def _ocr_pdf_scanned(
     content: bytes,
     *,
+    newapi_key: str = "",
     audit_context: Optional[dict] = None,
 ) -> tuple[str, str, Optional[str]]:
-    """扫描版 PDF（无文字层）：逐页渲染成 PNG 交自建 OCR 端点识别。
+    """扫描版 PDF（无文字层）：逐页渲染成 PNG 交 OCR 识别。
 
-    固定走 `endpointUrl`（与图片的 strategy 解耦：图片可走视觉模型转述，文档 OCR
-    仍用自建端点——2026-07-10 用户拍板的分工）；端点未配置/失败时返回明确提示。
+    优先走 `endpointUrl`（与图片的 strategy 解耦：图片可走视觉模型转述，文档 OCR
+    仍用自建端点——2026-07-10 用户拍板的分工）。自建端点没填、但平台启用了
+    multimodal_model 策略时，逐页交视觉模型转述（复用 _describe_image，与图片同一条
+    链路）：线上只配了视觉模型、没有自建端点，此前扫描件在这里直接报「未配置 OCR
+    端点」，管理页刚配好的视觉模型对 PDF 扫描件完全不起作用。两者都没有才返回明确提示。
     返回 (text, status, note)：status=ok/partial/failed——占位提示文本继续喂给模型
     （模型需要知道读不到的原因），status 供上层结构化下发前端（附件置信度）。
     """
     conf = await cfg.get_ocr_config()
     url = str(conf.get("endpointUrl") or "").strip()
-    if not url:
+    use_vision = (
+        not url
+        and bool(conf.get("enabled"))
+        and conf.get("strategy") == "multimodal_model"
+        and bool(str(conf.get("model") or "").strip())
+    )
+    if not url and not use_vision:
         return "（扫描版 PDF 无文字层，且未配置 OCR 端点，无法提取文字）", "failed", "扫描版 PDF 未配置 OCR 端点"
     try:
         pages, total = await asyncio.to_thread(_render_pdf_pages, content, MAX_SCAN_PAGES)
@@ -295,6 +305,12 @@ async def _ocr_pdf_scanned(
 
     async def ocr_page(client: httpx.AsyncClient, idx: int, png: bytes) -> str:
         async with sem:
+            if use_vision:
+                # _describe_image 失败返回 ""，这里统一成与自建端点一致的失败占位
+                described = await _describe_image(
+                    png, "png", newapi_key, conf, audit_context=audit_context,
+                )
+                return described if described.strip() else f"（第 {idx + 1} 页 OCR 失败）"
             try:
                 file_payload = {"file": (f"page{idx + 1}.png", png, "image/png")}
                 _resp, data = await _audited_document_model_post(
@@ -820,7 +836,7 @@ async def parse_upload(
             if len(text.strip()) < SCAN_PDF_CHARS_PER_PAGE * max(1, npages):
                 if ocr_visual:
                     ocr_text, ocr_status, ocr_note = await _ocr_pdf_scanned(
-                        content, audit_context=audit_context,
+                        content, newapi_key=newapi_key, audit_context=audit_context,
                     )
                     if len(ocr_text.strip()) > len(text.strip()):
                         text = ocr_text
