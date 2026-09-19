@@ -54,9 +54,9 @@ describe('手机端登录与主对话布局契约', () => {
     expect(centerShell).toContain('class="compact-menu-trigger"');
     expect(centerShell).toContain('class="compact-nav-shortcuts"');
     expect(centerShell).toContain("label: '我的内容'");
-    expect(compactGroupsSource).toContain("['files', 'models'].includes(item.key)");
+    // 手机抽屉「我的内容」= 知识库 / 文件 / 模型配置（2026-09-19：知识库入口补回手机端）
+    expect(compactGroupsSource).toContain("['knowledge', 'files', 'models'].includes(item.key)");
     expect(compactGroupsSource).not.toContain("'myAgent'");
-    expect(compactGroupsSource).not.toContain("'knowledge'");
     expect(centerStyles).toContain('@media (max-width: 1024px)');
     expect(centerStyles).toContain('transform: translateX(-105%);');
     expect(centerStyles).toContain('.primary-nav.compact-open');

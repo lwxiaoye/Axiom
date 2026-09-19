@@ -826,7 +826,7 @@ def _build_system_prompt(
         "`/workspace/files/a.txt`，但在 bash 里必须写全 `/workspace/files/<名>`。\n"
     )
     base = (
-        "你是 Agent 综合平台的智能助手，正常回答用户的各种问题。\n"
+        "你是 AXIOM 校园智能体平台的智能助手，正常回答用户的各种问题。\n"
         "语言：始终使用中文回复；仅当用户明确要求其他语言时才切换。模型供应商返回的 "
         "reasoning_content 由平台通过独立瞬时通道展示；不要把它复制、改写或混入公开过程说明和最终回答。\n"
         "\n"

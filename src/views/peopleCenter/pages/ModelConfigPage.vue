@@ -51,7 +51,8 @@ import { requestAgentApi } from '../agentApi';
 type Platform = { configured: boolean; model: string; models?: string[] };
 type Config = { base_url: string; model: string; enabled: boolean; has_api_key: boolean; platform?: Platform };
 type Result = { success: boolean; message: string; latency_ms?: number };
-const form = reactive({ base_url: '', model: '', api_key: '', enabled: true });
+// 空表单默认不启用：开关亮着却什么都没填，容易让人以为「已经在用个人模型」
+const form = reactive({ base_url: '', model: '', api_key: '', enabled: false });
 const loading = ref(true);
 const loadError = ref('');
 const hasKey = ref(false);
@@ -62,9 +63,12 @@ const saving = ref(false);
 const feedback = ref<Result | null>(null);
 const busy = computed(() => testing.value || saving.value);
 watch(form, () => { feedback.value = null; });
+// 首次填入密钥就把开关打开：填了却没启用的配置等于没配，最容易让人误会
+watch(() => form.api_key, (value) => { if (value && !hasKey.value) form.enabled = true; });
 
 function apply(data: Config) {
-  Object.assign(form, { base_url: data.base_url, model: data.model, api_key: '', enabled: data.has_api_key ? data.enabled : true });
+  // 没存过密钥（还没配置）时开关按关显示；一旦填了密钥再保存，开关自动打开（见 save）
+  Object.assign(form, { base_url: data.base_url, model: data.model, api_key: '', enabled: data.has_api_key ? data.enabled : false });
   hasKey.value = data.has_api_key;
   if (data.platform) {
     Object.assign(platform, {

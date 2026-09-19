@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 import json
 import logging
@@ -151,19 +152,35 @@ def assistant_message(
     return msg
 
 
+# 只有 Chat Completions、没有 /responses 的官方端点：对着它们发 Responses 只会白吃一个 401/404。
+_CHAT_ONLY_HOSTS = ("api.deepseek.com",)
+
+
+def endpoint_is_chat_only(base_url: str) -> bool:
+    host = (urlsplit(str(base_url or "").strip()).hostname or "").lower()
+    return any(host == item or host.endswith("." + item) for item in _CHAT_ONLY_HOSTS)
+
+
 def model_uses_responses_transport(
     model: str,
     *,
     aliases: Iterable[str] = (),
     supports_responses: Optional[bool] = None,
+    base_url: str = "",
 ) -> bool:
     """Prefer Responses whenever the selected model can use it.
 
     DeepSeek remains an explicit product-level ``True`` even when the catalog omits
-    capability metadata. Other explicit catalog values are honored. Unknown models
-    optimistically try Responses; callers may fall back to Chat Completions only when
-    the endpoint rejects the request before any output or tool side effect.
+    capability metadata — that rule was written for DeepSeek served through New API,
+    whose adaptor speaks Responses. DeepSeek's own endpoint only has Chat Completions
+    (2026-09-19: ``api.deepseek.com/responses`` answers 401 for a key that works on
+    ``/chat/completions``), so a chat-only host wins over the model-name rule. Other
+    explicit catalog values are honored. Unknown models optimistically try Responses;
+    callers may fall back to Chat Completions only when the endpoint rejects the
+    request before any output or tool side effect.
     """
+    if base_url and endpoint_is_chat_only(base_url):
+        return False
     if model_is_deepseek(model, aliases=aliases):
         return True
     if supports_responses is not None:
@@ -256,6 +273,11 @@ def responses_api_is_unsupported(status_code: int, body: Any) -> bool:
     """Conservatively classify a zero-output Responses rejection as protocol-incompatible."""
     status = int(status_code or 0)
     if status in {404, 405, 501}:
+        return True
+    if status in {401, 403}:
+        # 同一把密钥在 /chat/completions 能过、在 /responses 却被拒：不少只做了 Chat
+        # Completions 的网关/官方端点对未知路径先回鉴权失败而不是 404。首次请求、零输出时
+        # 退回 Chat 再试一次；真的密钥错会在 Chat 那边再次 401，由调用方按鉴权失败收尾。
         return True
     if status == 500:
         # New API's DeepSeek adaptor reports a deterministic request-conversion gap as 500.

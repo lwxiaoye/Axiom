@@ -666,9 +666,9 @@ const compactNavGroups: CenterNavGroup[] = [
   {
     key: 'library',
     label: '我的内容',
-    // 手机/iPad 只保留文件入口；智能体与知识库仍保留在桌面端，不删除路由或权限。
-    // 对话历史 / 记忆在抽屉顶部的 compact-nav-shortcuts 里，这里不重复。
-    items: navItems.filter((item) => ['files', 'models'].includes(item.key)),
+    // 手机/iPad 也给知识库入口（2026-09-19 巡检：学生在手机上勾知识库时提示去「我的知识库」
+    // 上传，抽屉里却没有这一项）。对话历史 / 记忆在抽屉顶部的 compact-nav-shortcuts 里，这里不重复。
+    items: navItems.filter((item) => ['knowledge', 'files', 'models'].includes(item.key)),
   },
 ];
 const visibleNavGroups = computed(() => (isCompactShell.value ? compactNavGroups : desktopNavGroups));
@@ -1083,8 +1083,32 @@ onMounted(() => {
   window.addEventListener('resize', onCenterViewportResize);
   applyNavWidth();
   reloadApps();
-  // 只预加载对话历史。不要自动打开上次会话，否则从子智能体/其他板块回到 /center 会被拽进最近一轮。
-  void centerChat.restoreCurrentThread();
+  // 只预加载对话历史。不自动打开「上次会话」——从别的板块回到 /center 不该被拽进最近一轮；
+  // 但整页刷新要回到刷新前那个会话：会话 id 跟着写在 URL 的 ?thread= 里（见下方 watch），
+  // 这里按 URL 恢复。内置助手页（/center/chat/campus 等）自己管 ?thread=，这里只管主对话。
+  void centerChat.restoreCurrentThread().then(() => {
+    const requested = mainChatThreadFromRoute();
+    if (requested) void loadThread(requested);
+  });
+});
+
+const MAIN_CHAT_PATH = '/center/chat';
+
+function mainChatThreadFromRoute(): string {
+  if (route.path !== MAIN_CHAT_PATH) return '';
+  const raw = Array.isArray(route.query.thread) ? route.query.thread[0] : route.query.thread;
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+// 主对话当前会话 ↔ URL ?thread= 同步：切会话/新对话时改 URL（replace，不进历史栈），F5 后能回到原会话。
+watch(currentThreadId, (threadId) => {
+  if (route.path !== MAIN_CHAT_PATH) return;
+  const current = mainChatThreadFromRoute();
+  if ((threadId || '') === current) return;
+  const query = { ...route.query };
+  if (threadId) query.thread = threadId;
+  else delete query.thread;
+  void router.replace({ path: route.path, query });
 });
 
 onBeforeUnmount(() => {

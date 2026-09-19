@@ -155,6 +155,26 @@ _ENABLED_TTL_SEC = 60
 _ENABLED_GEN: Dict[str, int] = {}
 
 
+
+def _loads_json_lenient(content: str):
+    """模型的 JSON 输出经常带壳：```json 围栏、一句「以下是抽取结果：」前言、末尾附注。
+    先按原样解析，不行就截取第一个 [ / { 到最后一个 ] / } 之间的片段再解析；两次都失败才抛，
+    并把开头 80 字符带进异常，日志里不再只有一句 Expecting value (char 0)。"""
+    text = str(content or "").strip()
+    fenced = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        return json.loads(fenced)
+    except json.JSONDecodeError:
+        pass
+    starts = [i for i in (fenced.find("["), fenced.find("{")) if i >= 0]
+    ends = [i for i in (fenced.rfind("]"), fenced.rfind("}")) if i >= 0]
+    if starts and ends and max(ends) > min(starts):
+        try:
+            return json.loads(fenced[min(starts):max(ends) + 1])
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"模型输出不是 JSON（开头: {text[:80]!r}）")
+
 async def is_enabled(user_id: str, *, _now: Optional[float] = None) -> bool:
     """当前用户是否开启记忆（默认开）。带 60s 进程内缓存；Runtime 未配置视为开
     （反正 recall/store 自身对未配置降级 no-op，不影响主链路）。"""
@@ -1161,8 +1181,7 @@ async def extract_and_store(
                 ((response_payload.get("choices") or [{}])[0].get("message") or {}).get("content")
                 or "[]"
             )
-            content = content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-            items = json.loads(content)
+            items = _loads_json_lenient(content)
         except asyncio.CancelledError:
             await _finish_memory_model_audit(
                 audit, logical, attempt,

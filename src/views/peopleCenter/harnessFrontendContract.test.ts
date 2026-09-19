@@ -502,7 +502,10 @@ describe('主对话 Harness 前端契约', () => {
     expect(chatSource).toContain('await loadThreads()');
     expect(chatSource).toContain('if (viewVersion !== restoreToken) return;');
     expect(chatSource).toContain('if (viewVersion !== viewToken) return false;');
-    expect(centerSource).toContain('void centerChat.restoreCurrentThread();');
+    // 只预加载历史；唯一会打开会话的是 URL 里明确写着的 ?thread=（整页刷新回到原会话），不是「最近一条」
+    expect(centerSource).toContain('void centerChat.restoreCurrentThread().then(');
+    expect(centerSource).toContain('const requested = mainChatThreadFromRoute();');
+    expect(centerSource).not.toMatch(/loadThread\(threadList\.value\[0\]\.id/);
     expect(centerSource).not.toContain('void centerChat.loadThreads().finally');
     expect(centerSource).toContain('function openNewChat()');
     expect(centerSource).toContain('resetChat()');

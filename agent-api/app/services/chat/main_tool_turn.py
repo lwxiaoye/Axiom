@@ -1036,35 +1036,43 @@ async def run_agent_turn(env):
     web_enabled = False
     connector_block = ""
     kb_ctx = ""
-    try:
-        results = await asyncio.wait_for(
-            asyncio.gather(
-                _preflight_kb_tenant(),
-                _preflight_web(),
-                _preflight_connectors(),
-                _preflight_kb(),
-                return_exceptions=True,
-            ),
-            timeout=preflight_budget,
-        )
-        for i, r in enumerate(results):
-            if isinstance(r, BaseException):
-                logger.warning("tool preflight[%d] failed: %s", i, r)
-                continue
-            if i == 0:
-                kb_tenant = r
-            elif i == 1:
-                web_enabled = bool(r)
-            elif i == 2:
-                connector_block = str(r or "")
-            elif i == 3:
-                kb_ctx = str(r or "")
-    except asyncio.TimeoutError:
+    # 四路预检各自成 task、按预算 wait：预算耗尽时**已完成的照用**，只有没回来的那几路降级，
+    # 并把它们取消后收干净——原先 wait_for(gather(...)) 超时会把整个 gather 掐掉，四路全丢，
+    # 而且被取消的 gather 没人收尾，日志里刷「_GatheringFuture exception was never retrieved」。
+    preflight_tasks = [
+        asyncio.create_task(_preflight_kb_tenant()),
+        asyncio.create_task(_preflight_web()),
+        asyncio.create_task(_preflight_connectors()),
+        asyncio.create_task(_preflight_kb()),
+    ]
+    done, pending = await asyncio.wait(preflight_tasks, timeout=preflight_budget)
+    if pending:
         logger.warning(
-            "tool preflight 预算 %.1fs 耗尽，以降级能力面开跑（首帧优先）",
-            preflight_budget,
+            "tool preflight 预算 %.1fs 耗尽，%d/4 路未返回（%s），以降级能力面开跑（首帧优先）",
+            preflight_budget, len(pending),
+            ",".join(("kb_tenant", "web", "connectors", "kb")[preflight_tasks.index(t)] for t in pending),
         )
-        # 超时后至少再抢一次联网开关（几乎恒快，影响工具可见性）
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+    for i, task in enumerate(preflight_tasks):
+        if task not in done:
+            continue
+        exc = task.exception()
+        if exc is not None:
+            logger.warning("tool preflight[%d] failed: %s", i, exc)
+            continue
+        r = task.result()
+        if i == 0:
+            kb_tenant = r
+        elif i == 1:
+            web_enabled = bool(r)
+        elif i == 2:
+            connector_block = str(r or "")
+        elif i == 3:
+            kb_ctx = str(r or "")
+    if pending and preflight_tasks[1] in pending:
+        # 联网开关几乎恒快、又决定工具可见性：超时后再抢一次
         try:
             web_enabled = bool(await asyncio.wait_for(_preflight_web(), timeout=0.5))
         except Exception:  # noqa: BLE001

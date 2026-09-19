@@ -34,7 +34,7 @@
         </template>
       </p>
       <p v-if="uiPolicy?.welcomeHint && !presentationMode" class="chat-intro-hint">{{ uiPolicy.welcomeHint }}</p>
-      <p v-if="!presentationMode && !builtinAssistant" class="chat-intro-hint">可输入 <strong>@</strong> 使用智能体或 Skill</p>
+      <p v-if="!presentationMode && !builtinAssistant" class="chat-intro-hint">可输入 <strong>@</strong> 使用 Skill</p>
     </div>
     <InterviewSetup v-if="interviewMode && interview && !interview.hasSession.value" v-show="!chatMessages.length || !interview.busy.value" />
 

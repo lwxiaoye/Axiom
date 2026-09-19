@@ -249,6 +249,29 @@ def test_only_exact_structured_conversion_500_is_protocol_unsupported() -> None:
     ) is False
 
 
+def test_chat_only_host_overrides_deepseek_responses_contract() -> None:
+    # DeepSeek 官方端点只有 Chat Completions：即使模型名是 deepseek 也不走 Responses
+    assert model_uses_responses_transport(
+        "deepseek-flash", base_url="https://api.deepseek.com/v1"
+    ) is False
+    assert model_uses_responses_transport(
+        "deepseek-flash", base_url="https://api.deepseek.com"
+    ) is False
+    # 经 New API 之类网关的 DeepSeek 仍按产品契约走 Responses
+    assert model_uses_responses_transport(
+        "deepseek-flash", base_url="https://gateway.example.com/v1"
+    ) is True
+
+
+def test_auth_rejection_on_responses_allows_one_chat_fallback() -> None:
+    # 只做了 Chat 的端点对 /responses 先回 401/403 而不是 404：零输出时允许退回 Chat 再试
+    assert responses_api_is_unsupported(401, "Unauthorized") is True
+    assert responses_api_is_unsupported(403, {"error": {"message": "forbidden"}}) is True
+    # 429 / 502 仍是普通的上游故障，不当协议不兼容处理
+    assert responses_api_is_unsupported(429, "rate limited") is False
+    assert responses_api_is_unsupported(502, "bad gateway") is False
+
+
 def test_observed_model_capability_is_isolated_by_user_key() -> None:
     service = AgentService()
     service.remember_model_responses_capability("shared-model", "key-a", True)

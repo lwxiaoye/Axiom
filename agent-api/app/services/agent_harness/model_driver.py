@@ -67,6 +67,7 @@ from app.services.agent_harness.tool_result_store import (
 )
 from app.services.agent_harness.thread_projection_store import thread_projection_store
 from app.services.agent_harness.responses_protocol import (
+    endpoint_is_chat_only,
     ResponsesUnsupportedError,
     ResponsesTerminalError,
     ResponsesRoundState,
@@ -5065,9 +5066,12 @@ async def drive_model(
             model,
             aliases=transport_aliases,
             supports_responses=catalog_responses_capability,
+            base_url=base_url,
         )
         transport_source = (
-            "deepseek_contract"
+            "chat_only_host"
+            if not use_responses_transport and endpoint_is_chat_only(base_url)
+            else "deepseek_contract"
             if deepseek_transport_contract
             else "catalog"
             if catalog_responses_capability is not None

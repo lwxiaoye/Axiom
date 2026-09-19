@@ -70,7 +70,7 @@ def test_system_prompt_is_identical_across_minutes_and_has_only_date_timezone(mo
     second = turn_context_builder._build_system_prompt(memory_block="memory")
 
     assert first == second
-    assert first.startswith("你是 Agent 综合平台的智能助手")
+    assert first.startswith("你是 AXIOM 校园智能体平台的智能助手")
     parts = turn_context_builder.split_system_prompt_context(first)
     assert "memory" not in parts.stable_base
     assert parts.as_context_section()["memory"] == "memory"
