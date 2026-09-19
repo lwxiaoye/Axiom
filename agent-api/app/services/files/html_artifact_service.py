@@ -141,8 +141,31 @@ def _looks_like_local_image(reference: str, *, image_context: bool) -> bool:
     return posixpath.splitext(path)[1] in _IMAGE_EXTENSIONS
 
 
+# 标准库 mimetypes 在 3.11 且容器没有 /etc/mime.types 时不认识这几种（.webp 到 3.13 才内置），
+# 会把它们内嵌成 data:application/octet-stream——<source type>/srcset 与部分 CSS 引擎不会
+# 对 octet-stream 做图片嗅探，网页里图就是空的。凡在 _IMAGE_EXTENSIONS 白名单里的都自己兜底。
+_IMAGE_MIME_FALLBACK = {
+    ".apng": "image/apng",
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".jfif": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".webp": "image/webp",
+}
+
+
 def _data_url(path: str, data: bytes) -> str:
-    mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    mime = mimetypes.guess_type(path)[0]
+    if not mime or not mime.startswith("image/"):
+        ext = posixpath.splitext(urlsplit(str(path or "")).path.lower())[1]
+        mime = _IMAGE_MIME_FALLBACK.get(ext) or mime or "application/octet-stream"
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
 
 
