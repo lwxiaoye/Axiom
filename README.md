@@ -63,7 +63,7 @@ curl.exe http://127.0.0.1:8000/health/ready
 
 Compose 项目名为 `axiom`。本机若已有其他 MySQL，宿主端口映射为 `3307`。容器内部仍使用 `mysql:3306`。
 登录走 FastAPI 认证服务 `axiom-auth-api`（`127.0.0.1:9090`），默认用户名 `admin`，密码必须通过 `AXIOM_ADMIN_PASSWORD` 设置，没有内置密码，仍需输入图形验证码。Compose 配置中的本地端口仅绑定 `127.0.0.1`；旧容器需重新创建才会应用新绑定，以 `docker ps` 为准。
-认证状态保存于 `axiom_auth_data` 卷；重启保留会话，修改配置中的账号或密码会撤销旧会话。当前仅支持一个管理员，不支持创建用户、编辑角色或知识库管理；未实现接口明确报错。详见 [本地认证服务](auth-api/README.md)。
+认证状态保存于 `axiom_auth_data` 卷；重启保留会话，修改配置中的账号或密码会撤销旧会话。只有一个管理员（`admin`），学生在登录页自助注册为普通成员；不支持编辑角色，管理页的「用户」tab 只读。详见 [本地认证服务](auth-api/README.md)。
 
 `AXIOM_MODEL_BASE_URL` 配置模型 API 地址：可以是本机网关，也可以是兼容的云端服务。默认 `host.docker.internal:3001/v1` 只是地址，不表示模型已部署。仍需配置聊天模型及用户模型凭据；不能把密钥放入 `VITE_*`。
 本地镜像 `agent-api/Dockerfile.local` 不含 LibreOffice；Office 文档转换需要生产 `Dockerfile`。
