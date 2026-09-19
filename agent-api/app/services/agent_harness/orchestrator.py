@@ -372,8 +372,15 @@ _PPT_STYLE_REFERENCE_TURN_RE = re.compile(
     re.I,
 )
 _IMAGE_EDIT_TARGET_RE = re.compile(
-    r"(修改|编辑|处理|裁剪|抠图|去水印|换背景|调色).{0,10}"
-    r"(这张|该|上传|图片|照片)",
+    # 动作在前：「修改/裁剪/抠图…这张图片」
+    r"(修改|编辑|处理|裁剪|抠图|去水印|换背景|调色|美化|修图|P一下|加滤镜|加水印|压缩|旋转|翻转).{0,10}"
+    r"(这张|该|上传|图片|照片|截图)"
+    r"|"
+    # 对象在前：「把这张图片的背景换成蓝色」「这张照片的水印去掉」——要求点到图片的某个属性
+    # 再接改动动词，「这张图里的字是什么」这类问句不命中。
+    r"(这张|该|上传的?|这些)(图片?|照片|截图)的?[^。！？\n]{0,8}"
+    r"(背景|颜色|色调|尺寸|大小|分辨率|水印|亮度|对比度|方向|边框|文字|人物|logo|滤镜)"
+    r"[^。！？\n]{0,6}(换|改|去|加|调|裁|删|抠|换成|改成)",
     re.I,
 )
 _PPT_CREATE_RE = re.compile(
@@ -383,18 +390,68 @@ _PPT_CREATE_RE = re.compile(
 )
 
 
-def _attachment_is_reference_only(message: str, attachment: Any) -> bool:
-    """新建 PPT 时的图片可以是风格参考，不是 RevisionTarget。"""
-    text = str(message or "")
-    if not (_PPT_CREATE_RE.search(text) and _PPT_STYLE_REFERENCE_TURN_RE.search(text)):
-        return False
-    if _IMAGE_EDIT_TARGET_RE.search(text):
-        return False
+# 图片要作为**素材进工作区/沙箱**的话术：把图做成/嵌进某个文件产物。判据刻意收窄到
+# 「动作词 + 产物名」同现——「这张通知里期末考试是什么时候」「帮我看看这张图」这类看图
+# 问答绝不能命中；命中与否只影响图片走不走工作区，图片本身照样以 image 内容块进模型。
+_IMAGE_AS_MATERIAL_RE = re.compile(
+    r"(做成|做出|做一?[份个张页套版]|制成|生成|制作|设计|绘制|导出|转成|转换成|转为|存成|"
+    r"嵌入|插入|放进|放到|加到|贴到|合成|拼成)"
+    r"[\s\S]{0,40}"
+    r"(pptx?|演示文稿|幻灯片|海报|网页|html|word|docx|excel|xlsx|表格文件|pdf|长图|gif|视频|文件|素材库)",
+    re.I,
+)
+_IMAGE_NAME_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+
+
+def _is_image_attachment(attachment: Any) -> bool:
     kind = str(_att_field(attachment, "kind") or "").lower()
     name = str(_att_field(attachment, "filename") or "").lower()
-    return kind == "image" or name.endswith(
-        (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
-    )
+    return kind == "image" or name.endswith(_IMAGE_NAME_SUFFIXES)
+
+
+def _ppt_style_reference_turn(message: str) -> bool:
+    """新建 PPT 且话里在讲风格/参考：图片是视觉 DNA 参考，不是要改的东西。"""
+    text = str(message or "")
+    return bool(_PPT_CREATE_RE.search(text) and _PPT_STYLE_REFERENCE_TURN_RE.search(text))
+
+
+# 图片附件在本轮扮演的角色：
+# - "target"：要改这张图 / 要把它做成、嵌进某个文件产物 → 是修订目标或素材，进工作区；
+# - "style_reference"：新建 PPT 的风格参考 → 不是修订目标，但仍进工作区（PPT 流程按既有语义
+#   可能要引用它，见 ingest_user_files_into_workspace 的说明）；
+# - "view_only"：看图问答 → 只以 image 内容块给模型看，不是修订目标、不进工作区。
+IMAGE_ROLE_TARGET = "target"
+IMAGE_ROLE_STYLE_REFERENCE = "style_reference"
+IMAGE_ROLE_VIEW_ONLY = "view_only"
+
+
+def _image_attachment_role(message: str, attachment: Any) -> str:
+    """非图片附件一律 target（文档/表格照旧是可修订目标）。"""
+    if not _is_image_attachment(attachment):
+        return IMAGE_ROLE_TARGET
+    text = str(message or "")
+    if _IMAGE_EDIT_TARGET_RE.search(text):
+        return IMAGE_ROLE_TARGET
+    if _ppt_style_reference_turn(text):
+        return IMAGE_ROLE_STYLE_REFERENCE
+    if _IMAGE_AS_MATERIAL_RE.search(text):
+        return IMAGE_ROLE_TARGET
+    return IMAGE_ROLE_VIEW_ONLY
+
+
+def _attachment_is_reference_only(message: str, attachment: Any) -> bool:
+    """图片附件默认是「给模型看的参考」，不是 RevisionTarget。
+
+    2026-09-19 用户拍板「OCR 不需要，我们用的是多模态模型」：带图提问时图片直接以 image
+    内容块随消息进模型。此前任何带 file_id 的附件都被当成「待修改的文件」——图片被记成
+    revision target、灌进会话工作区、再触发沙箱 Pull 和「请接着改现有文件」提示，模型于是
+    对着一张通知截图连开十个工具、300 秒没有一个字的回答。
+
+    只有两种话术让图片回到修订/素材链路：① 明确要改这张图（裁剪/抠图/去水印/换背景…）；
+    ② 明确要把图做成/嵌进某个文件产物（PPT/海报/网页/Word…）。新建 PPT 时的「风格参考」
+    仍按参考处理（既有语义）。
+    """
+    return _image_attachment_role(message, attachment) != IMAGE_ROLE_TARGET
 
 
 def _has_revision_target_attachments(
@@ -404,6 +461,19 @@ def _has_revision_target_attachments(
         _att_field(item, "file_id") and not _attachment_is_reference_only(message, item)
         for item in (attachments or [])
     )
+
+
+def _workspace_bound_attachments(message: str, attachments: Optional[List[Any]]) -> list:
+    """本轮要灌进会话工作区的附件：去掉「只是给模型看」的图。
+
+    看图问答的图一旦进了工作区，本轮和此后每一轮 hydrate 都会为它拉起沙箱（实测约 20 秒）并
+    注入「会话工作区已灌入当前沙箱，请接着改现有文件」——问答被硬生生推向工具链路。
+    PPT 风格参考图照旧进工作区，不改既有 PPT 流程。
+    """
+    return [
+        item for item in (attachments or [])
+        if _image_attachment_role(message, item) != IMAGE_ROLE_VIEW_ONLY
+    ]
 
 
 def _decide_turn_with_attachment_intent(
@@ -417,6 +487,8 @@ def _decide_turn_with_attachment_intent(
     TurnDecision 的通用词表会把消息中的 ``PPT`` 视为 existing target，再把
     “不要复制参考图”里的动作词误认成修订。这里只在所有已选附件均已被
     严格判定为 PPT 风格参考时覆盖，不改动真正的 PPTX/图片编辑任务。
+    看图问答（图片仅供参考、话里不是在做 PPT）不覆盖：它该按原判定走
+    conversation，而不是被硬改成 execute。
     """
     selected = list(attachments or [])
     decision = decide_turn(
@@ -424,7 +496,11 @@ def _decide_turn_with_attachment_intent(
         has_selected_files=_has_revision_target_attachments(message, selected),
         active_run=active_run,
     )
-    if selected and all(_attachment_is_reference_only(message, item) for item in selected):
+    if (
+        selected
+        and _ppt_style_reference_turn(message)
+        and all(_attachment_is_reference_only(message, item) for item in selected)
+    ):
         return replace(
             decision,
             intent="execute",
@@ -2254,10 +2330,15 @@ class HarnessOrchestrator:
         if not owns_turn_context:
             try:
                 from app.services.agent_harness import workspace_service as _ws_ingest
+                # 仅供模型看的参考图不进工作区（见 _workspace_bound_attachments）；用户回指
+                # 「刚才那张图做成海报」时，prior_file_targets 里的那份按 file_id 补灌进去，
+                # 参考图不进工作区不等于以后再也拿不到它。
+                _ingest_targets = _workspace_bound_attachments(message, attachments)
+                _ingest_targets += _workspace_bound_attachments(message, prior_file_targets)
                 await _ws_ingest.ingest_user_files_into_workspace(
                     user_id=str(user_id or ""),
                     thread_id=str(thread_id or ""),
-                    attachments=attachments,
+                    attachments=_ingest_targets,
                     run_id=str(run_id or ""),
                 )
             except Exception:  # noqa: BLE001

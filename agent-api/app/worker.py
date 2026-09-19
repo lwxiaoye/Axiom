@@ -142,6 +142,7 @@ async def _resolve_worker_input(payload: dict[str, Any]) -> dict[str, Any]:
 
     file_ids = list(data.pop("file_ids", None) or [])
     if file_ids:
+        from app.services.chat.turn_context_builder import model_supports_vision
         from app.services.files import user_file_service
 
         resolved = await user_file_service.build_chat_attachments(
@@ -150,6 +151,8 @@ async def _resolve_worker_input(payload: dict[str, Any]) -> dict[str, Any]:
                 "run_id": str(data.get("run_id") or ""),
                 "thread_id": str(data.get("thread_id") or ""),
             },
+            # 多模态模型自己看图：「我的文件」里选的图片不再先经视觉模型转述一遍。
+            ocr_visual=not model_supports_vision(resolved_model),
         )
         attachments.extend(resolved or [])
 

@@ -147,45 +147,6 @@
       </template>
     </section>
 
-    <!-- 图片识别 -->
-    <section v-show="tab === 'ocr'" class="card">
-      <div v-if="ocr.loading" class="muted">正在加载…</div>
-      <template v-else>
-        <p class="hint">用于读取对话里的图片附件与扫描件 PDF。</p>
-        <label for="o-strategy">识别方式</label>
-        <select id="o-strategy" v-model="ocr.form.strategy" :disabled="ocr.busy">
-          <option value="none">不启用</option>
-          <option value="multimodal_model">视觉模型</option>
-          <option value="custom_endpoint">自建 OCR 端点</option>
-        </select>
-        <template v-if="ocr.form.strategy === 'multimodal_model'">
-          <label for="o-base">请求地址</label>
-          <input id="o-base" v-model="ocr.form.visionBaseUrl" type="url" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" :disabled="ocr.busy" />
-          <label for="o-key">API Key <span v-if="ocr.hasVisionKey" class="ok">已配置</span></label>
-          <input id="o-key" v-model="ocr.form.visionApiKey" type="password" autocomplete="new-password"
-                 :placeholder="ocr.hasVisionKey ? '留空则保持原密钥' : '输入 API Key'" :disabled="ocr.busy" />
-          <label for="o-model">模型名称</label>
-          <input id="o-model" v-model="ocr.form.model" placeholder="例如 qwen3-vl-plus" :disabled="ocr.busy" />
-        </template>
-        <template v-else-if="ocr.form.strategy === 'custom_endpoint'">
-          <label for="o-url">端点地址</label>
-          <input id="o-url" v-model="ocr.form.endpointUrl" type="url" placeholder="http://ocr:8080/ocr" :disabled="ocr.busy" />
-          <label for="o-ekey">API Key <span v-if="ocr.hasEndpointKey" class="ok">已配置</span></label>
-          <input id="o-ekey" v-model="ocr.form.apiKey" type="password" autocomplete="new-password"
-                 :placeholder="ocr.hasEndpointKey ? '留空则保持原密钥' : '没有可留空'" :disabled="ocr.busy" />
-        </template>
-        <Feedback :state="ocr.feedback" />
-        <div class="actions">
-          <button type="button" class="secondary" :disabled="ocr.busy || ocr.form.strategy === 'none'" @click="testOcr">
-            {{ ocr.testing ? '测试中…' : '测试连接' }}
-          </button>
-          <button type="button" class="primary" :disabled="ocr.busy" @click="saveOcr">
-            {{ ocr.saving ? '保存中…' : '保存' }}
-          </button>
-        </div>
-      </template>
-    </section>
-
     <!-- 校园百事通 -->
     <section v-show="tab === 'campus'" class="card">
       <div v-if="campus.loading" class="muted">正在加载…</div>
@@ -304,7 +265,6 @@
     { key: 'model', label: '对话模型' },
     { key: 'embedding', label: '向量模型' },
     { key: 'search', label: '联网搜索' },
-    { key: 'ocr', label: '图片识别' },
     { key: 'campus', label: '校园百事通' },
     { key: 'users', label: '用户' },
   ] as const;
@@ -478,60 +438,6 @@
     finally { search.testing = false; }
   }
 
-  // ---- 图片识别 ----
-  // 后端契约（/platform-config/ocr）：GET 把密钥置空、用 secrets_set 标记「已配置」；PUT 是合并
-  // 语义，密钥留空表示保持原值。enabled 随识别方式走（选「不启用」即关），页面不再单放开关。
-  const ocr = reactive({
-    loading: true, saving: false, testing: false, busy: false,
-    hasVisionKey: false, hasEndpointKey: false,
-    feedback: null as Result | null,
-    form: { strategy: 'none', visionBaseUrl: '', visionApiKey: '', model: '', endpointUrl: '', apiKey: '' },
-  });
-  watch(() => [ocr.saving, ocr.testing], () => { ocr.busy = ocr.saving || ocr.testing; });
-
-  function ocrPayload() {
-    return { ...ocr.form, enabled: ocr.form.strategy !== 'none' };
-  }
-  async function loadOcr() {
-    ocr.loading = true;
-    try {
-      const d = await requestAgentApi<any>('/platform-config/ocr');
-      Object.assign(ocr.form, {
-        strategy: d.strategy || 'none',
-        visionBaseUrl: d.visionBaseUrl || '',
-        visionApiKey: '',
-        model: d.model || '',
-        endpointUrl: d.endpointUrl || '',
-        apiKey: '',
-      });
-      ocr.hasVisionKey = !!d.secrets_set?.visionApiKey;
-      ocr.hasEndpointKey = !!d.secrets_set?.apiKey;
-    } catch (e: any) { ocr.feedback = fail(e, '配置加载失败'); }
-    finally { ocr.loading = false; }
-  }
-  async function saveOcr() {
-    ocr.saving = true;
-    try {
-      const d = await requestAgentApi<any>('/platform-config/ocr', { method: 'PUT', body: JSON.stringify(ocrPayload()) });
-      ocr.hasVisionKey = !!d.secrets_set?.visionApiKey;
-      ocr.hasEndpointKey = !!d.secrets_set?.apiKey;
-      ocr.form.visionApiKey = '';
-      ocr.form.apiKey = '';
-      ocr.feedback = { success: true, message: '已保存，下一次读取图片时生效' };
-    } catch (e: any) { ocr.feedback = fail(e, '保存失败'); }
-    finally { ocr.saving = false; }
-  }
-  async function testOcr() {
-    ocr.testing = true;
-    ocr.feedback = null;
-    try {
-      // 密钥留空时后端会回退到库里已存的那把，所以「已配置」状态下不填 Key 也能测
-      const r = await requestAgentApi<any>('/platform-config/ocr/test', { method: 'POST', body: JSON.stringify(ocrPayload()) });
-      ocr.feedback = { success: r.status === 'success', message: r.message || '测试完成' };
-    } catch (e: any) { ocr.feedback = fail(e, '测试失败'); }
-    finally { ocr.testing = false; }
-  }
-
   // ---- 校园百事通 ----
   // 后端契约：PUT /draft 必填 expected_revision + model_id；POST /draft/publish 必填
   // expected_revision（乐观并发：与服务端当前版本不一致即拒绝，避免覆盖他人改动）。
@@ -682,7 +588,6 @@
     loadEmbedding();
     loadRerank();
     loadSearch();
-    loadOcr();
     // 打开即显示校园百事通还差哪些配置，不用等到点发布才知道
     loadCampus().then(() => checkCampus(true));
     loadUsers();
