@@ -4,13 +4,11 @@ import httpx
 import pytest
 
 from app.services.agent_harness import model_usage_audit
-from app.services.agents import agent_executor
 from app.services.chat import turn_finalizer
 from app.services.chat.tools import image_fetch
 from app.services.chat.tools.base import CURRENT_TOOL_CONTEXT, ToolExecutionContext
 from app.services.memory import memory_service
 from app.services.platform import platform_config_service
-from app.services.workflows.workflow_engine import RunContext, WorkflowEngine
 
 
 class _AuditRecorder:
@@ -73,76 +71,6 @@ def _assert_unseen_failure(audit: _AuditRecorder) -> None:
     assert facts["terminal_seen"] is False
 
 
-@pytest.mark.asyncio
-async def test_workflow_langchain_network_error_has_no_provider_event(audit):
-    engine = WorkflowEngine(
-        {"nodes": [], "edges": []},
-        RunContext(input_text="x", run_id="run-1", thread_id="thread-1", llm_api_key="k"),
-    )
-
-    class _Llm:
-        async def ainvoke(self, _messages):
-            raise RuntimeError("connect failed")
-
-    with pytest.raises(RuntimeError, match="connect failed"):
-        await engine._ainvoke_workflow_llm(  # noqa: SLF001
-            _Llm(), [], model="m", node={"nodeId": "n1", "flowNodeType": "chatNode"},
-        )
-
-    _assert_unseen_failure(audit)
-
-
-@pytest.mark.asyncio
-async def test_workflow_langchain_status_error_is_complete_provider_response(audit):
-    engine = WorkflowEngine(
-        {"nodes": [], "edges": []},
-        RunContext(input_text="x", run_id="run-1", thread_id="thread-1", llm_api_key="k"),
-    )
-
-    class _StatusError(RuntimeError):
-        def __init__(self):
-            super().__init__("status error")
-            self.response = SimpleNamespace(status_code=429)
-
-    class _Llm:
-        async def ainvoke(self, _messages):
-            raise _StatusError()
-
-    with pytest.raises(_StatusError):
-        await engine._ainvoke_workflow_llm(  # noqa: SLF001
-            _Llm(), [], model="m", node={"nodeId": "n1", "flowNodeType": "chatNode"},
-        )
-
-    facts = audit.attempt_finishes[0][1]
-    assert facts["provider_event_seen"] is True
-    assert facts["terminal_seen"] is True
-    assert facts["http_status"] == 429
-
-
-@pytest.mark.asyncio
-async def test_workflow_langchain_partial_stream_is_event_without_terminal(audit):
-    engine = WorkflowEngine(
-        {"nodes": [], "edges": []},
-        RunContext(input_text="x", run_id="run-1", thread_id="thread-1", llm_api_key="k"),
-    )
-
-    class _Llm:
-        async def astream(self, _messages):
-            yield SimpleNamespace(content="partial", response_metadata={}, usage_metadata={})
-            raise RuntimeError("stream disconnected")
-
-    with pytest.raises(RuntimeError, match="stream disconnected"):
-        async for _chunk in engine._astream_workflow_llm(  # noqa: SLF001
-            _Llm(), [], model="m", node={"nodeId": "n1", "flowNodeType": "chatNode"},
-        ):
-            pass
-
-    facts = audit.attempt_finishes[0][1]
-    assert facts["provider_event_seen"] is True
-    assert facts["partial_text_seen"] is True
-    assert facts["terminal_seen"] is False
-
-
 class _PartialStreamResponse:
     status_code = 200
 
@@ -160,56 +88,6 @@ class _PartialStreamResponse:
 class _PartialStreamClient(_RaisingClient):
     def stream(self, *_args, **_kwargs):
         return _PartialStreamResponse()
-
-
-@pytest.mark.asyncio
-async def test_workflow_agent_http_network_error_has_no_provider_event(monkeypatch, audit):
-    monkeypatch.setattr(agent_executor.httpx, "AsyncClient", _RaisingClient)
-    engine = SimpleNamespace(ctx=SimpleNamespace(
-        variables={}, llm_api_key="k", run_id="run-1", thread_id="thread-1",
-        stream_output=None,
-    ))
-
-    with pytest.raises(RuntimeError, match="network failed before response"):
-        await agent_executor.run_function_call_loop(
-            engine,
-            model="m",
-            temperature=None,
-            system_prompt="",
-            max_histories=0,
-            user_input="hello",
-            tools=[],
-        )
-
-    _assert_unseen_failure(audit)
-
-
-@pytest.mark.asyncio
-async def test_workflow_agent_http_partial_stream_is_not_terminal(monkeypatch, audit):
-    monkeypatch.setattr(agent_executor.httpx, "AsyncClient", _PartialStreamClient)
-
-    async def _stream_output(_seq, _text):
-        return None
-
-    engine = SimpleNamespace(ctx=SimpleNamespace(
-        variables={}, llm_api_key="k", run_id="run-1", thread_id="thread-1",
-        stream_output=_stream_output,
-    ))
-    with pytest.raises(RuntimeError, match="stream body failed"):
-        await agent_executor.run_function_call_loop(
-            engine,
-            model="m",
-            temperature=None,
-            system_prompt="",
-            max_histories=0,
-            user_input="hello",
-            tools=[],
-        )
-
-    facts = audit.attempt_finishes[0][1]
-    assert facts["provider_event_seen"] is True
-    assert facts["partial_text_seen"] is True
-    assert facts["terminal_seen"] is False
 
 
 @pytest.mark.asyncio

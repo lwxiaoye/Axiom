@@ -5,11 +5,8 @@ import pytest
 
 from app.core.config import settings
 from app.services.agent_harness import model_usage_audit
-from app.services.agents import agent_executor
 from app.services.chat.tools import browser
 from app.services.knowledge import embedding_service, web_search_service
-from app.services.workflow_runtime import compiler as workflow_compiler
-from app.services.workflows.workflow_engine import RunContext, WorkflowEngine
 
 
 class _AuditRecorder:
@@ -71,56 +68,6 @@ class _PostClient:
 
     async def post(self, *_args, **_kwargs):
         return self.response
-
-
-class _StreamResponse:
-    status_code = 200
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_args):
-        return False
-
-    async def aiter_lines(self):
-        yield 'data: {"id":"resp-agent","choices":[{"delta":{"content":"ok"}}]}'
-        yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":1}}'
-        yield "data: [DONE]"
-
-
-class _StreamClient(_PostClient):
-    def stream(self, *_args, **_kwargs):
-        return _StreamResponse()
-
-
-@pytest.mark.asyncio
-async def test_agent_loop_stream_attempt_keeps_usage_and_handle(monkeypatch, audit):
-    from app.services.agents.agent_service import agent_service
-    monkeypatch.setattr(agent_service, "model_responses_capability", lambda *_: False)
-    monkeypatch.setattr(agent_executor.httpx, "AsyncClient", _StreamClient)
-    chunks = []
-
-    async def _stream_output(seq, text):
-        chunks.append((seq, text))
-
-    engine = SimpleNamespace(ctx=SimpleNamespace(
-        variables={}, llm_api_key="k", run_id="run-1", thread_id="thread-1",
-        stream_output=_stream_output,
-    ))
-    answer, trace = await agent_executor.run_function_call_loop(
-        engine,
-        model="m",
-        temperature=None,
-        system_prompt="",
-        max_histories=0,
-        user_input="hello",
-        tools=[],
-    )
-
-    assert answer == "ok" and trace == []
-    assert audit.logical[0]["purpose"] == "subagent_model"
-    assert audit.attempt_finishes[0][0] is audit.attempts[0][2]
-    assert audit.attempt_finishes[0][1]["usage"]["prompt_tokens"] == 7
 
 
 @pytest.mark.asyncio
@@ -264,75 +211,6 @@ async def test_embedding_5xx_retry_reuses_frozen_payload(monkeypatch, audit):
         "input": "query",
     }
     assert audit.attempts[1][1]["retry_of_attempt_id"] == "at-1"
-
-
-@pytest.mark.asyncio
-async def test_workflow_ainvoke_is_one_workflow_node_attempt(audit):
-    ctx = RunContext(
-        input_text="hello", run_id="run-1", thread_id="thread-1", llm_api_key="k",
-        audit_root_run_id="root-1",
-        audit_parent_tool_call_id="tool-1",
-        audit_parent_logical_call_id="logical-parent-1",
-        audit_execution_segment="segment-2",
-    )
-    engine = WorkflowEngine({"nodes": [], "edges": []}, ctx)
-
-    class _Llm:
-        async def ainvoke(self, _messages):
-            return SimpleNamespace(
-                content="ok", usage_metadata={"input_tokens": 4, "output_tokens": 1},
-                response_metadata={"id": "resp-workflow"},
-            )
-
-    response = await engine._ainvoke_workflow_llm(
-        _Llm(), [], model="m", node={"nodeId": "node-1", "flowNodeType": "chatNode"},
-    )
-    assert response.content == "ok"
-    assert audit.logical[0]["purpose"] == "workflow_node"
-    assert audit.logical[0]["root_run_id"] == "root-1"
-    assert audit.logical[0]["parent_tool_call_id"] == "tool-1"
-    assert audit.logical[0]["parent_logical_call_id"] == "logical-parent-1"
-    assert audit.attempts[0][1]["execution_segment"] == "segment-2"
-    assert audit.attempt_finishes[0][0] is audit.attempts[0][2]
-    assert audit.logical_finishes[0][1]["selected_attempt_id"] == "at-1"
-
-
-@pytest.mark.asyncio
-async def test_workflow_checkpoint_hydrate_restores_lineage_but_keeps_resume_segment():
-    class _Compiled:
-        async def aget_state(self, _config):
-            return SimpleNamespace(values={
-                "audit_run_id": "run-original",
-                "audit_root_run_id": "root-original",
-                "audit_parent_tool_call_id": "tool-original",
-                "audit_parent_logical_call_id": "logical-original",
-                "audit_execution_segment": "segment-original",
-                "outputs": {"node-1": {"answer": "ok"}},
-                "variables": {"remembered": True},
-            })
-
-    ctx = SimpleNamespace(
-        audit_run_id="",
-        audit_root_run_id="",
-        audit_parent_tool_call_id="",
-        audit_parent_logical_call_id="",
-        audit_execution_segment="segment-resume",
-        outputs={},
-        variables={},
-    )
-    engine = SimpleNamespace(ctx=ctx, edges=[])
-
-    await workflow_compiler._hydrate_engine_from_checkpoint(  # noqa: SLF001
-        _Compiled(), engine, {"configurable": {"thread_id": "resume-1"}},
-    )
-
-    assert ctx.audit_run_id == "run-original"
-    assert ctx.audit_root_run_id == "root-original"
-    assert ctx.audit_parent_tool_call_id == "tool-original"
-    assert ctx.audit_parent_logical_call_id == "logical-original"
-    assert ctx.audit_execution_segment == "segment-resume"
-    assert ctx.outputs == {"node-1": {"answer": "ok"}}
-    assert ctx.variables == {"remembered": True}
 
 
 @pytest.mark.asyncio

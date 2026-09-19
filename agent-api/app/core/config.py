@@ -59,11 +59,6 @@ class Settings(BaseSettings):
     # 否则任务模式退化成不可恢复的临时图、事件回放/R0 守卫/HITL 全部静默失效。
     # 默认 false 仅照顾裸机本地跑（无 PG 也能起）。
     RUNTIME_REQUIRED: bool = False
-    # 工作流执行内核：langgraph（§10.5.10 已选定默认，环路图自动回退 legacy）| legacy（手写调度器）
-    # 默认值必须与 docker-compose.yml 一致：交互节点（userSelect/formInput）只有 langgraph 支持，
-    # 若默认 legacy，直跑 uvicorn 时已发布的交互图会执行失败。
-    WORKFLOW_ENGINE: str = "langgraph"
-
     # Qdrant 向量库（知识库集合）
     QDRANT_URL: str = "http://qdrant:6333"
     INITIAL_CHAT_MODELS: str = ""
@@ -242,17 +237,9 @@ class Settings(BaseSettings):
     CONTEXT_COMPACT_TIMEOUT_SECONDS: int = 4
 
     # 发布审批（WS2，强制审批）：所有工作流/对话 Agent 发布须提交审核，审核员通过后上线。
-    PUBLISH_APPROVAL_REQUIRED: bool = True
-    # 审核员 / 平台管理员角色白名单（逗号分隔的 auth-api 返回的 role_id）。命中即拥有审核 / 跨用户管理权限。
+    # 平台管理员角色白名单（逗号分隔的 auth-api 返回的 role_id）。命中即拥有跨用户管理权限。
     # role_id↔权限码映射是跨团队 seam；username==admin 或 role 含 "admin" 亦视为平台管理员（沿用 is_admin）。
-    AGENT_REVIEWER_ROLE_IDS: str = ""
     AGENT_ADMIN_ROLE_IDS: str = ""
-    # 临时兼容跨租户的智能体/工作流发布与运行。恢复租户隔离时仅需设为 True，
-    # 不影响知识库、文件、外部应用等其他业务域的租户边界。
-    AGENT_WORKFLOW_TENANT_ISOLATION_ENABLED: bool = False
-
-    # 内部同步接口
-    INTERNAL_SYNC_SECRET: str = ""
     INTERNAL_SYNC_MAX_AGE_SECONDS: int = 300
 
     # 选中知识库后的前置召回不能无限挡住首帧；超时后模型会明确说明本轮未取得资料。

@@ -443,9 +443,8 @@ async def _acquire_with_timeout(sem: asyncio.Semaphore, timeout: float) -> bool:
     return False
 
 
-# 对外稳定名字：技能沙箱闸（app/services/agents/agent_executor.py）复用**同一份**实现。
-# 两处各抄一份正是 2026-07-28 那条 bug 的来源——那边只有 wait_for 版本，缺了外部取消
-# （用户点停止）路径的兜底 release，名额累计泄漏满即永久「沙箱繁忙」直到进程重启。
+# 对外稳定名字：沙箱名额闸只保留这一份实现（2026-07-28 的 bug 正来自两处各抄一份：
+# 缺了外部取消（用户点停止）路径的兜底 release，名额累计泄漏满即永久「沙箱繁忙」）。
 acquire_with_timeout = _acquire_with_timeout
 
 

@@ -25,7 +25,8 @@ from app.routers.connectors import router as connectors_router
 from app.routers.embedding_config import router as embedding_config_router
 from app.routers.platform_config import router as platform_config_router
 from app.routers.knowledge import router as knowledge_router
-from app.routers.workflow import router as workflow_router
+from app.routers.marketplace import router as marketplace_router
+from app.routers.gateway import router as gateway_router
 from app.routers.agent_skill import router as agent_skill_router
 from app.routers.files import router as files_router
 from app.routers.workspace import router as workspace_router
@@ -41,7 +42,8 @@ api_router.include_router(rerank_config_router)
 api_router.include_router(embedding_config_router)
 api_router.include_router(platform_config_router)
 api_router.include_router(knowledge_router)
-api_router.include_router(workflow_router)
+api_router.include_router(marketplace_router)
+api_router.include_router(gateway_router)
 api_router.include_router(agent_skill_router)
 api_router.include_router(files_router)
 api_router.include_router(workspace_router)

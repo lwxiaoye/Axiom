@@ -99,12 +99,8 @@ class DurableToolResultStore:
     table, or a transient write failure all return an unavailable reference instead of raising.
     """
 
-    def __init__(self, *, max_bytes: int = MAX_DURABLE_TOOL_RESULT_BYTES, workflow_execution: bool = False):
+    def __init__(self, *, max_bytes: int = MAX_DURABLE_TOOL_RESULT_BYTES):
         self.max_bytes = max(1, int(max_bytes))
-        self.workflow_execution = workflow_execution
-
-    def _execution_column(self, model):
-        return model.workflow_execution_id if self.workflow_execution else model.run_id
 
     async def put(
         self,
@@ -164,7 +160,7 @@ class DurableToolResultStore:
                 previous = (
                     await session.execute(
                         select(AgentToolResultBlob).where(
-                            self._execution_column(AgentToolResultBlob) == owner["run_id"],
+                            AgentToolResultBlob.run_id == owner["run_id"],
                             AgentToolResultBlob.thread_id == owner["thread_id"],
                             AgentToolResultBlob.user_id == owner["user_id"],
                             AgentToolResultBlob.call_id == owner["call_id"],
@@ -184,8 +180,6 @@ class DurableToolResultStore:
 
                 handle = f"tool-result-{uuid.uuid4().hex}"
                 persisted_owner = dict(owner)
-                if self.workflow_execution:
-                    persisted_owner["workflow_execution_id"] = persisted_owner.pop("run_id")
                 session.add(AgentToolResultBlob(
                     handle=handle,
                     **persisted_owner,
@@ -251,7 +245,7 @@ class DurableToolResultStore:
                     await session.execute(
                         select(AgentToolResultBlob).where(
                             AgentToolResultBlob.handle == handle_value,
-                            self._execution_column(AgentToolResultBlob) == owner_values[0],
+                            AgentToolResultBlob.run_id == owner_values[0],
                             AgentToolResultBlob.thread_id == owner_values[1],
                             AgentToolResultBlob.user_id == owner_values[2],
                             AgentToolResultBlob.full_available.is_(True),

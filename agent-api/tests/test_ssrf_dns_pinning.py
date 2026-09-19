@@ -13,7 +13,7 @@ import socket
 import httpx
 import pytest
 
-from app.services.gateway import mcp_client, tool_invoker
+from app.services.gateway import mcp_client
 from app.services.gateway.mcp_client import (
     McpClientError,
     PinnedPublicTransport,
@@ -71,12 +71,6 @@ def base_transport(monkeypatch):
     return rec
 
 
-_TOOL_CONFIG = {
-    "baseUrl": "https://tool.example.com",
-    "toolList": [{"name": "ping", "path": "/ping", "method": "GET"}],
-}
-
-
 # ---------- 解析层 ----------
 
 def test_resolve_returns_validated_ip(resolver):
@@ -129,29 +123,6 @@ async def test_transport_blocks_rebinding_on_each_hop(resolver, base_transport):
         await transport.handle_async_request(httpx.Request("GET", "https://tool.example.com/b"))
     assert r.calls == 2
     assert len(base_transport.seen) == 1
-
-
-# ---------- HTTP 工具集（tool_invoker） ----------
-
-@pytest.mark.asyncio
-async def test_http_toolset_blocks_dns_rebinding(resolver, base_transport):
-    """预检拿到公网 IP 放行，随后连接前的解析被换成元数据地址——必须拦在发请求之前。"""
-    r = resolver(PUBLIC_IP, METADATA_IP)
-    with pytest.raises(McpClientError):
-        await tool_invoker.invoke_http_toolset_tool(_TOOL_CONFIG, "ping", {})
-    assert r.calls >= 2, "预检与连接各解析一次才构成 rebinding 窗口"
-    assert base_transport.seen == [], "被 rebinding 的请求绝不能真的发出去"
-
-
-@pytest.mark.asyncio
-async def test_http_toolset_happy_path_still_works(resolver, base_transport):
-    resolver(PUBLIC_IP)
-    out = await tool_invoker.invoke_http_toolset_tool(_TOOL_CONFIG, "ping", {})
-    assert out == "ok"
-    seen = base_transport.seen[0]
-    assert seen["url"].startswith(f"https://{PUBLIC_IP}/ping")
-    assert seen["host_header"] == "tool.example.com"
-    assert seen["sni"] == "tool.example.com"
 
 
 # ---------- MCP 客户端 ----------

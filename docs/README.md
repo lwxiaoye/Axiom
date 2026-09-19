@@ -21,15 +21,12 @@
 - [`生产部署手册.md`](生产部署手册.md)：服务器部署、组件配置、迁移和上线验收；不用于日常热更新。
 - [`../agent-api/README.md`](../agent-api/README.md)：API、鉴权、数据面与本机启动。
 - [`../agent-api/migrations/README.md`](../agent-api/migrations/README.md)：双目标 Alembic、当前代码迁移头和启动门禁。
-- [`workflow-node-help.md`](workflow-node-help.md)：工作流节点、变量、调试与发布前检查。
 - [`可移植皮肤包与前端响应式规范.md`](可移植皮肤包与前端响应式规范.md)：两类皮肤包的字段、导入导出与三端边界。
-- [`智能体广场能力分类与创建者接口契约.md`](智能体广场能力分类与创建者接口契约.md)：分类值、创建者展示及 Java 接口配合。
 - [`处理连接学校VPN的方法.md`](处理连接学校VPN的方法.md)：本机 iNode / Clash 排障。先核对实际 Vite 模式和环境文件，不自行切换 Java 或数据库。
-- `sql/`：需要人工执行或核对的菜单、能力注册 SQL。
 
 ## 带日期的设计与实施资料
 
-`superpowers/specs/` 与 `superpowers/plans/` 中现存知识库权限/运营统计/原文路径、智能体发布/治理/监测和对话日志资料，是对应日期的设计及执行记录。计划里的未勾选项不等于功能尚未实现，也不能据文件存在宣布验收通过。当前实现分别回查 `src/views/knowledge/`、`src/views/peopleCenter/`、`src/views/workflow/`、`agent-api/app/routers/workflow.py` 与 `agent-api/app/services/workflows/`；Java 接口须在对应 Java 仓库另验。
+`superpowers/specs/` 与 `superpowers/plans/` 中现存知识库权限/运营统计/原文路径、智能体发布/治理/监测和对话日志资料，是对应日期的设计及执行记录。计划里的未勾选项不等于功能尚未实现，也不能据文件存在宣布验收通过。当前实现分别回查 `src/views/knowledge/`、`src/views/peopleCenter/` 与 `agent-api/app/`；工作流编排（自建智能体、发布/审核/治理、子智能体、对外 Agent API）已于 2026-09-19 整体删除，相关设计资料只作历史记录；Java 接口须在对应 Java 仓库另验。
 
 仓库外或未入库的 `qa/`、`outputs/` 验证资料可能被历史版本说明引用；缺失时保留“证据待补”的结论，不补造测试结果。本轮文档对齐不删除历史资料，也不改写原验收记录。
 

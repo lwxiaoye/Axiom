@@ -22,7 +22,6 @@ from app.services.agent_harness.tool_result_store import (
 )
 from app.services.chat.tools.base import MainTool, ToolValue, text_tool_body
 from app.services.gateway.tool_gateway import _serialize_result
-from app.services.gateway.tool_invoker import truncate_result
 from app.services.platform.token_estimator import estimate_tokens
 
 
@@ -308,8 +307,3 @@ def test_gateway_serialization_is_valid_and_lossless_past_legacy_cutoff():
     encoded = _serialize_result(value)
     assert len(encoded) > 16_000
     assert json.loads(encoded) == value
-
-
-def test_legacy_tool_invoker_helper_no_longer_discards_the_only_copy():
-    raw = "x" * 20_000
-    assert truncate_result(raw) == raw

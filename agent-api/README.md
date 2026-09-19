@@ -36,16 +36,17 @@ python -u ./run.py                       # 依赖已装好时只跑这一条
 | --- | --- |
 | 主对话 Run | `POST /chat/runs`、`GET /chat/runs/{run_id}`、`GET /chat/runs/{run_id}/events`、`POST /chat/runs/{run_id}/inputs`、`POST /chat/runs/{run_id}/cancel` |
 | 会话与队列 | `/chat/threads`、`/chat/threads/{thread_id}/messages`、`/chat/threads/{thread_id}/queue` |
-| 主对话附件与委派 | `POST /chat/upload`、`GET /chat/subagents` |
+| 主对话附件 | `POST /chat/upload` |
 | 面试状态 | `GET /chat/threads/{thread_id}/interview`；写操作仍通过共享 Run 的 `interview_input` 受理 |
 | 用户文件与工作文件夹 | `/files`、`/files/folders`、`/files/upload`、`/files/{file_id}/download`、`/files/{file_id}/versions`；Thread 的 `workspace_folder_id` 绑定访问范围 |
-| 工作流 | `/workflow/app`、`/workflow/definition`、`/workflow/run`；管理员治理使用 `/workflow/admin/app/...` |
+| 内置智能体广场 | `GET /chat/builtin-apps`、`GET /chat/builtin-apps/{preset}`、`GET /marketplace/model/options`；管理端 `/campus-assistant/*` |
+| 敏感工具审批 | `POST /gateway/approve`、`POST /gateway/reject`、`GET /gateway/calls`（`approval.required` 审批卡出口） |
 | Skill 与知识库 | `/skill`、`/embedding-config` |
-| 管理与内部同步 | `/models`、`/agents`、`/master-config`、`/internal/agents/events` |
+| 管理 | `/models`、`/master-config`、`/platform-config`、`/audit` |
 
 接口的请求/事件契约，尤其是主对话 Run，不以本页的摘要替代：请以 [`docs/主对话-Agent-Harness-架构与开发规范.md`](../docs/主对话-Agent-Harness-架构与开发规范.md) 为准。
 
-主对话与 presentation/campus_services/interview 共用 Harness；工作流 Agent/toolCall 由 `services/agents/agent_executor.py` 的函数循环执行，复用传输、压缩及长结果分页，仍有自己的执行身份，不等于获得主对话 Job、Worker 和断点恢复能力。
+主对话与 presentation/campus_services/interview 共用 Harness。所有智能体都是代码内置、预置在广场的三个（校园百事通 / 演示文稿助手 / 面试助手）；用户不自建智能体，工作流编排、子智能体与对外 Agent API 已整体删除。
 
 ## 鉴权
 
