@@ -15,8 +15,8 @@ describe('knowledge chunk rebuild entry point', () => {
   it('only offers a rebuild when documents claim chunks the list cannot show', () => {
     const panel = read('src/views/knowledge/components/KnowledgeChunksPanel.vue');
     const gate = panel.slice(panel.indexOf('const needsRebuild = computed'), panel.indexOf('});', panel.indexOf('const needsRebuild = computed')));
-    // 管理侧（旧路径）、加载中、列表非空、关键词搜索都不提示——这些不是「正本表没同步」
-    expect(gate).toContain('props.management');
+    // 加载中、列表非空、关键词搜索都不提示——这些不是「正本表没同步」
+    expect(gate).not.toContain('props.management');
     expect(gate).toContain('loading.value');
     expect(gate).toContain('chunks.value.length');
     expect(gate).toContain('keyword.value.trim()');

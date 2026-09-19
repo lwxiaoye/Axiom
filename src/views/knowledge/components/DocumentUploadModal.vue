@@ -157,10 +157,10 @@ import { computed, reactive, ref, watch } from 'vue';
 import { FileExcelOutlined, FileMarkdownOutlined, FileOutlined, FilePdfOutlined, FileTextOutlined, FileWordOutlined, InboxOutlined } from '@ant-design/icons-vue';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { getProxyStaticFileUrl } from '/@/utils/common/fileUrl';
-import { previewKnowledgeDocument, previewManagedKnowledgeDocument, uploadKnowledgeDocument, uploadManagedKnowledgeDocument } from '../knowledge.api';
+import { previewKnowledgeDocument, uploadKnowledgeDocument } from '../knowledge.api';
 import { KNOWLEDGE_UPLOAD_ACCEPT, KNOWLEDGE_UPLOAD_FORMAT_HINT } from '../knowledgeUploadFormats';
 import type { KnowledgeDocumentPreview, KnowledgePreviewChunk, KnowledgeUploadOptions } from '../knowledge.types';
-const props = defineProps<{ open: boolean; knowledgeId: string; management?: boolean }>();
+const props = defineProps<{ open: boolean; knowledgeId: string }>();
 const emit = defineEmits<{ 'update:open': [value: boolean]; success: [] }>();
 const { createMessage } = useMessage();
 const currentStep = ref(0);
@@ -274,7 +274,7 @@ async function loadPreview() {
   try {
     await Promise.all(files.map(async (item) => {
       try {
-        const response = await (props.management ? previewManagedKnowledgeDocument : previewKnowledgeDocument)(props.knowledgeId, item.originFileObj, { ...form });
+        const response = await previewKnowledgeDocument(props.knowledgeId, item.originFileObj, { ...form });
         previewByUid.value[item.uid] = { loading: false, data: unwrapResponse<KnowledgeDocumentPreview>(response) };
       } catch (error) {
         previewByUid.value[item.uid] = {
@@ -298,7 +298,7 @@ async function upload() {
   try {
     for (const item of fileList.value) {
       try {
-        const response = await (props.management ? uploadManagedKnowledgeDocument : uploadKnowledgeDocument)(props.knowledgeId, item.originFileObj, { ...form });
+        const response = await uploadKnowledgeDocument(props.knowledgeId, item.originFileObj, { ...form });
         unwrapResponse(response);
         completed += 1;
       } catch { /* Batch summary below reports failed files. */ }

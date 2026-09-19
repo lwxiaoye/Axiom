@@ -10,11 +10,13 @@ describe('knowledge upload formats', () => {
     ]);
   });
 
-  it('keeps document preview and upload on the current origin API proxy', () => {
+  it('keeps document preview and upload on the current origin agent-api path', () => {
     const api = readFileSync(resolve(process.cwd(), 'src/views/knowledge/knowledge.api.ts'), 'utf8');
-    expect(api).toContain("const knowledgeApiBaseUrl = useGlobSetting().apiUrl;");
-    expect(api).toMatch(/uploadKnowledgeDocument[\s\S]*?baseURL: knowledgeApiBaseUrl/);
-    expect(api).toMatch(/previewKnowledgeDocument[\s\S]*?baseURL: knowledgeApiBaseUrl/);
+    // uploadFile 绕过了 URL 前缀钩子：agent-api 不在 /api 之下，baseURL 必须是空串而不是
+    // useGlobSetting().apiUrl（那是老 Java 管理侧上传用的，已随 Managed* 一起删掉）。
+    expect(api).not.toContain('useGlobSetting');
+    expect(api).toMatch(/export const uploadKnowledgeDocument[\s\S]*?url: `\$\{KB\}\/bases\/\$\{knowledgeId\}\/documents\/upload`, baseURL: ''/);
+    expect(api).toMatch(/export const previewKnowledgeDocument[\s\S]*?url: `\$\{KB\}\/bases\/\$\{knowledgeId\}\/documents\/preview`, baseURL: ''/);
   });
 
   it('keeps the upload dialog a capped content-area size instead of stretching with the sidebar', () => {
@@ -75,20 +77,20 @@ describe('knowledge upload formats', () => {
     expect(retrieval).toContain('相关度');
   });
 
-  it('edits chunk images inline by inserting markdown at the textarea cursor', () => {
+  it('inserts existing chunk images as markdown at the textarea cursor, without an upload entry', () => {
     const editor = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunkEditorDrawer.vue'), 'utf8');
     const api = readFileSync(resolve(process.cwd(), 'src/views/knowledge/knowledge.api.ts'), 'utf8');
     expect(editor).toContain('ref="chunkTextareaRef"');
-    expect(editor).toContain('@contextmenu="handleChunkContextMenu"');
-    expect(editor).toContain('function handleChunkContextMenu(event: MouseEvent)');
-    expect(editor).toContain('uploadChunkImageFromMenu');
     expect(editor).toContain('@click="insertChunkImage(image)"');
-    expect(editor).toContain('insertChunkImage(image, chunkInsertSelection.value)');
-    expect(editor).toContain('insertTextAtCursor(`\\n\\n${markdownImage(image)}\\n\\n`, selection)');
+    expect(editor).toContain('insertTextAtCursor(`\\n\\n${markdownImage(image)}\\n\\n`)');
     expect(editor).toContain('const contentWithImages = chunkEditorContent.value.trim();');
     expect(editor).toContain('contentWithImages, images: chunkEditorImages.value');
-    expect(editor).toContain('单张不超过 5 MB');
+    // 插图上传（右键菜单、上传按钮、5 MB 限制）只属于已下线的 Java 管理侧，agent-api 的分段没有图片存储
+    expect(editor).not.toContain('handleChunkContextMenu');
+    expect(editor).not.toContain('<a-upload');
+    expect(editor).not.toContain('单张不超过 5 MB');
     expect(api).toContain("'contentWithImages'");
+    expect(api).not.toContain('uploadKnowledgeChunkImage');
   });
 
   it('keeps long retrieval result lists in a dedicated scrollable region', () => {

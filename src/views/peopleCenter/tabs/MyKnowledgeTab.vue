@@ -216,7 +216,6 @@
 
           <KnowledgeAnalyticsPanel
             v-else-if="activeView === 'analytics' && isActualOwner"
-            scope="owner"
             :knowledge-id="selectedKnowledgeId"
           />
 

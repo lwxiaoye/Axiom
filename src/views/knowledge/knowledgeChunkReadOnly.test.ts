@@ -8,7 +8,7 @@ describe('knowledge chunk read-only access', () => {
 
     expect(panel).toContain("function openChunk(record: KnowledgeChunk) {\n  emit('edit', record);");
     expect(tab).toContain("function editChunk(record: KnowledgeChunk) {\n  editingChunk.value = record;");
-    expect(panel).toContain('if (!props.canEdit) return;\n  await (props.management ? setManagedChunkEnabled : setChunkEnabled)');
+    expect(panel).toContain('if (!props.canEdit) return;\n  await setChunkEnabled(record.id, enabled)');
   });
 
   it('renders the shared chunk drawer as read-only for viewers', () => {

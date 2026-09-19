@@ -43,21 +43,20 @@ describe('MyKnowledgeTab chunk refresh', () => {
     expect(uploadModal).not.toContain(':percent="item.progress"');
   });
 
-  it('allows editors to insert user-side chunk images at the cursor and preserve inline image order', () => {
+  it('keeps existing chunk images insertable at the cursor and strips them from the saved content', () => {
     const editor = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunkEditorDrawer.vue'), 'utf8');
     expect(component).toContain('v-model:open="chunkEditorOpen"');
     expect(component).toContain('<KnowledgeChunkEditorDrawer');
-    // 右键菜单：编辑器后来把 @contextmenu.prevent 直接绑 openChunkImageMenu 改成先过一层
-    // handleChunkContextMenu（只读态放行浏览器原生菜单，可编辑态才 preventDefault 再打开）。
-    // 这里只钉「文本框容器绑了 contextmenu、且最终走到 openChunkImageMenu」，不钉中间那层的名字。
-    expect(editor).toMatch(/class="chunk-editor-textarea-wrap"[^>]*@contextmenu(?:\.prevent)?="\w+"/);
-    expect(editor).toMatch(/openChunkImageMenu\(event\)|@contextmenu\.prevent="openChunkImageMenu"/);
+    // 插图上传只存在于已下线的 Java 管理侧（management 分支），agent-api 的分段没有图片存储：
+    // 抽屉不再带右键插图菜单与上传按钮，也不再有 management prop；只有老数据自带 images 时
+    // 才展示图片区，让编辑者还能把它们插回正文或删掉。
+    expect(editor).not.toContain('management');
+    expect(editor).not.toContain('uploadKnowledgeChunkImage');
+    expect(editor).not.toContain('openChunkImageMenu');
+    expect(editor).not.toContain('<a-upload');
+    expect(editor).toContain('<a-form-item v-if="chunkEditorImages.length" label="分段图片">');
     expect(editor).toContain('ref="chunkTextareaRef"');
-    expect(editor).toContain('uploadChunkImageFromMenu');
-    // 上传：同一个抽屉现在同时服务用户侧与管理侧（props.management 三元选 API），
-    // 本契约只关心用户侧仍走 uploadKnowledgeChunkImage 且带上分段 id。
-    expect(editor).toMatch(/uploadKnowledgeChunkImage\)?\(props\.chunk\.id, /);
-    expect(editor).toContain('insertChunkImage(image, chunkInsertSelection.value)');
+    expect(editor).toContain('@click="insertChunkImage(image)"');
     expect(editor).toContain('const contentWithImages = chunkEditorContent.value.trim();');
     expect(editor).toContain('const content = stripMarkdownImages(contentWithImages);');
     expect(editor).toContain('contentWithImages, images: chunkEditorImages.value');
@@ -73,14 +72,12 @@ describe('MyKnowledgeTab chunk refresh', () => {
   it('allows editors to delete chunks from the user-side list', () => {
     const api = readFileSync(resolve(process.cwd(), 'src/views/knowledge/knowledge.api.ts'), 'utf8');
     const chunksPanel = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunksPanel.vue'), 'utf8');
-    expect(api).toContain("chunkDelete: '/ai/knowledge/chunk/delete'");
     expect(api).toContain('export const deleteChunk = (id: string)');
+    expect(api).toContain('`${KB}/chunks/${id}`');
     expect(component).toContain('<KnowledgeChunksPanel');
     expect(chunksPanel).toContain('title="确定删除该分段？"');
     expect(chunksPanel).toContain('@confirm="removeChunk(item)"');
-    // 面板同时服务用户侧与管理侧（props.management 三元选 deleteChunk / deleteManagedChunk），
-    // 只钉「用户侧删除仍调 deleteChunk 且传分段 id」。
-    expect(chunksPanel).toMatch(/await \(?[^;\n]*\bdeleteChunk\)?\(record\.id\);/);
+    expect(chunksPanel).toContain('await deleteChunk(record.id);');
   });
 
   it('keeps document and chunk lists aligned with knowledge management', () => {

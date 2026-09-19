@@ -217,18 +217,12 @@ def admin_role() -> dict[str, Any]:
     }
 
 
-def permission_rows() -> list[dict[str, Any]]:
-    return [
-        {"id": "p-campus", "name": "校园百事通", "url": "/center/chat/campus", "perms": "campus:view", "menuType": 1},
-        {"id": "p-chat", "name": "主对话", "url": "/center/chat", "perms": "chat:view", "menuType": 1},
-    ]
-
-
 def menus() -> list[dict[str, Any]]:
     """侧栏菜单。只下发工作台真正有的页面：
-    /system/user、/system/role 是 Jeecg 的用户/角色管理页，Java 后端下线后表格空、
-    异步组件超时；/newapi/campus-assistant 的功能已并入 /admin 的「校园百事通」tab。
-    用户/角色管理页已随前端瘦身移出动态路由 glob（routeHelper 只吸入五个目录），这里不能再指过去。"""
+    /system/user、/system/role 那组 Jeecg 用户/角色管理页在 Java 后端下线后已从前端
+    源码删除（views/system 只剩 loginmini 与几个仍被活代码 import 的 *.api.ts），
+    /newapi/campus-assistant 的功能已并入 /admin 的「校园百事通」tab；这里只能指向
+    routeHelper 动态 glob（agent/sys/system/peopleCenter）里仍然存在的页面。"""
     return [
         {
             "path": "/center",
@@ -637,31 +631,6 @@ def role_list(
     if error:
         return error
     return ok({"records": [admin_role()], "total": 1, "size": pageSize, "current": pageNo, "pages": 1})
-
-
-@app.get("/sys/permission/list")
-def permission_list(
-    x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
-    authorization: Optional[str] = Header(None),
-):
-    session, error = require_user(x_access_token, authorization)
-    if error:
-        return error
-    return ok(permission_rows())
-
-
-@app.get("/sys/user/queryUserRole")
-def query_user_role(
-    x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
-    authorization: Optional[str] = Header(None),
-    userid: str = Query(""),
-):
-    session, error = require_user(x_access_token, authorization)
-    if error:
-        return error
-    if userid and userid != "1":
-        return fail("用户不存在", code=404, status=404)
-    return ok(["role-admin"])
 
 
 @app.get("/sys/dict/getDictItems/{code}")

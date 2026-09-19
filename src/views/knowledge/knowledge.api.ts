@@ -1,6 +1,5 @@
 import { defHttp } from '/@/utils/http/axios';
 import { recordAuditEvent } from '/@/api/audit/audit.api';
-import { useGlobSetting } from '/@/hooks/setting';
 import type {
   KnowledgeAcl,
   KnowledgeAnalyticsOverview,
@@ -9,34 +8,10 @@ import type {
   KnowledgeChunk,
   KnowledgeDocument,
   KnowledgeDocumentPreview,
-  KnowledgePreviewImage,
   KnowledgeUploadOptions,
   PageResult,
   RetrievalResponse,
 } from './knowledge.types';
-
-const Api = {
-  documentList: '/ai/knowledge/document/list',
-  documentUpload: '/ai/knowledge/document/upload',
-  documentPreview: '/ai/knowledge/document/preview',
-  chunkList: '/ai/knowledge/chunk/list',
-  chunkEdit: '/ai/knowledge/chunk/edit',
-  chunkImageUpload: '/ai/knowledge/chunk/image/upload',
-  chunkEnable: '/ai/knowledge/chunk/enable',
-  chunkDisable: '/ai/knowledge/chunk/disable',
-  chunkDelete: '/ai/knowledge/chunk/delete',
-  retrievalTest: '/ai/knowledge/retrieval/test',
-};
-
-// 后台知识库内容管理与用户侧 ACL 接口必须分开，不能依赖前端页面来源决定授权范围。
-// 后台管理页（KnowledgeList/KnowledgeDetail/analytics）已随 Java 下线删除；下面剩余的
-// Managed* 函数只被 components/ 下共用面板的 `props.management` 分支引用，当前没有任何
-// 调用方把 management 置真。
-const ManagementApiPrefix = '/ai/knowledge/admin';
-const managementUrl = (url: string) => `${ManagementApiPrefix}${url.replace('/ai/knowledge', '')}`;
-
-// uploadFile bypasses the normal URL-prefix hook, so use the same relative API base as ordinary requests.
-const knowledgeApiBaseUrl = useGlobSetting().apiUrl;
 
 // ── 知识库迁移至 agent-api ───────────────────────────────────────────────
 // 原 /ai/knowledge/* 由 JeecgBoot(Java) 提供，Java 下线后 auth-api 只剩一个统一
@@ -170,15 +145,9 @@ export const getChunkList = (params: Recordable) =>
   defHttp.get<PageResult<KnowledgeChunk>>({ url: `${KB}/chunks`, params }, KB_OPTS);
 
 // 只有 content 会被保存：agent-api 的分段没有图片存储，contentWithImages / images 这两个
-// 老 Java 的图文字段服务端忽略；签名保留是为了让编辑器组件在用户侧/管理侧共用一套调用。
+// 老 Java 的图文字段服务端忽略；签名保留是因为编辑器仍按这个结构组装保存参数。
 export const updateChunk = (params: Pick<KnowledgeChunk, 'id' | 'content' | 'contentWithImages' | 'images'>) =>
   defHttp.put<KnowledgeChunk>({ url: `${KB}/chunks/${params.id}`, params: { content: params.content } }, KB_OPTS);
-
-// 用户侧分段图片上传没有对应的 agent-api 接口（分段表没有图片列，也没有跨用户可读的
-// 图片存储），编辑器在用户侧已把插图入口藏起来；这里保留函数只为防止某条路径漏网时
-// 报一个看得懂的错，而不是打到已下线的 Java 地址得到 503。
-export const uploadKnowledgeChunkImage = (_id: string, _file: File): Promise<KnowledgePreviewImage> =>
-  Promise.reject(new Error('当前版本的分段暂不支持插入图片'));
 
 export const setChunkEnabled = (id: string, enabled: boolean) =>
   defHttp.post({ url: `${KB}/chunks/${id}/enabled`, params: { enabled } }, KB_OPTS);
@@ -202,54 +171,6 @@ export const getKnowledgeAcl = (knowledgeId: string) =>
 
 export const saveKnowledgeAcl = (knowledgeId: string, items: KnowledgeAcl[]) =>
   defHttp.post({ url: `${KB}/bases/${knowledgeId}/acl`, params: { acls: items } }, KB_OPTS);
-
-export const getManagedDocumentList = (params: Recordable) =>
-  defHttp.get<PageResult<KnowledgeDocument>>({ url: managementUrl(Api.documentList), params }, { errorMessageMode: 'none' });
-
-export const uploadManagedKnowledgeDocument = (knowledgeId: string, file: File, options: KnowledgeUploadOptions, onUploadProgress?: (event: ProgressEvent) => void) =>
-  defHttp.uploadFile<KnowledgeDocument>(
-    { url: managementUrl(Api.documentUpload), baseURL: knowledgeApiBaseUrl, onUploadProgress },
-    { file, data: { knowledgeId, ...options } },
-    { isReturnResponse: true },
-  );
-
-export const previewManagedKnowledgeDocument = (knowledgeId: string, file: File, options: KnowledgeUploadOptions) =>
-  defHttp.uploadFile<KnowledgeDocumentPreview>(
-    { url: managementUrl(Api.documentPreview), baseURL: knowledgeApiBaseUrl },
-    { file, data: { knowledgeId, ...options } },
-    { isReturnResponse: true },
-  );
-
-export const getManagedChunkList = (params: Recordable) =>
-  defHttp.get<PageResult<KnowledgeChunk>>({ url: managementUrl(Api.chunkList), params }, { errorMessageMode: 'none' });
-
-export const updateManagedChunk = (params: Pick<KnowledgeChunk, 'id' | 'content' | 'contentWithImages' | 'images'>) =>
-  defHttp.put<KnowledgeChunk>({ url: managementUrl(Api.chunkEdit), params });
-
-export const uploadManagedKnowledgeChunkImage = (id: string, file: File) =>
-  defHttp.uploadFile<KnowledgePreviewImage>(
-    { url: managementUrl(Api.chunkImageUpload), baseURL: knowledgeApiBaseUrl },
-    { file, data: { id } },
-    { isReturnResponse: true },
-  );
-
-export const setManagedChunkEnabled = (id: string, enabled: boolean) =>
-  defHttp.post({ url: managementUrl(enabled ? Api.chunkEnable : Api.chunkDisable), params: { id } }, { joinParamsToUrl: true });
-
-export const deleteManagedChunk = (id: string) =>
-  defHttp.delete({ url: managementUrl(Api.chunkDelete), params: { id } }, { joinParamsToUrl: true });
-
-export const testManagedRetrieval = (params: Recordable) =>
-  defHttp.post<RetrievalResponse>({ url: managementUrl(Api.retrievalTest), params });
-
-export const getManagedKnowledgeAnalyticsOverview = (params: KnowledgeAnalyticsRange) =>
-  defHttp.get<KnowledgeAnalyticsOverview>({ url: `${ManagementApiPrefix}/analytics/overview`, params }, { errorMessageMode: 'none' });
-
-export const getManagedKnowledgeBaseAnalytics = (id: string, params: KnowledgeAnalyticsRange) =>
-  defHttp.get<KnowledgeAnalyticsOverview>({
-    url: `${ManagementApiPrefix}/analytics/knowledge-bases/${encodeURIComponent(id)}`,
-    params,
-  }, { errorMessageMode: 'none' });
 
 // 用户侧单库运营统计：数据源是 agent-api 的检索日志（agent_knowledge_retrieval_log），
 // 原 /ai/knowledge/base/{id}/analytics 归已下线的 Java，面板一直报「统计迁移」。
