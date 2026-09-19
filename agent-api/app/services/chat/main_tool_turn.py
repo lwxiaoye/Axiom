@@ -3,10 +3,11 @@
 - trace_to_steps：编排轨迹 → agent_steps 记录（§16.5 可观测/回放）
 - strip_images_for_state：挂起游标持久化前剥离多模态图片
 """
+import inspect
 import re
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from app.services.chat.tools.base import pop_tool_meta
 
@@ -399,11 +400,32 @@ def _append_tool_result_trace(out: dict, ev: dict) -> dict:
     return item
 
 
+async def convert_loop_failure(runtime_policy, env, error: BaseException):
+    """交互式内置助手（面试）可把已耗尽重试的模型失败改判为终态错误。
+
+    否则任何非 TerminalRunError 都进 `_pump_background_run` 的恢复路径：waiting_system →
+    无限退避重排，用户只看到「正在自动恢复…」，作答框一直锁着。改判后是可读原因 + 可重发。
+    已是终态错误的不改判；策略自身抛错时按未改判处理，绝不吞掉原异常。
+    """
+    if not runtime_policy or not getattr(runtime_policy, "terminal_failure", None):
+        return None
+    from app.services.agent_harness.public_errors import TerminalRunError
+    if isinstance(error, TerminalRunError):
+        return None
+    try:
+        converted = await runtime_policy.terminal_failure(env, error)
+    except Exception:  # noqa: BLE001
+        logger.warning("builtin terminal_failure hook failed; keep recovery path", exc_info=True)
+        return None
+    return converted if isinstance(converted, TerminalRunError) else None
+
+
 async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, tool_meta: Optional[dict] = None,
                                ctx_window: int = 0, strict_ppt_publish: bool = False,
                                subagent_icons: Optional[dict] = None,
                                research_profile: bool = False,
-                               committed_text_only: bool = False):
+                               committed_text_only: bool = False,
+                               public_event_mapper: Optional[Callable[[dict], dict]] = None):
     """把 drive_model 事件流映射为 SSE 帧；聚合结果写入 out（异步生成器无返回值）。
 
     call_subagent 映射为 subagent.*（前端渲染子智能体 chip），其余映射 tool.*。
@@ -441,8 +463,14 @@ async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, too
         if committed_text_only and et in {"delta", "reasoning"}:
             continue
         if committed_text_only and et in {"tool_started", "tool_progress", "tool_result"}:
-            from app.services.chat.builtin_assistants.interview.tools import public_interview_loop_event
-            ev = public_interview_loop_event(ev)
+            # 阶段文案由助手自己的投影给出（面试：按冻结动作说「评估你的回答，准备第 N 题」）；
+            # 没传工厂时退回面试的无上下文投影，保证旧调用方仍不泄漏草稿与工具参数。
+            if public_event_mapper is None:
+                from app.services.chat.builtin_assistants.interview.tools import public_interview_loop_event
+                public_event_mapper = public_interview_loop_event
+            ev = public_event_mapper(ev)
+            if inspect.isawaitable(ev):
+                ev = await ev
         if et != "reasoning":
             completed = _flush_reasoning()
             if completed:
@@ -1626,6 +1654,10 @@ async def run_agent_turn(env):
                     subagent_icons=subagent_icons,
                     research_profile=bool(getattr(env, "research_profile", False)),
                     committed_text_only=bool(runtime_policy and runtime_policy.project_answer),
+                    public_event_mapper=(
+                        runtime_policy.public_loop_event(env)
+                        if runtime_policy and runtime_policy.public_loop_event else None
+                    ),
                 ):
                     yield payload
 
@@ -1994,6 +2026,9 @@ async def run_agent_turn(env):
                     record_tool_observations=task_run_service.record_tool_observations,
                     error=e,
                 )
+                converted = await convert_loop_failure(runtime_policy, env, e)
+                if converted is not None:
+                    raise converted from e
                 raise
     # 深扫修复(2026-07-20 P0):此置位在 skeleton 脚本重放中因缩进不匹配被静默丢失——
     # 缺它则骨架恒 return,直答回退成死代码:普通对话在首个正文 token 前遇异常时
