@@ -43,8 +43,10 @@ function asyncImportRoute(routes: AppRouteRecordRaw[] | undefined) {
   if (!dynamicViewsModules) {
     // SLIM-BUILD: 原为 '../../views/**/*.{vue,tsx}'，会把 src/views 下全部 787 个
     // 页面文件连同它们的依赖（bpmn/pdfjs/echarts/codemirror…）无条件打进包里。
-    // 现只吸入使用界面。要恢复某个模块，把目录名加进花括号即可 —— 文件都还在磁盘上。
-    dynamicViewsModules = import.meta.glob('../../views/{agent,sys,system,dashboard,peopleCenter}/**/*.{vue,tsx}');
+    // 现只吸入使用界面；auth-api menus() 实际只下发 peopleCenter/pages/ChatPage。
+    // 指向已下线 Java 接口的页面目录（dashboard、gpustack、monitor、openapi、flow 的
+    // 流程页、system 的后台管理页…）已随 Java 下线删除，只在 git 历史里。
+    dynamicViewsModules = import.meta.glob('../../views/{agent,sys,system,peopleCenter}/**/*.{vue,tsx}');
     //合并online lib路由
     dynamicViewsModules = Object.assign({}, dynamicViewsModules, packageViews);
   }
