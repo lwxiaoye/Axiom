@@ -1033,7 +1033,7 @@ import { commentaryRepeatsFinalAnswer } from '../utils/commentaryVisibility';
 import { stopProtocolLinkAtCjkPunctuation } from '../utils/markdownLinkify';
 import { stripInlineSourceMarkers } from '../utils/stripInlineSourceMarkers';
 import { isResearchTurn, linkResearchCites, researchCompletionStats as buildResearchCompletionStats, researchStructureMarkdown, researchStructureTitle, sanitizeResearchTitle, stripLeadingTitleHeadings, stripResearchScaffold } from '../utils/researchReport';
-import type { AttachmentIssue, GeneratedFile, SkillItem, SubagentItem } from '../agentApi';
+import type { AttachmentIssue, CitationSource, GeneratedFile, SkillItem, SubagentItem } from '../agentApi';
 import { myFilesRouteFor, visibleDeliverables } from '../composables/deliverable';
 import { fileKindOf } from '../composables/fileKind';
 import { generationMeterStatus, interviewGenerationMeterStatus } from '../composables/generationMeterStatus';
@@ -1516,7 +1516,21 @@ function openSources(message: ChatMessage) {
 // 文本类来源（知识库/网页/文件）：来源抽屉与「引用来源（N）」计数用——
 // 搜索附带图片（type=image）只服务正文 [图N] 图文混排，不算阅读来源
 function sourceCitations(message: ChatMessage) {
-  return (message.citations || []).filter((c) => c.type !== 'image');
+  // 同一轮里模型可能多次调 search_knowledge 命中同一分段、多次 search_web 命中同一页——
+  // 后端按调用累加不去重，抽屉里就会出现两条一模一样的引用。有 URL 按 URL 去重，
+  // 知识库分段没有 URL，按「来源 + 片段正文」去重。
+  const seen = new Set<string>();
+  const out: CitationSource[] = [];
+  for (const c of message.citations || []) {
+    if (c.type === 'image') continue;
+    const key = c.url
+      ? `url:${String(c.url)}`
+      : `text:${String(c.source || '')}|${String(c.snippet || c.title || '').trim().slice(0, 200)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c);
+  }
+  return out;
 }
 
 // 带 URL 的网页来源（站点图标 /「参考了 N 个来源」抽屉）。

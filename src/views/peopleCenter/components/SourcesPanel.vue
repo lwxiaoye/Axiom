@@ -4,11 +4,11 @@
       <div v-if="open" class="sources-backdrop" @click="emit('close')"></div>
     </transition>
     <transition name="sources-slide">
-      <aside v-if="open" class="sources-panel" aria-label="搜索结果">
+      <aside v-if="open" class="sources-panel" aria-label="引用来源">
         <header class="sources-head">
           <div class="sources-title">
             <GlobalOutlined />
-            <strong>搜索结果</strong>
+            <strong>引用来源</strong>
             <em class="sources-count">{{ sources.length }}</em>
           </div>
           <button type="button" class="sources-close" title="关闭" @click="emit('close')">

@@ -364,14 +364,17 @@ async def build_kb_pre_context_result(
     if rq and rq != query:
         queries.append(rq)
     try:
-        results = await asyncio.wait_for(
+        # return_exceptions=True：外层（工具预检预算）把这个等待取消时，gather 里某个子检索
+        # 随后抛出的异常会没人消费，日志里就是「_GatheringFuture exception was never retrieved」
+        # 的 ERROR 噪音；改为把异常当结果收回来，下面统一按失败处理。
+        raw_results = await asyncio.wait_for(
             asyncio.gather(*[
                 retrieve_knowledge(
                     token, knowledge_ids, q, tenant_id=tenant_id, image_sink=image_sink,
                     telemetry_user_id=telemetry_user_id, turn_id=turn_id, source=source,
                     execution_id=uuid.uuid4().hex,
                 ) for q in queries
-            ]),
+            ], return_exceptions=True),
             timeout=max(1, int(settings.KNOWLEDGE_PRE_RETRIEVE_TIMEOUT_SECONDS)),
         )
     except asyncio.TimeoutError:
@@ -381,6 +384,13 @@ async def build_kb_pre_context_result(
             prompt_block="【知识库检索超时】本轮未能及时取得所选知识库资料；请如实说明这一点，不要假装引用了资料。",
             error_code="timeout",
         )
+    results: List[Dict[str, Any]] = []
+    for r in raw_results:
+        if isinstance(r, BaseException):
+            logger.warning("知识库前置检索子任务异常: %s", r)
+            results.append({"ok": False, "chunks": [], "error": f"检索失败: {r}"})
+        else:
+            results.append(r)
     if not any(r["ok"] for r in results):
         logger.warning("知识库前置检索失败，本轮不注入资料: %s", results[0].get("error"))
         return KnowledgePreContextResult(

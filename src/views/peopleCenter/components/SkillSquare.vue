@@ -61,7 +61,7 @@
                 <strong>{{ skill.name }}</strong>
                 <p>{{ skill.description || '暂无描述' }}</p>
                 <div class="skill-meta">
-                  <span v-if="skill.version">v{{ skill.version }}</span>
+                  <span v-if="skill.version">{{ versionLabel(skill.version) }}</span>
                   <!-- 平台技能标来源：内置 / 管理员分发。个人区不标，分区标题已经说明了 -->
                   <span v-if="skill.source === 'system'" class="skill-origin">{{ originLabel(skill) }}</span>
                   <span v-if="isPackageSkill(skill)">zip · {{ skill.fileCount }} 个文件</span>
@@ -110,7 +110,7 @@
     >
       <div v-if="detailSkill" class="skill-detail">
         <div class="skill-detail-meta">
-          <span v-if="detailSkill.version">v{{ detailSkill.version }}</span>
+          <span v-if="detailSkill.version">{{ versionLabel(detailSkill.version) }}</span>
           <span v-if="detailSkill.author">{{ detailSkill.author }}</span>
           <span>{{ originLabel(detailSkill) }}</span>
           <span v-if="isPackageSkill(detailSkill)">zip 包 · {{ detailSkill.fileCount }} 个文件</span>
@@ -423,6 +423,12 @@ function skillVisual(skill: SkillItem): SkillVisual {
 }
 
 /** 平台技能上的来源小标签：内置 / 管理员分发；个人技能显示「我的」 */
+/** 版本名后端可能已带 v（v1/v2），也可能是裸语义版本（3.0.7）：统一成 v 开头，不出现 vv2 */
+function versionLabel(version: string): string {
+  const v = String(version || '').trim();
+  return /^v/i.test(v) ? v : `v${v}`;
+}
+
 function originLabel(skill: SkillItem): string {
   if (skill.source === 'system') return skill.builtin ? '内置' : '管理员分发';
   return '我的';
