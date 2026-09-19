@@ -927,6 +927,10 @@ async def _rank_by_relevance(
     embedding 不可用时只保留关键词匹配项，无 query 时保持新近序。批量 embed，冷启动一次调用。"""
     if not query or not query.strip():
         return candidates
+    if not candidates:
+        # 没有候选记忆还去给 query 做 embedding，等于每轮白付一次向量服务往返（实测 1.5 s
+        # 且占用 prepare_turn 预算）——大多数学生账号根本没有语义记忆。
+        return []
     try:
         vecs = await _embed_many(
             [query] + [r.content for r in candidates],
