@@ -1,43 +1,37 @@
 # AXIOM 项目拆解与校园复用路线
 
-检查日期：2026-09-17。结论基于提供的工作区源码，不代表原服务器或新环境已完成业务联调。
-
-当前工作区补充：`auth-api` 已提供 FastAPI 单管理员认证兼容实现，基本登录不再必须依赖 Java。它不等于下文的完整业务后端，知识库、目录等依赖仍需补齐。模型地址可连接本地网关或云端服务，仓库没有部署模型权重。详见 [本地认证服务](../auth-api/README.md)。
+首版检查日期：2026-09-17；2026-09-19 按删除工作流编排 / 子智能体 / 皮肤系统后的源码重新核对复用表与缺口。结论基于仓库源码，不代表目标环境已完成业务联调。
 
 ## 1. 结论
 
-这是一套带 Agent 执行框架的 AI 平台，包含 Vue 用户端/管理端、Python Agent API、工作流、知识检索适配、文件与皮肤系统。
-本次按工作区当前内容复刻到新仓库，包含原来未提交的源码改动；没有导入旧 Git 历史、服务器凭据和运行数据。
+这是一套带 Agent 执行框架的校园 AI 平台：Vue 3 前端、FastAPI agent-api（主对话 Harness、知识库、Skill、文件、平台配置）、FastAPI auth-api（单管理员 + 自助注册）。Java 业务后端已下线，知识库与 Skill 目录由 agent-api 自持；模型地址可连接本地网关或云端服务，仓库不含模型权重。
 
-现有校园产品可以作为 AXIOM 的“官方知识问答”模块复用，但不能直接称为“十个智能体协作办事”。
-校园模式显式只允许 search_knowledge、search_web 两种只读工具，拒绝客户端指定子智能体、Skill、计划模式等覆盖。
-在学校资料和基础服务未配置前，源码完整也不等于产品可运行。
+现有校园百事通可以作为 AXIOM 的“官方知识问答”模块直接复用，但不能直接称为“十个智能体协作办事”。校园模式只允许 `search_knowledge`、`search_web` 两种只读工具，拒绝客户端指定 Skill、计划模式等覆盖。在学校资料和基础服务未配置前，源码完整也不等于产品可运行。
 
 ## 2. 实际系统结构
 
 ```mermaid
 flowchart TD
-  U[学生 / 教师 / 管理员] --> V[Vue 3 + Vite 前端]
-  V -->|登录 / 权限 / 目录 / 知识库管理| J[Java 业务后端：本仓库不含]
-  V -->|对话 / SSE / 工作流 / 校园配置| P[FastAPI Agent API]
-  P --> H[共享 Agent Harness + Worker]
-  H --> M[模型网关与用户模型配置]
-  H --> R[PostgreSQL：Run / 事件 / 计划]
-  P --> B[MySQL：共享业务表]
-  J --> B
-  P -->|知识回源与权限核验| J
+  U[学生 / 管理员] --> V[Vue 3 + Vite 前端]
+  V -->|登录 / 注册 / 资料 /api| A[FastAPI auth-api：SQLite]
+  V -->|对话 SSE / 知识库 / Skill / 文件 / 管理配置 /agent-api| P[FastAPI agent-api]
+  P -->|X-Access-Token 回源| A
+  P --> H[Agent Harness + Worker]
+  H --> M[平台对话模型名册 / 个人覆盖]
+  H --> R[PostgreSQL：Run / 事件 / 计划 / 工具结果]
+  P --> B[MySQL：会话 / 知识库切片正本 / Skill / 文件 / 平台配置]
   P --> Q[Qdrant 向量索引]
   P --> F[文件存储：本地或 MinIO]
-  H --> O[可选：搜索 / 浏览器 / 沙箱 / OCR]
+  H --> O[SearXNG 搜索 / Playwright 浏览器 / OpenSandbox 沙箱]
 ```
 
 关键边界：
 
-- `/center/chat`：通用主对话，具备任务执行与能力调用框架。
-- `/center/chat/campus`：同一框架中的只读校园助手，按已发布配置固定知识库、域名与模型。
-- `/workflow` 相关页面：可视化工作流，拥有独立的确定性执行流程。
-- `/channel` 等后台页面：管理入口，不能把所有管理菜单暴露为学生首页。
-- Java 拥有身份、角色、组织等业务数据；不能通过删登录保护来替代缺失后端。
+- `/center/chat`：通用主对话，具备任务执行与能力调用框架（详见 Harness 规范）。
+- `/center/chat/campus`、`/center/chat/ppt`、`/center/chat/interview`：同一框架中的三个内置助手；校园百事通按已发布配置固定知识库、域名与模型。
+- `/admin`：管理配置（对话 / 向量 / 重排模型、联网搜索、校园百事通发布、用户列表），只有管理员可见。
+- auth-api 拥有身份；agent-api 每次请求回源校验 Token，不能通过删登录保护来替代认证。
+- 已删除、不要再找：工作流编排与 `/workflow/*`、子智能体、对外 Agent API、皮肤系统（见 [`架构概览.md`](架构概览.md) 第 5 节）。
 
 ## 3. 哪些可以复用
 
@@ -46,35 +40,34 @@ flowchart TD
 | 模块 | 代码入口 | 判断 | 接下来做什么 |
 |---|---|---|---|
 | 校园问答身份与页面 | `src/views/peopleCenter/builtinAssistants/campusServices/` | 直接复用 | 调整校园名称、说明、入口和角色展示 |
-| 校园后台配置 | `src/views/peopleCenter/pages/AdminConsolePage.vue`（/admin 校园百事通 tab）、`agent-api/app/routers/campus_assistant.py` | 直接复用 | 配模型、知识库绑定、学校官方域名并发布 |
-| 配置发布与回滚 | `agent-api/app/services/chat/builtin_assistants/campus_services/config_service.py` | 直接复用 | 配置真实租户和权限；保留版本与发布记录 |
+| 校园后台配置 | `src/views/peopleCenter/pages/AdminConsolePage.vue`（`/admin` 校园百事通 tab）、`agent-api/app/routers/campus_assistant.py` | 直接复用 | 选模型、绑定知识库、填学校官方域名并发布 |
+| 配置发布与回滚 | `agent-api/app/services/chat/builtin_assistants/campus_services/config_service.py` | 直接复用 | 保留版本与发布记录；`/campus-assistant/admin/releases/{id}/rollback` |
 | 每次运行的配置快照 | 同目录 `runtime_service.py` | 直接复用 | 保持发布版本可追溯，不能临时绕过未发布检查 |
 | 官方域名限制 | 同目录 `domain_policy.py` | 直接复用 | 填本校域名；精确匹配主机及获准子域 |
 | 依据不足拒答、来源说明 | 同目录 `policy.py` | 直接复用 | 写好真实学校知识；不让模型猜时间、地点、费用和电话 |
+| 知识库入库与检索 | `agent-api/app/services/knowledge/`、`src/views/knowledge/` | 直接复用 | 配向量模型（`/embedding-config`）后上传学校资料；切片正本在 MySQL、向量在 Qdrant |
 | 主对话与流式展示 | `src/views/peopleCenter/`、`agentApi.ts` | 直接复用 | 以校园服务组织导航、欢迎语、快捷入口 |
-| 运行、计划、恢复与工具调度 | `agent-api/app/services/agent_harness/` | 复用框架 | 在新的校园协作产品策略中接入能力；不要复制第二套内核 |
-| 智能体目录与子智能体调用 | `agent-api/app/services/agents/`、`chat/subagent_turn.py` | 复用框架 | 配置十个角色、检索发现、权限和输入输出协议 |
-| 工作流编辑与执行 | `src/views/workflow/`、`agent-api/app/services/workflows/` | 按场景复用 | 表单、分支、用户选择、流程状态可用于办事指引 |
-| 用户文件、文档解析 | `agent-api/app/services/files/` | 接服务后复用 | 配存储、上传权限及清理周期；不导入原用户文件 |
-| 知识检索 | `campus_services/java_knowledge.py`、`services/knowledge/` | 接服务后复用 | Java 接口、知识库 ACL、向量模型与 Qdrant 必须一致 |
-| PPT、面试、邮件连接器等 | 各自模块 | 可选保留 | 不作为校园入学项目的首期必做范围 |
+| 运行、计划、恢复与工具调度 | `agent-api/app/services/agent_harness/` | 复用框架 | 新的校园协作能力接进同一 Harness；不要复制第二套内核，也不要复活子智能体委派 |
+| 人在环与工具审批 | `services/chat/tools/`（`ask_user_choice`）、`services/gateway/tool_gateway.py` | 复用框架 | 办事确认、材料核对等交互复用现有选择卡与审批卡 |
+| 用户文件、文档解析 | `agent-api/app/services/files/` | 直接复用 | 配存储（本地或 MinIO）与清理周期；不导入原用户文件 |
+| 登录、注册、个人资料 | `auth-api/`、`src/views/system/loginmini/` | 直接复用 | 生产前评估是否需要接学校统一身份；当前只有单管理员 + 自助注册 |
+| 演示文稿助手、面试助手、Skill 广场、邮件/GitHub 连接器 | 各自模块 | 可选保留 | 不作为校园入学项目的首期必做范围 |
 
 ## 4. 当前最重要的缺口
 
 ### P0：复刻现有校园问答必须完成
 
-1. **Java 业务后端**：本仓库没有相应 Java 源码或部署包。需要另提供兼容服务，或另立任务实现兼容认证、权限、应用目录与知识接口。
-2. **业务数据库基线**：Python 有迁移文件，但不等于包含 Java `sys_user/sys_role/sys_permission` 等完整业务初始化。需取得可用的空库建库方案，不能复制原学校用户数据。
-3. **登录协议参数**：登录 AES 参数、签名兼容参数已移出源码常量，需与实际 Java 配置对齐。这些浏览器参数是公开协议值，不能当服务端密钥。
-4. **模型与基础服务**：配置自己的模型网关、MySQL、Runtime PostgreSQL、Qdrant。沙箱、浏览器、OCR、MinIO 按实际功能决定是否接入。
-5. **学校知识**：准备真实且有来源的入学手册、缴费说明、资助流程、住宿规则、校园账号指南，记录适用年份、校区与更新时间。
-6. **发布校园配置**：在管理员页面选择模型、绑定知识库、填写官方域名并发布。没有已发布配置时返回不可用是预期保护。
-7. **完成业务联调**：测试真实登录、权限隔离、官方依据检索、未知问题拒答、历史恢复及手机展示。
+1. **部署基础服务**：按 [`生产部署手册.md`](生产部署手册.md) 起 MySQL、Runtime PostgreSQL、Qdrant、SearXNG、auth-api、agent-api、worker；沙箱与浏览器容器按是否需要 bash / 网页工具决定。
+2. **登录协议参数**：`AXIOM_LOGIN_AES_KEY` / `AXIOM_LOGIN_AES_IV` / `AXIOM_REQUEST_SIGNATURE_SALT` 前端构建期与 auth-api 必须一致；它们是公开协议值，不能当服务端密钥。
+3. **模型配置**：管理员在 `/admin` 配对话模型名册、向量模型、（可选）重排模型与联网搜索；密钥只以 Fernet 密文入库，`AXIOM_CONNECTOR_SECRET` 必须稳定。
+4. **学校知识**：在「我的知识库」上传真实且有来源的入学手册、缴费说明、资助流程、住宿规则、校园账号指南，记录适用年份、校区与更新时间。
+5. **发布校园配置**：在 `/admin` 校园百事通 tab 选择模型、绑定知识库、填写官方域名，校验后发布。没有已发布配置时返回不可用是预期保护。
+6. **完成业务联调**：测试真实登录 / 注册、权限隔离（管理员无旁路）、官方依据检索、未知问题拒答、历史恢复及手机展示。
 
 ### P1：从现有产品走向比赛要求
 
 1. 原代码只有一个内置校园问答身份，不能用十张卡片充当十个有效智能体。
-2. 新建“校园协作”产品策略，复用共享 Harness；保留原只读校园助手作为可信资料检索角色。
+2. 新建“校园协作”产品策略，复用共享 Harness（与三个内置助手同样以 preset / 策略注册接入）；保留原只读校园助手作为可信资料检索角色。子智能体委派已删除，多角色协作需要重新设计，不要恢复旧的 `call_subagent`。
 3. 建立学生最小化服务档案、事项状态及角色交接协议，明确数据访问权限与保留期限。
 4. 为十个角色分别配置知识范围、输入、输出、失败处理和测试案例。
 5. 做一条完整旅程：学生需求 → 资料核对 → 个性化办事清单 → 状态确认 → 缺失项处理 → 完成检查。
@@ -112,6 +105,6 @@ flowchart TD
 
 ## 7. 复用和原创范围
 
-本项目的前端基础组件、Agent 执行框架和现有校园问答实现来自提供的上游工作区。
+本项目的前端基础组件、Agent 执行框架和现有校园问答实现来自提供的上游工作区；auth-api、知识库与 Skill 目录自持以及 2026-09-19 的功能删减是本仓库后续改动。
 AXIOM 的品牌调整、脱敏配置和后续校园协作设计不代表这些上游模块为团队原创。
 参赛材料应分别说明复用底座、团队新增逻辑、学校资料来源和实际验证结果。

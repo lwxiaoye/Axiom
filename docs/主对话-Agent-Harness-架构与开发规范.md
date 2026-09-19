@@ -1,16 +1,16 @@
-> AXIOM 迁移说明：保留上游较新的 v1.211 架构说明，已合并原文件中的两处文档冲突。历史测试、部署及服务状态不代表 AXIOM 当前环境。
+> AXIOM 迁移说明：保留上游较新的 v1.211 架构说明，已合并原文件中的两处文档冲突。2026-09-19：工作流编排、子智能体委派、对外 Agent API、智能体推荐与皮肤系统已整体删除，本文相应段落已去掉；§15 中只描述这些已删功能的条目一并移除，完整历史见 Git。历史测试、部署及服务状态不代表 AXIOM 当前环境。
 
 # 主对话 Agent Harness 架构与开发规范
 
 | 项目 | 内容 |
 | --- | --- |
 | 文档身份 | **主对话唯一执行事实源（SSOT），覆盖架构、开发、Code Review 与验收** |
-| 版本 | v1.211 |
-| 更新日期 | 2026-09-11 |
+| 版本 | v2.0 |
+| 更新日期 | 2026-09-19 |
 | 当前状态 | H1–H6 的源码入口与协议切换已完成，H2 扩展能力和 H7 仍有独立运行验收门禁。Standard/Plan 共用主模型工具循环；Research 经同一 Harness 入口进入专用研究编排，当前以临时团队取证、空工具面成稿和发表前核验为主路径。Run、Plan、Tool、Context、Event、Worker 与恢复保持共享；内置 presentation/campus_services/interview 通过策略注册接入。源码存在不等于服务已加载或发布门禁通过。 |
 | 最新交互 | 普通主对话在 + 右侧提供绑定 Thread 的工作文件夹；连接器与旧顶栏工作区入口仍隐藏。Research 完成行使用持久耗时和 URL 去重后的 sourcesFound，成员说明展示实际网页/材料成果，导航只释放观察者。面试过程中只展示问答，动作收进单个菜单；整场结束并保存复盘后才展示白灰报告，分数、点评和导出复用服务端整场汇总。按凭据密钥作用域排队的 Job 使用 queued_scoped/leased_scoped，公开 Run 协议不变。具体契约见 §3、§5.3、§6.6.2、§9.4，历史验收按日期另读。 |
 | 适用范围 | `/center/chat`、`/center/chat/ppt`、`/center/chat/campus`、`/center/chat/interview`、主对话及内置应用前端、AXIOM Agent（`agent-api` 主 Agent）、Run Worker、工具与沙箱、上下文、记忆、事件和计划 |
-| 不适用范围 | 工作台确定性工作流 DAG、Java 业务流程、知识库管理页、后台模型和渠道管理 |
+| 不适用范围 | 知识库管理页（`src/views/knowledge/`）、管理配置页 `/admin`、auth-api 的登录与用户体系 |
 
 > 本文是主对话架构、开发、Code Review 和验收的唯一事实源。
 > 与其他文档、代码注释或历史实现冲突时，以本文为目标；若产品决策发生变化，必须先更新本文，再修改代码。
@@ -47,8 +47,8 @@
 | 本机服务 | `agent-api/run.py`、`app/core/local_worker.py`、`app/main.py`；统一环境和密钥、子 Worker 监护、就绪检查 |
 | 内置应用 | `chat/builtin_assistants/registry.py` 与各模块策略；前端 `builtinAssistants/`、`BuiltinHarnessRunPage`，路由见 `src/router/routes/mainOut.ts` |
 | 工作文件夹 | `app/routers/files.py`、`files/user_file_service.py`、`agent_harness/workspace_service.py`；前端 `WorkFolderMenu.vue` 和 `useCenterChat.ts` |
-| 工作流函数循环 | `agents/agent_executor.py` 已无固定 30 轮/总墙钟限制，复用传输、压缩和结果分页；仍不是主对话的持久 Run/Worker 循环 |
-| 数据迁移 | MySQL `mysql_0015_work_folders`，Runtime `runtime_0020_workflow_results`；链头和旧库升级规则见 [迁移说明](../agent-api/migrations/README.md) |
+| 数据迁移 | MySQL 链头 `mysql_0024_drop_orchestration`（其前一版 `mysql_0023_drop_skins`），Runtime 链头 `runtime_0024_drop_eval_runs`；旧库升级规则见 [迁移说明](../agent-api/migrations/README.md) |
+| 已删除（2026-09-19） | 子智能体委派（`call_subagent`）、智能体推荐（`recommend_agent`）、工作流编排与对外 Agent API、皮肤系统整体删除；`ChatRequest.subagent_id` 只为旧前端宽松保留并被忽略，`services/agents/` 只剩模型目录 `agent_service.py` |
 
 表内后端缩写路径以 `agent-api/app/services/` 为基准，带 `app/` 的路径以 `agent-api/` 为基准。现存源码中的旧注释、未被调用的验证辅助分支及架构测试，只能按实际调用链判断，不能直接作为当前产品行为。
 
@@ -58,7 +58,7 @@
 
 ## 1. 一句话目标与不可回退原则
 
-把主对话建设成一个 Web 端任务执行者。主对话里的主 Agent 产品名称是 **AXIOM Agent**（执行团队主管卡缺省名、欢迎语与委派 `manager_role` 默认值）。Harness 运行时仍叫 AXIOM Agent Harness，不改包名、路由或协议。
+把主对话建设成一个 Web 端任务执行者。主对话里的主 Agent 产品名称是 **AXIOM Agent**（欢迎语与执行过程中的缺省名称）。Harness 运行时仍叫 AXIOM Agent Harness，不改包名、路由或协议。
 
 > **模型负责理解、思考和选择下一步；Harness 负责计划、上下文、权限、执行、状态、记忆、证据和完成真相。**
 
@@ -211,11 +211,11 @@ compaction 在 Provider 请求前按目标模型窗口与 token 估算分段，�
 
 每个真实 Provider 网络请求在发出前建立 physical attempt，并在完成、失败、中断或取消时结束同一 handle。一个 attempt 不得代表多个 HTTP 请求，审计写入失败也不得把消耗记为 0；审计故障 fail-open 保持用户输出，同时发不含正文的 `audit_write_failed`。
 
-总账必须覆盖 `main_loop / plain_answer / public_preamble / research_commentary / compaction_live / compaction_preflight / compaction_background / router / title / memory_extract / memory_summary / paid_search / browser_digest / subagent_model / workflow_node / acceptance / parent_summary / tool_internal`。逻辑调用保存 `logical_call_id / root_run_id / run_id / thread_id / parent_logical_call_id / parent_tool_call_id / call_scope_id / purpose / model / transport`；物理尝试保存独立 `request_id / attempt_index / execution_segment / run_request_sequence / outcome / latency / semantic_payload_hash / wire_payload_hash`。`run_request_sequence` 必须由数据库原子分配，跨恢复与后台调用严格递增；主前缀比较只在相同 `call_scope_id + model + transport` 内选前驱。
+总账必须覆盖 `main_loop / plain_answer / public_preamble / research_commentary / compaction_live / compaction_preflight / compaction_background / router / title / memory_extract / memory_summary / paid_search / browser_digest / subagent_model / workflow_node / acceptance / parent_summary / tool_internal`（`subagent_model` / `workflow_node` 只为历史审计行保留枚举，当前代码不再产生）。逻辑调用保存 `logical_call_id / root_run_id / run_id / thread_id / parent_logical_call_id / parent_tool_call_id / call_scope_id / purpose / model / transport`；物理尝试保存独立 `request_id / attempt_index / execution_segment / run_request_sequence / outcome / latency / semantic_payload_hash / wire_payload_hash`。`run_request_sequence` 必须由数据库原子分配，跨恢复与后台调用严格递增；主前缀比较只在相同 `call_scope_id + model + transport` 内选前驱。
 
 usage 必须先绑定到真正返回它的 attempt，再做 Root 汇总。`completed / incomplete / failed` 终态只要携带可信 usage 就先入账；无终态 usage 的断流将 token 留为 `NULL` 并记 `unknown_provider_charge=true`，不得伪造 0。归一化后分别保存 input、output、reasoning、cache read/miss/write；Provider 返回的 `usage_metadata.amount` 和单位按原始字符串保存，不转 float，不由 token 反推「精确金额」。请求审计可保存 reasoning 控制字段，但不得保存模型正文、reasoning 正文、encrypted reasoning 或工具原文。
 
-Root Run 的总用量等于自身、全部嵌套子智能体/workflow/验收/parent summary 以及 SSE 终态后 title/memory 的用量 delta 之和；`active → idle → completed`、重试和恢复不得重复归集，终态后调用标记 `post_terminal=true`。对外观测必须把三个指标分开：
+Root Run 的总用量等于自身、全部嵌套调用（研究团队成员、验收、parent summary） 以及 SSE 终态后 title/memory 的用量 delta 之和；`active → idle → completed`、重试和恢复不得重复归集，终态后调用标记 `post_terminal=true`。对外观测必须把三个指标分开：
 
 1. **Provider cache usage**：供应商原始 cache read/miss/write token；
 2. **本地 exact-prefix/LCP**：相邻主循环请求的 item 和规范化字符最长公共前缀，只证明结构稳定性；
@@ -308,7 +308,7 @@ message.reasoning.delta（瞬时） / message.reasoning.completed（持久化思
 input.required
 plan.updated / plan.confirmation.required
 tool.started / tool.completed / tool.failed
-recommend_agents
+message.commentary / approval.required / research.team
 artifact.saved / progress.updated
 run.completed / run.partial / run.failed / run.cancelled
 ```
@@ -317,7 +317,7 @@ run.completed / run.partial / run.failed / run.cancelled
 
 切回正在执行的会话时，历史端点必须用同一批持久事件生成完整的 `execution_trace + event_cursor`。初始用户行在受理时即绑定 `run_id`；对旧数据，若活动 Run 尚无任何持久消息锚点，历史响应在末尾追加一条不落库的临时助手轨迹投影。前端必须用该快照补齐或覆盖活动助手锚点，保留截止游标已发生的全部步骤与 `startedAt`，再从快照游标之后续订 SSE。不得从 `sequence=0` 可见重演，也不得只保留游标尾段而让旧步骤或计时消失。
 
-页面导航、打开新对话窗口或可见订阅断开，只能释放前端观察者，不得调用 Run cancel API。活动 Run 的历史快照中可以合法存在 `running` 工具、Thought、子智能体或验证步骤；前端必须保留该状态并用后续事件收尾。只有 Run 已进入 `completed/failed/cancelled/partial` 终态后仍残留的 `running` 步骤，才能归一为历史中断记录。
+页面导航、打开新对话窗口或可见订阅断开，只能释放前端观察者，不得调用 Run cancel API。活动 Run 的历史快照中可以合法存在 `running` 工具、Thought、研究团队成员或验证步骤；前端必须保留该状态并用后续事件收尾。只有 Run 已进入 `completed/failed/cancelled/partial` 终态后仍残留的 `running` 步骤，才能归一为历史中断记录。
 
 ---
 
@@ -357,7 +357,7 @@ v1.200 验证：前端团队解析、运行头、布局与一次性 Profile **36
 
 搜索配置回退（v1.193）：按用户确认撤回本轮未部署的共享限流网关及配套请求调整，部署继续由 SearXNG 直接提供 `8085`。恢复原配置优先级：非空 `WEB_SEARCH_SEARXNG_URL`、`WEB_SEARCH_SEARXNG_ENGINES`、`WEB_SEARCH_SEARXNG_IMAGE_ENGINES` 覆盖已保存的对应字段；环境值为空时使用后台保存值或缺省值。后台显示值与实际运行值因此可能不同，不能再宣称本地引擎与服务器一致。既有 Run 内请求去重、引擎冷却和有界混合搜索继续使用，不能据此宣称已有跨进程全局限流。回退不修改环境文件、配置数据库或运行中的服务，Python 是否加载需另行确认。
 
-- 研究团队是本次研究的临时成员，不是广场应用或 `call_subagent` 委派。三个蓝球成员分别承担资料研究、分析和交叉核验，主 Agent 统筹；各自独立上下文复用 `drive_model`，只开放研究只读工具。成员独立取证并交换带来源的公开发现，再由主 Agent 集中核对，最终仍由主 Agent 交付现有蓝框报告。公开事件是 `research.team`（allowlist 快照）与既有 `research.progress`；团队角色、公开交流、工具归属和成员检查点持久化于同一 Run；恢复不得覆盖主循环检查点、重复已交付成员或把未完成成员显示为成功。身份按本次团队成员区分，不复用广场应用 ID。前端仅新增头像状态与可展开成员详情，其他样式和报告查看/导出不改。成员失败后保留已有证据并在报告注明缺证；取消继续向上传播。
+- 研究团队是本次研究的临时成员，不是广场里的智能体。三个蓝球成员分别承担资料研究、分析和交叉核验，主 Agent 统筹；各自独立上下文复用 `drive_model`，只开放研究只读工具。成员独立取证并交换带来源的公开发现，再由主 Agent 集中核对，最终仍由主 Agent 交付现有蓝框报告。公开事件是 `research.team`（allowlist 快照）与既有 `research.progress`；团队角色、公开交流、工具归属和成员检查点持久化于同一 Run；恢复不得覆盖主循环检查点、重复已交付成员或把未完成成员显示为成功。身份按本次团队成员区分，不复用广场应用 ID。前端仅新增头像状态与可展开成员详情，其他样式和报告查看/导出不改。成员失败后保留已有证据并在报告注明缺证；取消继续向上传播。
 - 研究团队细化（v1.173）：新团队从名字池无重复抽取三个人名；名字随团队一起持久化，刷新、断点恢复和同用户同会话的停止后继续不得重抽。三个成员按冻结主题并行取证，主 Agent 负责计划、集中核对和成稿；各上下文共用既有 `drive_model`，不作为第四个取证成员；主报告仍由 Research 内核末尾统一合成。`share_research_update` 只在当前 Run 内交换明确公开的消息，检索回执带队友最新消息，不能伪造讨论或暴露私有思维链。`research.team.activity` 按保存顺序保留有界公开记录，角色列表与活动流分开；前端默认最近三条、可展开全过程，完成后收起到详情入口。球体轮廓与五官静止，水纹仅在球身遮罩内扩散；组队依次入场、活动模糊淡入/上移淡出，尊重 reduced-motion。取消必须传播并回收成员，未保存的快照不得当作公开成功。保存只 patch 团队字段，并为主 Run 同时写入事件造成的 CAS 冲突做有界退避。
 - 单次取证与蓝框交付（v1.174）：团队已负责并行取证和讨论补证，返回后不得再进入旧 `collect_coverage`。报告整合时 `research_team_synthesis_only` 收起工具与能力发现入口，`drive_model` 同时禁止隐式回取工具；即使模型请求搜索也没有执行器。空工具集仍必须进入 `main_tool_turn` 的主模型分支，保留团队简报、证据注入、引用、Research 标记和现有蓝框报告交付，不得掉入普通回答 fallback。证据不足据实输出部分研究报告，不以新一轮搜索掩盖缺口。只有没有团队记录的兼容路径保留旧覆盖检索。
 - 动态研究计划：新研究由主 Agent 通过受限 `drive_model` 上下文制定与用户问题对应的主题，不播固定四主题模板。取证前冻结 topic key、研究范围和成员归属，之后只允许在原主题内细化具体缺口，不得新增研究支线或按模型自报完成绕过证据门槛。计划与团队标记同次 scoped patch 持久化，检索回执投影到既有 `plan.updated`；停止后继续保留已保存范围和计划版本。协调异常只使用真实问题作为降级主题。协调上下文不含搜索工具，团队返回后不能重开取证。
@@ -415,7 +415,6 @@ started_at / completed_at
 - **核心工具**：`glob`、`read_file`、`write_file`、`edit_file`、`bash`。
 - **用户环境工具**：`get_current_time` 与 `get_user_location` 始终以稳定只读 Schema 注册，仅在任务确实需要时调用。`get_user_location` 只采信 ASGI 服务器经受信代理解析后的客户端地址，公网 IP 在活动 Run 中加密保存并于终态清除；调用时配置的定位供应商必然会接收该 IP，但工具只向模型返回国家/省州/城市/时区及准确性说明，不返回原始 IP、经纬度、邮编或精确地址。本地/内网地址、代理未正确转发或定位服务不可用时必须明确返回「不可定位」，禁止以 API/Worker/沙箱出口 IP 冒充用户位置。
 - **检索工具**：`search_web`、页面抓取、状态化浏览器、知识库、只读连接器。
-- **委派工具**：`call_subagent`，遵守独立权限、预算和结果契约。
 - **专业能力**：由 Skill/artifact profile 提供，不把专业规则塞进 `bash` 描述。
 
 ### 6.3 唯一通用执行器
@@ -440,81 +439,36 @@ started_at / completed_at
 - 第三方 Skill 导入时检查退休工具名；不兼容时拒绝导入并给出迁移提示。
 - 禁止在全局 prompt 中加入旧工具翻译兼容说明。
 - composer Skill 保持一次性选择：正常发送后清空，重新生成沿用上一轮；编辑历史用户消息并重发时，则精确恢复被编辑消息自己的 Skill 快照。Skill ID 随用户消息引用元数据持久化；名称只用于旧历史的唯一命中兼容，同名歧义不得猜测。
-- Skill 包完整性是一等事实：`complete | incomplete | unavailable`，并记录取包通道 `zip | bytes | text_json`。Java `/ai/skill/file` 的 JSON 文本口不得把损坏二进制挂进沙箱；树里声明了图片、字体、Office 模板但通道拿不到时必须 `incomplete` 并点名未挂载文件。
+- Skill 包完整性是一等事实：`complete | incomplete | unavailable`，并记录取包通道 `zip | bytes | text_json`。取包由 `services/skills/skill_package_bridge.py` 在进程内完成（内置包读磁盘、导入包解 zip），不得把损坏二进制挂进沙箱；树里声明了图片、字体、Office 模板但通道拿不到时必须 `incomplete` 并点名未挂载文件。
 - 主对话不自动执行不可信 `entrypoint.sh`。依赖以包内声明为准；第一方 ppt-studio 仍可用仓库 overlay 补运行时文件。
-- Java 提示词型 Skill 广场与工作台 `AgentSkill` ZIP 库不共表、不混用 ID。个人 Skill 导入主 Agent 本轮不做。
-
-### 6.5 专业智能体推荐（`recommend_agent`）
-
-`recommend_agent` 是 Standard / executing / interactive 可用的无副作用控制工具，最长 2 秒，同一 Run 最多调用一次。它不出现在用户执行时间线，也不作为生产性工具推进 Plan。服务端仅在独立索引 ready 时将它注册给模型：
-
-```text
-recommend_agent({
-  task: string,
-  intent: "explicit_request" | "capability_gap"
-})
-```
-
-#### 6.5.1 是否推荐
-
-1. `explicit_request`：当前用户句子明确询问平台智能体/助手/应用/工具，或精确说出当前可见智能体名称。单独“有没有办法”不算明确找智能体。
-2. `capability_gap`：任务确实需要模拟面试、结构化填表、专业文档识别等定制流程。普通写作、总结、翻译、润色和办公问答不得以“不确定”为由调用。
-3. 服务端重新判定 intent，不相信模型自报。模型不能传候选 id；`task` 只是最多 400 字的补充语义。
-4. 已显式选择 Skill/专业智能体、当前已在执行子智能体、同 Run 已调用，或近 5 条助手消息已做隐式推荐时不再主动推荐。明确寻找时可重新查看候选。
-
-查询上下文的权重顺序是：当前用户原始消息 > 最近两条用户消息 > 附件类型/扩展名 > 模型 `task`。不传附件正文，不把历史助手长回答混入查询。
-
-#### 6.5.2 索引与数据边界
-
-- 数据库 `app_info` 是状态、租户、角色/部门 ACL、PC 跳转地址和展示卡的权威事实源；`CapabilityRegistry` 只补充已发布内部智能体的 `routeDescription` / `triggerExamples` / `negativeExamples` / `tags` 和可读能力名称。Qdrant 只召回，不能直接决定用户可见性。
-- 独立物理集合为 `agent_recommend_v1_<embedding_signature>_<snapshot_digest>`，线上只查别名 `agent_recommend_current`；不修补 `agents_v4_*`，不影响 `agent_route_*` 委派索引。
-- 正向 embedding 仅含名称、能力说明、`triggerExamples`、标签、分类和可读能力名称。`negativeExamples` 只保存在 payload 并用于重排否决/降权，不得进入正向向量。ID、URL、ACL、状态和租户不进 embedding。
-- 外部智能体不根据名称猜能力。只有名称、没有任何语义说明的记录标为 `semantic_ready=false`，只能精确名称命中，不参与隐式兜底。
-- 推荐的候选域是当前用户可见的整个智能体广场，包含内部和外部智能体。`@` 面板和 `call_subagent` 只使用可委派的 Capability Registry 候选；两个目录不得互相裁剪。推荐外部智能体只产生打开广场应用的卡片，不授予委派权限。
-- API/Worker 使用 MySQL `GET_LOCK` 防止重复构建。构建新集合期间不动当前别名；记录数、内容哈希、embedding 签名和黄金集质量门禁都通过后才原子切换。发布、下架、删除、ACL 或路由元数据变更会合并触发新的蓝绿快照对账；同时保留周期轮询修复未发事件的漂移。失败不切别名。
-
-#### 6.5.3 混合召回、重排和拒绝
-
-查询从当前用户可见记录中产生向量语义、名称/标签/分类/说明关键词、`triggerExamples` 场景三组 Top 20，再用稳定排名融合（RRF）取并集。不直接相加不同来源的原始分数。精确名称优先，`is_recommend` 只在同等相关时轻量破平。
-
-- 整句高度命中负例的候选直接排除；部分负例关键词命中明显降权。
-- `exact`：当前可见名称精确命中；`strong`：向量过阈值且至少再有触发样例、标签、分类或说明之一的独立信号；`medium`：只有一个较强信号；`weak`：信息不足。
-- 隐式 `capability_gap` 只接受 strong 的第一名，且它与第二名向量分差必须过门槛；否则 `suppressed`。明确 `explicit_request` 可显示 exact / strong / 过质量阈值的 medium，最多三个。weak 永不显示。
-- 向量分数阈值不写死。每个索引快照按当前 embedding/schema 扫描阈值，要求隐式 Precision@1 ≥ 90%、通用办公误展示率 ≤ 2%、名称查询 Recall@3 ≥ 80%。未达标的集合不写 ready manifest，不切换别名。
-
-#### 6.5.4 SSE、卡片与发布
-
-工具返回 `status / intent / recommendations / confidence / matched_signals / suppressed_reason`。推荐理由只能由服务端使用真实命中的触发样例、标签或说明生成。成功后发持久化 `recommend_agents { ids, intent, confidence, reasons }`；`[[RECOMMEND:id]]` 仅用于旧历史正文回放，新链路不得生成它。
-
-卡片位于本轮助手输出底部，随该消息滚动；隐式文案为“如果你希望用更专门的流程继续，可以试试”，明确询问为“这些智能体与刚才的需求比较匹配”。不展示分数、相似度或营销文案。点击以新窗口打开当前数据库 PC URL，主对话不跳转、不清空上下文。实时事件在发送前已从数据库回源；历史回放仍用当前已加载、当前用户可见的智能体列表重新匹配，失效 id 静默丢弃。
+- Skill 目录由 agent-api 自持（`services/skills/skill_catalog.py`，表 `agent_skill` / `agent_skill_version`）：内置 `ppt-studio` 为 `source=system`，用户直接编写或 zip 导入的技能只对属主可见，管理员分发后才成为全员可见的系统技能；`@Skill`、`use_skill` 与演示文稿助手都只读这一份目录。
 
 ### 6.6 平台内置 Harness 应用
 
-- H5 / 定制智能体管理（2026-09-11）：校园百事通、演示文稿助手和面试助手统一进入 `/workflow/manage`，复用现有管理抽屉、六项运营指标及时间趋势。管理目录从现有 `app_info` 记录只读投影，保留 `custom/external` 来源、记录 ID、启停与角色/部门 ACL，不复制为 WorkflowApp、不迁移历史消息。原应用管理的对应行转向统一管理入口；设置仍复用原目录编辑和 Java 权限校验。监测按注册的 Thread origin、顶层会话和真实完成回复归集，不能以目录 ID 匹配空的 `ChatThread.app_id`；普通主对话与其他助手不计入。无工作流版本的助手不虚构版本历史；汇总运营权限不授予面试材料、作答或评分明细读取权。源码验证、真实数据库汇总与服务重载后的页面验收分别记录。
-- 演示文稿助手与校园百事通是代码内置页面，分别固定到 AXIOM Agent Harness 的 `presentation` 与 `campus_services` 预设；它们不是第二套 Agent、Profile、Workflow Run 或执行循环。代码只提供页面和运行边界，不向 `app_info` 播种或自动补齐任何应用记录。
-- 管理员在现有应用管理中手工新增普通外部应用（`app_type=external`）：演示文稿助手的 PC/H5 地址为 `/center/chat/ppt`，校园百事通为 `/center/chat/campus`，打开方式为新窗口。记录的名称、图标、分类、排序、启停、角色/部门权限均可编辑，整条记录也可删除；删除或停用后应用即不可见、不可使用，重新新增同类型与同路径的记录即可恢复。同一固定路径同时存在多条已启用外部应用时必须 fail closed，不得随机选择一条 ACL。
-- 应用能力分类的前端事实源是智能体广场的 8 项正典定义：沟通交互、文档与知识、数据与表格、内容创作、规划与结构、开发与自动化、图像与多媒体、综合/其他。系统设置的应用新增、编辑和列表筛选必须直接消费这份定义，不得重新维护文案、顺序或从可能带旧缓存的 `app_category` 通用字典读取。历史 `work/top/video/audio` 等旧值不做静默批量改写；管理员编辑保存旧记录时必须显式改选正典分类。
-- 智能体广场直接使用现有应用目录接口，不注入静态卡片、不请求第二套内置目录、不过滤命中固定路径的手工记录。卡片展示该记录实际的应用名称与创建人姓名/头像；谁新增就显示谁。`app_icon` 非空时展示管理员配置的应用图标，应用描述非空时同样优先使用管理员配置；两者为空时，只对已返回的固定路径记录分别回退到对应智能体照片和默认描述，不得因回退而新建卡片。广场列表中校园百事通固定第一、演示文稿助手固定第二，其他应用保持目录接口原有的相对顺序。主对话推荐区同样从这份可见应用列表按固定路径入选，并保持同一前两名顺序，不依赖可编辑的显示名称。空角色+部门 ACL 表示所有已登录用户可用，否则角色或部门命中任一即授权；不再引入租户维度。前端隐藏不是权限边界，新 Run、继续输入、HITL 恢复、队列写入、历史读取与对话引用都必须从当前外部应用记录复核授权。
+- 演示文稿助手与校园百事通是代码内置页面，分别固定到 AXIOM Agent Harness 的 `presentation` 与 `campus_services` 预设；它们不是第二套 Agent、Profile 或执行循环。agent-api 启动时按 `pc_url` 为三个预设幂等补种 `app_info` 上架记录（`app/main.py::_seed_builtin_app_catalog`），已有记录不覆盖管理员后续的改名、换图标或停用。
+- 上架记录 `app_type=external`，`pc_url` 分别为 `/center/chat/ppt`、`/center/chat/campus`、`/center/chat/interview`，打开方式为新窗口；`app_role` / `app_dept` 是 ACL。停用或删除记录后该助手即不可见、不可使用。同一固定路径同时存在多条已启用记录时必须 fail closed（503），不得随机选择一条 ACL。当前没有编辑这些记录的管理页面。
+- 智能体广场的能力分类是 `src/views/peopleCenter/agentMarketCapabilities.ts` 里的 8 项正典定义：沟通交互、文档与知识、数据与表格、内容创作、规划与结构、开发与自动化、图像与多媒体、综合/其他。
+- 智能体广场只消费 `GET /agent-api/chat/builtin-apps`（`services/chat/builtin_app_access.py`），返回当前用户可见的内置智能体，不注入静态卡片。卡片展示记录实际的应用名称与创建人姓名/头像；`app_icon` 与描述非空时优先使用管理员配置，为空时回退到对应智能体照片和默认描述，不得因回退而新建卡片。广场列表中校园百事通固定第一、演示文稿助手固定第二。主对话欢迎页的智能体卡片区（`RecommendGrid.vue`）从同一份可见列表按固定路径入选，并保持同一顺序。空角色+部门 ACL 表示所有已登录用户可用，否则角色或部门命中任一即授权；不再引入租户维度。前端隐藏不是权限边界，新 Run、继续输入、HITL 恢复、队列写入、历史读取与对话引用都必须从当前上架记录复核授权。
 - `create_by` 历史上同时存在用户 ID 与登录名两种写法，广场展示层必须将它们归一到同一 `sys_user.realname/avatar`，不得将原始登录名误当不同的创建人。卡片不展示“外部”类型标签；这只是展示取舍，不得改写管理端的 `app_type=external` 与删除行为。
-- 点击入口以新浏览器页面分别打开演示文稿助手 `/center/chat/ppt` 与校园百事通 `/center/chat/campus`，不得在 `/center/chat` 内替换当前主 Agent 页面或上下文。专属页面复用子智能体运行页的会话式外壳与交互层级，但内部仍调用 AXIOM Agent Harness 的同一受理、Run、Plan、Event、工具和恢复链路。
+- 点击入口以新浏览器页面分别打开演示文稿助手 `/center/chat/ppt` 与校园百事通 `/center/chat/campus`，不得在 `/center/chat` 内替换当前主 Agent 页面或上下文。专属页面复用会话式外壳与交互层级，但内部仍调用 AXIOM Agent Harness 的同一受理、Run、Plan、Event、工具和恢复链路。
 - 普通主对话、演示文稿助手、校园百事通的会话列表、搜索、分页、草稿和最近会话恢复必须完全分域：普通域只查询 `origin IS NULL`，两个内置应用分别只查询 `origin=presentation` 和 `origin=campus_services`。首次发送才创建对应 origin 的 Thread；已有 origin 标记的会话无需搬迁消息，直接归入对应专属页；不得按标题猜测旧会话，也不得把普通 Thread 原地改成内置应用 Thread。
-- 专属页保留对话历史、记忆、任务协作以及各自策略允许的 composer 能力；空态复用主页面的欢迎层级但使用自身文案与形象。演示文稿助手继续隐藏普通主对话的 `@` 提示、推荐智能体区、Skill 选择、子智能体引用、计划模式和深度研究；校园百事通按已发布租户快照锁定知识库、模型、工具和皮肤，同样不向用户开放计划模式与深度研究。校园百事通只开放主对话同源的图片选择、粘贴和拖放：图片必须先经 `/chat/upload` 获得持久 `file_id`，再沿同一 attachment 链进入 Harness。固定模型命中视觉能力时原图直接进入该模型；固定模型为纯文本时，Run 创建后由平台 `multimodal_model` 视觉配置读取持久原图，生成带“由视觉模型识别”来源标记的描述，再把描述交给固定文本模型继续推理。两条路径都必须归属同一个 Run 审计，视觉失败要如实降级；不得只传文件名或空文本冒充看过图片。文档、我的文件、知识库改选、对话引用和远程伪造图片 URL 均不得进入。演示文稿助手的 Run 受理强制 `agent_mode=standard` 且决策路由为 `agent`，客户端或续接不得把该专属页打进 Plan/Research Profile。
+- 专属页保留对话历史、记忆、任务协作以及各自策略允许的 composer 能力；空态复用主页面的欢迎层级但使用自身文案与形象。演示文稿助手继续隐藏普通主对话的 `@` 提示、欢迎页智能体卡片区、Skill 选择、计划模式和深度研究；校园百事通按已发布快照锁定知识库、模型和工具，同样不向用户开放计划模式与深度研究。校园百事通只开放主对话同源的图片选择、粘贴和拖放：图片必须先经 `/chat/upload` 获得持久 `file_id`，再沿同一 attachment 链进入 Harness。固定模型命中视觉能力时原图直接进入该模型；固定模型为纯文本时，Run 创建后由平台 `multimodal_model` 视觉配置读取持久原图，生成带“由视觉模型识别”来源标记的描述，再把描述交给固定文本模型继续推理。两条路径都必须归属同一个 Run 审计，视觉失败要如实降级；不得只传文件名或空文本冒充看过图片。文档、我的文件、知识库改选、对话引用和远程伪造图片 URL 均不得进入。演示文稿助手的 Run 受理强制 `agent_mode=standard` 且决策路由为 `agent`，客户端或续接不得把该专属页打进 Plan/Research Profile。
 - 校园百事通继承主对话同一套 Agent Loop、公开首句、Thought、可见工具步骤、终答与恢复链，不另起执行内核。真实 Tool Registry 只允许 `search_knowledge` 和 `search_web`。模型应先收集已审核知识库和必要的官网证据，再整合回答；不得凭常识补学校专属事实。官网域名是发布必填项：查询在送入搜索后端前增加 `site:` 范围，文字结果、图片结果与抓取页在返回后继续按同一白名单过滤；空白名单必须返回零条官方网页/图片，不得退化成无约束搜索。已审核知识库片段中的原图，以及官网检索正文/配图中与问题相关的图片，可由模型判断是否在终答用 `[图N]` 展示；禁止输出非官方来源配图，禁止编造图片链接。不得为此新增下载、浏览器或沙箱工具。
-- 主对话、演示文稿助手和校园百事通必须经过同一实际 `stream_chat` 图片预处理入口；Worker 应用预设时不得清空受理入口已校验的图片附件。能力判断使用本轮最终模型（校园为发布快照固定模型），视觉代读结果及其 `status/note` 一并进入后续附件元数据；识别失败必须同时触发附件提示和模型的如实降级约束。回归测试必须覆盖三个真实入口的原图直传、纯文本模型委托和视觉失败，不能只测试拆分附件或 OCR 辅助函数。`test_builtin_visual_entrypoint.py` 已覆盖这九个组合；这属于入口集成测试，不替代运行服务上的真实上传与模型调用验收。
+- 主对话、演示文稿助手和校园百事通必须经过同一实际 `stream_chat` 图片预处理入口；Worker 应用预设时不得清空受理入口已校验的图片附件。能力判断使用本轮最终模型（校园为发布快照固定模型），视觉代读结果及其 `status/note` 一并进入后续附件元数据；识别失败必须同时触发附件提示和模型的如实降级约束。回归测试必须覆盖三个真实入口的原图直传、纯文本模型委托和视觉失败，不能只测试拆分附件或视觉识别辅助函数。`test_builtin_visual_entrypoint.py` 已覆盖这九个组合；这属于入口集成测试，不替代运行服务上的真实上传与模型调用验收。
 - **2026-09-03 本机真实验收**：通过已登录的 `:3200` 页面图片选择器上传同一图片并发送，校园 Run `4772851d8fb64b2fb843edfa61610e18`、演示文稿 Run `c19f3c7285d5417da68f6504fe052b43` 均以纯文本 `deepseek-v4-flash` 运行，产生 `document_image_vision` 审计，委托 `deepseek-v4-flash-vision-exp` 分别约 10.4s / 8.6s 返回 HTTP 200。两轮的持久附件和同 Run 的 Provider 历史均含带来源标记的识别描述，最终回答已在页面显示，Run 为 completed。此证据证明本机两个入口的代读连通性，不代表全部图像细节准确、生产部署或所有移动浏览器验收；文稿助手对流苏左右位置有误识别，另按识别质量评估。
 - 校园百事通终答以学生快速阅读为目标：先直接回答当前问题，再按需用时间/地点/材料的短清单、办理的编号步骤和必要提醒组织；多问题分开回答，不把所有召回片段堆进正文。简单问题不强套模板，重要条件、截止时间和风险不能为压缩篇幅而省略；缺少学院/校区等必要信息时简洁澄清，不替学生猜测。配图紧跟对应主题，独立成块，不与正文浮动混排；手机端完整显示图片比例并支持点开放大。此差异仅属于校园预设的表达和展示层，不改变共享 Harness、证据来源或检索步骤。
 - 校园百事通的仅图片添加菜单在手机和平板上按内容撑开，不继承多级资源选择器的固定面板高度；保留标题、图片操作、关闭按钮、遮罩关闭、Esc 和安全区。主对话与演示文稿助手的完整资源菜单仍使用共享原有面板，不因校园展示调整缩小二级选择器空间。
-- 主对话、演示文稿助手和校园百事通的输入框吉祥物统一只在无消息的欢迎态显示；用户发送首条消息后立即隐藏，加载已有会话时也不显示。校园皮肤和欢迎页蓝色助手仍保留，不再沿用旧版对话态持续显示的小球特例。
+- 主对话、演示文稿助手和校园百事通的输入框吉祥物统一只在无消息的欢迎态显示；用户发送首条消息后立即隐藏，加载已有会话时也不显示。校园百事通欢迎页的蓝色助手仍保留，不再沿用旧版对话态持续显示的小球特例。
 - 主壳和内置应用独立页复用全局 Less 时，通过各自 `<style lang="less">` 中的 `@import` 引入；不要把同一文件同时作为多个非 scoped 的 `<style src>`。后者在 Vue 插件中共用外部文件的描述符，不同样式序号会造成加载/热更新顺序相关的编译失败。保持原有全局样式语义，不用追加 scoped 或关闭报错遮罩规避。
-- 受理层拒绝携带 `skill_ids` / `selected_skills` / `subagent_id` 的 presentation 请求。Worker 每轮都从当前用户的权威、已启用 Skill 目录精确解析 `ppt-studio`，读取受信任的 `SKILL.md` 后才执行；禁止以其他 PPT 类 Skill 兜底。
-- 真实 Tool Registry 必须移除 `use_skill` / `recommend_agent` / `call_subagent` / `delegate_task`，恢复和 HITL 续接也重建同一边界。`ppt-studio` 未启用、失权、指令读取失败或超时时，必须向用户返回明确的暂不可用错误，禁止静默降级到普通 AXIOM Agent。
+- 受理层拒绝携带 `skill_ids` / `selected_skills` 的 presentation 请求。Worker 每轮都从当前用户的权威、已启用 Skill 目录精确解析 `ppt-studio`，读取受信任的 `SKILL.md` 后才执行；禁止以其他 PPT 类 Skill 兜底。
+- 真实 Tool Registry 必须移除 `use_skill`，恢复和 HITL 续接也重建同一边界。`ppt-studio` 未启用、失权、指令读取失败或超时时，必须向用户返回明确的暂不可用错误，禁止静默降级到普通 AXIOM Agent。
 
 #### 6.6.1 定制助手模块边界（H2 / H5）
 
 - 前端 `builtinAssistants/campusServices/`、`builtinAssistants/presentation/` 分别拥有自己的身份定义与 UI 策略；共用注册入口、`BuiltinHarnessRunPage`、`useCenterChat`、消息渲染和上传链路。新增助手须显式注册，不能靠显示名称识别或复制聊天状态机。
-- 后端 `chat/builtin_assistants/campus_services/`、`chat/builtin_assistants/presentation/` 分别拥有身份、提示词、请求约束和工具策略；校园的发布配置、域名策略与运行快照同域归档。HTTP 路由、数据库模型和共用皮肤引擎仍是平台边界，不随目录整理改名或迁移数据。
+- 后端 `chat/builtin_assistants/campus_services/`、`chat/builtin_assistants/presentation/` 分别拥有身份、提示词、请求约束和工具策略；校园的发布配置、域名策略与运行快照同域归档。HTTP 路由和数据库模型仍是平台边界，不随目录整理改名或迁移数据。
 - 身份 registry 只聚合身份与目录展示定义，不导入执行策略；独立的 runtime policy 注册入口组合各助手的工具边界与回合约束。首次运行和恢复续接消费同一策略接口，未知助手必须拒绝，普通主对话保持原有能力。注册新助手时同时维护受保护路由与请求枚举，并通过注册完整性测试；只新建空目录不会自动获得权限。
-- 模块只声明或限制既有能力，不创建新 Agent Loop，不复制模型调用、视觉代读、SSE、Worker、取消或恢复逻辑。共享工具与图片服务修复仍同时服务三个入口，主对话皮肤属于共享展示能力，不迁为校园私有实现。
+- 模块只声明或限制既有能力，不创建新 Agent Loop，不复制模型调用、视觉代读、SSE、Worker、取消或恢复逻辑。共享工具与图片服务修复仍同时服务三个入口。
 - 本次只调整代码组织与策略接线，保留两个助手的公开路径、preset/origin、目录 ACL、历史分域、配置 hash/版本、图片输入输出和固定 Skill 契约；不引入数据库迁移或运行时新开关。迁移期间的旧导入桥接在本版本内清除，不保留两份业务实现。验收须在改前基线上重跑身份、ACL、工具、配置、图片、流式和恢复契约；源码与单测通过不等于本机 Python 进程已重载。
 
 2026-09-03 分支验证记录（非运行验收）：
@@ -537,7 +491,7 @@ recommend_agent({
 
 - 客户要求：以纯文字一问一答模拟学生求职面试；依据上传简历与目标岗位 JD 动态生成行为题、专业题和压力题，按回答深入追问。每次完整回答保存评分与证据，面试过程中只展示问答，整场结束后再显示综合百分制报告，说明整场做得好的地方和需要提升的地方；支持碎片化练习、暂停续练和结束复盘。
 - 重复练习需要变化题目：开场在同一用户最近 30 场中匹配岗位名称或 JD 内容哈希，最多参考 5 场相关面试已经问出的题目，未公开候选题不算已问。参考限 18 题、9000 字，只投影题干、类型、考察点和追问标记，不读取或继承历史答案、分数。优先选择近期未用的开场角度，由模型结合真实材料换项目细节、场景条件或推理任务，语义相近但仅换措辞不视为新题；岗位核心能力可重复考察，不能为了变化编造经历、偏离 JD 或增加难度。平台拦截忽略标点/空白后的原题重出与本场重复题，语义差异仍需模型实测评估，不宣称完全消除近义题。出题策略在开场受理时冻结到本轮私有输入，恢复重试复用；只在开场工具上下文出现，不进入公开快照、评分输入或报告，不增加页面设置、数据库迁移或模型循环。
-- 身份固定为 `assistant_preset=interview`、`thread.origin=interview`，受保护独立路由为 `/center/chat/interview`。管理员仍通过现有 `external` 应用记录配置同路径入口与角色/部门 ACL；不静态补卡、不自动播种应用。新助手通过现有身份与运行策略 registry 显式接入 `standard`，继续同一 Run API、Worker、Harness、模型驱动、上传、SSE、取消和恢复链路。
+- 身份固定为 `assistant_preset=interview`、`thread.origin=interview`，受保护独立路由为 `/center/chat/interview`。上架记录与 ACL 同 §6.6（启动时幂等补种，停用即不可用）。新助手通过现有身份与运行策略 registry 显式接入 `standard`，继续同一 Run API、Worker、Harness、模型驱动、上传、SSE、取消和恢复链路。
 - 前端复用 `BuiltinHarnessRunPage`、`ChatPage`、`useCenterChat`，新增面试设置、运行状态和整场复盘组件。设置包含简历文件引用、JD 文字或文件引用、目标岗位、求职阶段、题量和压力等级。解析失败或部分解析必须如实展示；不足的材料不能被宣称为完整个性化依据。学生确认的材料与配置在开场冻结版本。
 - 面试页面按材料准备、聊天式逐题练习与复盘组织：简历区支持点击或拖放单个文档，JD 可粘贴或上传；题量可选 3/5/8 题或自定义 3–12 题，可选简历补充信息渐进展开。顶部岗位、进度、题号及操作整栏已移除；题目继续显示在真实聊天消息中。提示、跳过、暂停、结束归入输入框旁的单个操作菜单；暂停时保留继续入口，完成后只提供查看面试报告。下载内容与页面同为整场报告，不拼接逐题问答和维度分表，不包含完整简历/JD、账户标识或未公开题库；沿用共享消息和输入框，不增加运行内核或客户端评分。
 - 面试首屏只突出简历、岗位、题量与开始操作，求职阶段和压力等级放入“更多设置”。报告仅在面试业务状态为 `completed` 且整场复盘已保存时显示；活动、暂停与未完成状态不显示报告或逐题反馈入口。报告容器采用白底、灰边、黑字和中性图标，页头保留名称、展开及下载。预览为一个整场百分制总分和一段 18px 短评，最多三行；展开正文为 17px，按整场表现组织“做得好的地方”和“需要提升的地方”，不提供题目或评分维度下拉框、不按题号排列。下一步练习和简短评分说明按需展开，报告与下载都直接读取整场 `review`，不把各题评价重新拼接，也不把后续已补清的内容恢复成不足。报告入场、弹窗和折叠使用短时过渡，兼容 prefers-reduced-motion；弹窗支持关闭、遮罩和 Esc。原始问答及评分记录保留，材料解析异常或部分解析确认保持。
@@ -564,20 +518,13 @@ recommend_agent({
 - 2026-09-04 增量：正确技术回答语义复验通过；证据不足样本发现专业分依据不足，规则已收紧并单列复验。通过真实受保护页面的同源 iframe 完成 390/768/1280 响应式检查，修复历史遮挡、长输入区底部空间与折叠侧栏残留；属于浏览器模拟，不代表真机。面试快照增加对共享 Run 完成标识的观察，覆盖 loading 已空闲的恢复路径，前端会话 13 项通过。简历板恢复且静态 Logo 与欢迎形象同步，球体母版和下移西装保留。第二身份权限联验与共享历史时长异常另列，不以已有单身份主流程代替。
 - 2026-09-04 12:34 收尾：证据不足独立首答复验通过，专业维度为空且页面显示原因，未编造性能结果；验收矩阵为 17 项通过、1 项等待第二身份。共享 Runtime 创建时间的 UTC 回放修复后，原异常历史页已显示实际 4 分 26 秒；新增及既有历史投影回归 33 项通过。API/Worker 重载后健康，Vite 保持运行；第二身份权限负向用例仍待真实登录验证。
 
-### 6.7 主对话皮肤、可移植包与移动端契约
+### 6.7 移动端契约
 
-- **域必须隔离**：主对话皮肤使用 `scope=main_chat`，服务 `/center/chat` 及复用 Harness 的系统内置应用页；子智能体运行页外观使用 `scope=sub_agent`，只服务 `/agent/run/:appId`。两类皮肤可以复用同一批原始图片，但不得复用皮肤 key、选择记录、发布字段或运行时读取接口；任一导入器必须拒绝另一 scope 的包。
-- **皮肤只负责展示**：主对话皮肤不得修改 `assistant_preset`、Thread `origin`、模型、知识库、Skill、工具注册、附件权限、Run/Plan/Event、上下文或记忆。校园百事通发布快照只保存已安装主对话皮肤的稳定版本引用；运行时外观接口只返回经过净化的主题、布局和素材 URL，不返回模型与知识库配置。
-- **包必须可移植**：标准包是 ZIP，根目录固定包含 `manifest.json`，素材只允许位于 `assets/`。manifest 必须声明 package kind、scope、schema version、skin key、语义版本、renderer、内容哈希、素材清单，以及 `desktop/tablet/mobile` 三端布局。所有运行素材必须随包进入客户系统的持久存储，禁止引用开发机绝对路径、源码相对路径、外站 URL 或 data URL。
-- **声明式而非可执行**：包不得包含或引用 JavaScript、Vue、HTML、任意 CSS、SVG、字体和网络脚本。颜色、圆角、阴影、背景、装饰锚点、尺寸、偏移、透明度和显隐只使用服务端白名单字段、枚举和有界数值；未知字段、路径穿越、超限文件、哈希不符、重复 key、异常图片或压缩炸弹必须拒绝。浏览器只消费服务端净化后的 manifest。
-- **响应式是导入与验收门禁**：同一份皮肤包一次导入覆盖桌面、平板和手机，不拆成三个包。基准视口为 desktop `>=1024px`、tablet `720–1023px`、mobile `<720px`；manifest 必须包含三个完整设备布局对象。当前导入器直接拒绝缺少任一端的包，不写入 `incomplete` 版本；合法包安装为 `active`。Schema、素材与数值校验通过不等于控件无遮挡，三端视觉和交互仍须实际验收。
-- **移动端行为优先于装饰**：输入框、发送/停止、历史入口、消息滚动和 HITL 操作必须始终可触达；装饰图层必须 `pointer-events:none`，不得制造横向滚动。窄屏可以缩放、改锚点或隐藏非关键信息，但不得隐藏品牌身份、对话内容或运行状态。生成输出后仍使用同一已发布皮肤，只切换布局状态，不能因进入对话态退回标准皮肤。
-- **点选历史即收抽屉**：手机与 iPad（`max-width: 1024px`）点选会话历史项后，主对话、普通智能体运行页、委派子智能体浮窗和系统内置 Harness 页都必须立即按 0.24s 曲线滑出侧栏并配合 0.18s 遮罩渐变收起，同时加载该会话；不得等消息拉取完成才关。置顶、重命名、删除不关抽屉。桌面主对话仍等加载成功后再关。
-- **导入、导出和发布**：导出必须从数据库中的已安装版本与持久素材重新组包；导入先在事务外解压、校验格式/哈希和解码图片，再在事务内原子安装一个不可变版本。当前 v1 无包签名验证协议，不能把 SHA-256 一致性校验称为验签。相同 key/version/content hash 幂等返回已有版本；同 key/version 不同内容冲突。校园百事通草稿可以预览新皮肤，只有发布后才影响新打开或刷新后的页面。
-- **CRUD 不改写包内容**：“增”是导入新包/新版本，“查”包含列表、版本详情、预览与导出，“改”只修改当前系统的显示名称和备注。`main_chat` 的内置版本以及仍被草稿/发布配置引用的版本不可删除；`sub_agent` 删除前在同一事务内把当前草稿和草稿/已发布分配回退为 `default`，发布 JSON 与历史版本保持不变，随应用交付的包通过撤下记录避免自动装回。manifest、素材字节、内容哈希、key 和 version 不得原地更新；运行效果变更必须导入新版本。
-- 详细字段、限制、兼容矩阵与验收视口以 [`可移植皮肤包与前端响应式规范.md`](可移植皮肤包与前端响应式规范.md) 为实现规范；若其与本节冲突，以本节的主对话边界为准。
+> 皮肤系统（可移植皮肤包、`scope=main_chat/sub_agent`、运行时外观接口）已于 2026-09-19 整体删除（`mysql_0023_drop_skins`），原本节的皮肤契约作废；下面只保留仍然生效的移动端行为。
 
-上线顺序是 `AGENT_RECOMMEND_SHADOW_MODE=true` 静默评估（日志仅候选 id、置信度和命中信号，不记完整用户原文）→ 将 shadow 关闭并通过 `AGENT_RECOMMEND_ROLLOUT_PERCENT` 做稳定用户分桶小流量 → 100% 全量。代码默认为 shadow 开启、展示流量 0%，不会因发布代码立即给全部用户出卡；实际展示范围须读取目标进程加载的配置；日常 `run.py` 不读取 `.env.dev`，不能用历史 Compose 覆盖推断当前已全量开放。监控超时率、空结果率、卡片点击率和失效候选率。索引异常、评测不通过或 `AGENT_RECOMMEND_ENABLED=false` 时工具整体不注册，主对话继续正常回答。排障依次检查：活动 embedding 配置 → alias manifest 的 model/dimension/schema/quality → MySQL 有效记录和 ACL → 黄金集指标 → SSE 回放的 `recommend_agents`。
+- **移动端行为优先于装饰**：输入框、发送/停止、历史入口、消息滚动和 HITL 操作必须始终可触达；装饰图层必须 `pointer-events:none`，不得制造横向滚动。窄屏可以缩放或隐藏非关键信息，但不得隐藏品牌身份、对话内容或运行状态。
+- **点选历史即收抽屉**：手机与 iPad（`max-width: 1024px`）点选会话历史项后，主对话与系统内置 Harness 页都必须立即按 0.24s 曲线滑出侧栏并配合 0.18s 遮罩渐变收起，同时加载该会话；不得等消息拉取完成才关。置顶、重命名、删除不关抽屉。桌面主对话仍等加载成功后再关。
+- 手机与 iPad 的主对话和系统内置 Harness 页共用同一紧凑对话顶栏与底部输入区；空对话的输入框不得卡在欢迎文案下方。
 
 ### 6.8 工具结果投影与恢复一致性
 
@@ -637,10 +584,10 @@ DeepSeek 依然是无状态 Responses 边界：即使持久 ledger 开启，Prov
 5. 新 Run 若与上一 Run 模型不同，Context Compiler 注入一次有界的模型切换说明，要求继续同一会话事实、目标、计划和工具契约；不得伪造不存在的供应商专属指令。
 6. 切换到更小窗口时，下一 Run 在首次采样前按新模型窗口重新估算并触发 compact；`direct_answer` 也必须走该预检。正常路径不得静默丢弃未摘要历史。
 
-### 7.2 主 Agent / 子智能体统一流式节奏
+### 7.2 主 Agent 统一流式节奏
 
-1. SSE 或工作流回调维护网络侧累计全文，页面只消费共享节奏器提交的视觉全文；不得把网络分片大小直接暴露成跳字节奏。
-2. 主 Agent 最终正文、主对话中的子智能体委派输出、子智能体独立对话必须复用同一个节奏器和参数，禁止分别维护打字机实现。
+1. SSE 维护网络侧累计全文，页面只消费共享节奏器提交的视觉全文；不得把网络分片大小直接暴露成跳字节奏。
+2. 主对话与三个内置助手页的最终正文必须复用同一个节奏器和参数，禁止分别维护打字机实现。
 3. 节奏器使用 `requestAnimationFrame` 按 60fps 视觉帧合并突发分片，并根据真实帧间隔和待显示积压自适应提速；普通流式正文的终态尾段在有界时间内平滑排空。Research 已核验终稿属于结构化报告，按 §5.3 在终态到达时直接展示完整文稿；面试领域报告同样消费持久化快照，不对报告再做逐字播放。
 4. 后端终态全文始终是权威事实。缩短、改写前缀等语义纠正立即落屏；后台页签或 `prefers-reduced-motion` 下直接同步到权威全文；停止、断流恢复、插话切段不得丢字、重复或从头重播。
 5. 自动滚动跟随视觉全文增长，而不是网络全文一次性增长；滚动目标与手势监听必须解析当前布局实际承载滚动的容器，不得硬编码主对话 `.workspace` 后漏掉校园/文稿等内置应用外壳。手机固定输入区的底部空间只预留一次，保留上滑阅读锁及回到底部恢复语义。“送回主任务”、落库和 TTS 仍使用权威终态全文，不能误用尚未排空的视觉子串。
@@ -777,7 +724,7 @@ v1.198 验证状态（2026-09-10）：文件服务、工具、Harness、修订�
 
 历史会话可发现性（v1.184）：只要存在已保存、非归档且非空的用户消息，历史列表及搜索必须保留该会话。助手正在生成、空输出锚点、失败、取消或中断都不得成为隐藏整条会话的条件，也不得按助手正文中的错误关键词过滤历史。空线程和只剩归档用户消息的分支继续隐藏；用户归属、内置应用 origin、子线程隔离、搜索和分页仍在服务端统一生效。切换模块只释放当前观察连接，不取消后台 Run；返回主对话仍按既定交互展示欢迎页，通过历史明确打开会话，不恢复隐式跳转最近会话。Run 失败应在会话内展示真实原因，不通过移除历史入口处理。
 
-敏感词拒绝轮隔离（v1.190）：适用范围内的主 Agent、内置应用、显式/自动路由智能体与 Research 共用 New API 结构化敏感词终止边界。命中时先以 Runtime PG 终态 CAS 确认本轮失败，再将该 Run 的用户消息和终态锚点以 `policy_pending → policy_rejected` 的幂等中间态收敛：两个状态都由历史展示接口返回，也都必须从后续模型请求、自动路由、会话压缩、记忆抽取、线程引用、任务快照与显式续接源中排除；若首轮自动标题仍等于被拒绝原文，同步清除该派生标题，避免它绕过 transcript 过滤重新注入引用对话。后续合法新问题必须使公开 transcript 指纹发生变化，旧 canonical Provider 隐藏历史不再符合恢复条件，只能从已隔离后的公开历史重建。普通网络错误、用户取消、研究引用拒绝及其他失败不得被扩大隔离。Runtime/MySQL 跨库无原子事务，当轮幂等写入外，启动与周期对账必须按权威敏感词终态收敛已有会话。不物理删除用户原话，不依赖前端清理历史，不以修改新提示词代替该隔离。源码测试不等于 Python 服务已重载，重启后仍须以「敏感词命中 → 合法问题正常回答」做真实网关 E2E。
+敏感词拒绝轮隔离（v1.190）：适用范围内的主 Agent、内置应用与 Research 共用 New API 结构化敏感词终止边界。命中时先以 Runtime PG 终态 CAS 确认本轮失败，再将该 Run 的用户消息和终态锚点以 `policy_pending → policy_rejected` 的幂等中间态收敛：两个状态都由历史展示接口返回，也都必须从后续模型请求、会话压缩、记忆抽取、线程引用、任务快照与显式续接源中排除；若首轮自动标题仍等于被拒绝原文，同步清除该派生标题，避免它绕过 transcript 过滤重新注入引用对话。后续合法新问题必须使公开 transcript 指纹发生变化，旧 canonical Provider 隐藏历史不再符合恢复条件，只能从已隔离后的公开历史重建。普通网络错误、用户取消、研究引用拒绝及其他失败不得被扩大隔离。Runtime/MySQL 跨库无原子事务，当轮幂等写入外，启动与周期对账必须按权威敏感词终态收敛已有会话。不物理删除用户原话，不依赖前端清理历史，不以修改新提示词代替该隔离。源码测试不等于 Python 服务已重载，重启后仍须以「敏感词命中 → 合法问题正常回答」做真实网关 E2E。
 
 真实动作、结果、检查和公开过程阐述来自已登记的权威事件，例如读取、搜索、运行、等待确认、验证和文件保存。模型供应商返回的 `reasoning_content` 或 reasoning summary 允许通过 `message.reasoning.delta/completed` 受控展示，但必须满足：
 
@@ -830,7 +777,7 @@ v1.198 验证状态（2026-09-10）：文件服务、工具、Harness、修订�
 - 整理 Run、Plan、PlanStep、Event 的约束、索引和版本字段。
 - 切换前停止旧 Worker，将非终态旧 Run 标记为因架构切换取消。
 - 不迁移旧任务图和旧计划事件，不提供旧历史解释器。
-- 不删除无关聊天消息、用户文件、知识库和工作台数据。
+- 不删除无关聊天消息、用户文件和知识库数据。
 
 ### 11.3 退休名称门禁
 
@@ -886,7 +833,7 @@ v1.198 验证状态（2026-09-10）：文件服务、工具、Harness、修订�
 
 ### H2：工具与沙箱
 
-以下基础项为已完成的源码切换；后续未勾选扩展项已在 v1.171 记录实现，仍保留 Java 取包、远程沙箱、真实文件交付等验收门禁。未勾选不等于没有代码，已有实现也不自动满足退出条件。
+以下基础项为已完成的源码切换；后续未勾选扩展项已在 v1.171 记录实现，仍保留 Skill 取包、远程沙箱、真实文件交付等验收门禁。未勾选不等于没有代码，已有实现也不自动满足退出条件。
 
 - [x] 引入 ToolSpec、ToolObservation 和资源锁。
 - [x] Policy/Gateway 从 ToolSpec 读取权限、效果域、审批、幂等和并发策略。
@@ -967,10 +914,9 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 - 故障测试：重复消息、重复事件、乱序、模型/工具超时、取消、Worker 崩溃、租约过期、沙箱退出、上下文压缩和数据库冲突；验证同一 Run 自动恢复且副作用不重复。
 - 安全测试：只读逃逸、危险 Bash、跨用户文件、外部副作用、敏感记忆和提示注入。
 - 架构测试：单 Loop、依赖方向、禁止工具名集合、禁止退休名称、禁止旧协议。
-- 推荐测试：调用边界、同 Run 次数、会话冷却、2 秒超时、租户/ACL/状态回源；名称/向量/触发样例/标签/负例/分差排序；蓝绿重建、并发锁、失败不切别名；SSE、历史恢复、失效候选和空结果 UI。
 - 目标生命周期测试：Standard/Plan 超过历史轮次/token/总墙钟阈值时，不因此产生预算型终态；诊断性 Verifier 缺口不回灌 Loop，系统依赖等待交 Worker 恢复。Research 的取证范围和预算另按 §5.3 验证，不能将其混作普通任务硬终止规则。
-- Provider 调用账本测试：覆盖 main/plain/preamble/research/三类 compaction/router/title/memory/paid search/browser/subagent/workflow/acceptance/parent summary/tool internal；底层捕获的每个真实请求恰好一个 attempt start/terminal，SDK `max_retries=0`，同协议 retry 语义 hash 不变，兼容兜底是有 lineage 的新 logical call。
-- Usage 与 Root 归集测试：`completed/incomplete/failed` 的可信 usage 都绑定正确 attempt；无 usage 断流保存 `NULL + unknown_provider_charge`；reasoning/cache/amount 归一化正确；嵌套子智能体、workflow retry、恢复与 post-terminal title/memory 只按 delta 归集一次。
+- Provider 调用账本测试：覆盖 main/plain/preamble/research/三类 compaction/router/title/memory/paid search/browser/acceptance/parent summary/tool internal（`subagent_model` / `workflow_node` 枚举只为历史行保留）；底层捕获的每个真实请求恰好一个 attempt start/terminal，SDK `max_retries=0`，同协议 retry 语义 hash 不变，兼容兜底是有 lineage 的新 logical call。
+- Usage 与 Root 归集测试：`completed/incomplete/failed` 的可信 usage 都绑定正确 attempt；无 usage 断流保存 `NULL + unknown_provider_charge`；reasoning/cache/amount 归一化正确；研究团队成员调用、恢复与 post-terminal title/memory 只按 delta 归集一次。
 - Context 投影测试：跨分钟 `StableBasePrompt` 逐字一致；`ThreadWorldState` 只携带正确日期/时区，`get_current_time` 按需返回 ISO-8601；memory/skills/workspace 变化只追加 patch；同 epoch 主输入精确前缀；edit/regenerate/compaction/model/transport/tool schema 变化产生正确 reset reason。DeepSeek 始终发完整输入且不含有状态禁止字段。
 - 用户位置测试：只接受受信代理已解析的公网 client peer，忽略应用层伪造的 `X-Forwarded-For`；原始 IP 仅加密存入活动 Run 并在终态清除，不出现在模型结果、公开快照或新增的工具业务日志，已有网关/接入层 access log 仍按部署日志政策治理。公网 IPv4/IPv6 可返回有界的国家/省州/城市/时区；loopback、内网、保留地址、定位服务超时/限流/非法响应均 fail closed，不用服务器出口代替。
 - 消耗收敛测试：public preamble 只有一次 `reasoning.effort=none` Responses attempt 且不含 `thinking`，半句/失败时不修补；compaction 每源分段一次调用，相同失败 hash 同 Run 去重，不以丢弃未读原文修复 overflow。
@@ -988,10 +934,8 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 8. 浏览器刷新、SSE 重连和 Worker 重启后恢复同一 Run。
 9. 工具成功但产物保存失败时诚实失败。
 10. Guard 拒绝能引导模型纠正，但不制造用户可见假失败。
-11. 普通写作/总结/翻译不出推荐卡；隐式专业缺口只出一个明显领先的 strong 候选；明确找智能体最多三个。
-12. 停用/删除/跨租户/无 ACL/无 PC URL 记录永不展示；索引超时或未 ready 时主回答不受影响。
-13. 一个 plain/direct Run、一个 10–20 轮 DeepSeek 工具 Run、一个 Research Run、一个 subagent/workflow Run、一个强制 compaction 与一个受控 paid-search fallback，均能在 Root 总账中对齐 logical calls、physical attempts、usage、LCP 和 unknown charge。
-14. 工具大结果跨新 `drive_model`、HITL resume 和 Worker restart 仍可按 handle 分页取回；原文未持久成功时不出现「完整已保存」。
+11. 一个 plain/direct Run、一个 10–20 轮 DeepSeek 工具 Run、一个 Research Run、一个强制 compaction 与一个受控 paid-search fallback，均能在 Root 总账中对齐 logical calls、physical attempts、usage、LCP 和 unknown charge。
+12. 工具大结果跨新 `drive_model`、HITL resume 和 Worker restart 仍可按 handle 分页取回；原文未持久成功时不出现「完整已保存」。
 
 ### 14.3 性能与体验
 
@@ -1038,7 +982,7 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 
 ## 15. 变更记录
 
-下表是只追加的历史记录；含有当时的方案、测试和运行状态。被后续版本覆盖的规则不再生效，当前实现以正文及源码核对入口为准，不能将旧版本中的“当前”理解为今天。
+下表是只追加的历史记录；含有当时的方案、测试和运行状态。被后续版本覆盖的规则不再生效，当前实现以正文及源码核对入口为准，不能将旧版本中的“当前”理解为今天。2026-09-19 起，只描述子智能体委派、智能体推荐、皮肤系统、工作流编排与对外 Agent API 的条目已随功能删除从本表移除（v1.85–v1.94、v1.105、v1.132–v1.134、v1.166、v1.209、v1.211），混合条目只去掉对应从句；完整历史见 Git。
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
@@ -1057,7 +1001,7 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 | v1.12 | 2026-08-18 | 思考步骤改为英文 aicss 口径：进行中 shimmer「Thinking…」加实时秒数，默认收起、点击展开看正文；结束后「Thought for Ns」仍可展开。样式对齐 [aicss Thinking+Reasoning](https://www.aicss.dev/components/thinking-reasoning)，不引入 360px 装饰卡。 |
 | v1.13 | 2026-08-18 | 产品特批：仅 Deep Research 走第二内核 `research.kernel`（平台强制分主题 `search_web`，合成仍复用 `model_driver` 与同一套 SSE）。Standard/Plan 仍走 `main_tool_turn`。Research 分支继续 `seed_goal_contract`。报告改为 ChatGPT Deep Research 连续白纸文稿（对话内统计行 + 白卡预览 + 展览区全文），不再用封面/目录分页。 |
 | v1.14 | 2026-08-18 | 计划与执行共用一份任务状态：任务协作 To-do 是 Plan Store 视图；`completed` 只由工具回执推进，模型不得空口打勾；后续里程碑可收掉更早的轻步骤。线性计划，不是 DAG。 |
-| v1.15 | 2026-08-18 | 计划模式硬契约：批准绑定 `approved_plan_version`；确认卡升级为消息流内结构化审查卡（GoalContract + 步骤验收 + 改这一步）；执行中 `update_plan` 分类为 status / content / structure，仅结构性改动挂起二次确认；content 标记 `diverged`。不自动路由，入口建议条仅前端。 |
+| v1.15 | 2026-08-18 | 计划模式硬契约：批准绑定 `approved_plan_version`；确认卡升级为消息流内结构化审查卡（GoalContract + 步骤验收 + 改这一步）；执行中 `update_plan` 分类为 status / content / structure，仅结构性改动挂起二次确认；content 标记 `diverged`。 |
 | v1.16 | 2026-08-18 | 滴水不漏身份绑定：`ToolObservation.plan_step_id` 指向 Plan 节点；无唯一光标或类型不匹配则拒绝执行副作用；按 `step_id` reduce，不再猜当前步或顺手勾掉更早步骤。`depends_on`/`requires` 为元数据。收尾未完成步 `invalidated`，不得空口 completed。不是 DAG 执行器。 |
 | v1.17 | 2026-08-18 | 思考步骤改为 Cursor 式执行行：仅在收到 reasoning 时插入，不在发送时占位；左侧箭头收起向右、展开向下；展开后完整展示灰色流式正文，取消 180px 渐隐裁切。 |
 | v1.18 | 2026-08-18 | 思考展开正文对齐 Cursor 截图字样：14px / 字重 400 / `#999` / 行高 1.55 无衬线灰色段落，按空行分段；箭头紧跟「Thought for Ns」右侧。 |
@@ -1123,20 +1067,10 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 | v1.81 | 2026-08-21 | 主 Agent 产品名称定为 AXIOM Agent。删除仍会拦住交付的活闸：办公任务禁止 `write_file` 过程脚本；非 PPT「继续」也 Pull 会话工作区；「继续」继承研究报告契约，且上一轮 Research 即使已 `completed` 也保持 `agent_mode=research`。生产循环不再使用 `tool_choice=none`、execution mode 收工具、视觉分拦发布、照片关键词拒 `download_url`、Verifier 回灌同一 Loop。富格式 `write_file` 仍拒绝 `.docx/.pptx` 伪文本（会写成打不开的坏文件，应走 bash）。v1.79 模型停手即 completed 仍在，不等于平台替模型调用 `write_file`。 |
 | v1.82 | 2026-08-21 | 对话框放下的图片 / PPT / 粘贴文本进隐藏会话工作区（`/chat/upload` 的 `source=workspace`），不进「我的文件」。我的文件只留 Agent 发布产物，以及用户在该页主动上传的个人文件。 |
 | v1.83 | 2026-08-21 | 上下文压缩对齐 Codex：`conversation_compact` 做 mid-turn 活历史替换（`SUMMARY_PREFIX` + 最近用户句，工具回执离窗）；超窗 compact 请求丢最旧非 system 再试。SSE `context.compaction` 过程帧驱动时间线：进行中 `• Compacting context (Ns)` 字符扫光（`codex-rs/tui/src/shimmer.rs`），完成后 `Context compacted`。发送前 `ensure_compacted` 触发时同步等待以便画出过程。 |
-| v1.84 | 2026-08-24 | 主对话入口不再自动打开会话：`/center/chat` 落地、刷新、从其他板块或子智能体运行页返回都停在欢迎/新对话，不恢复 sessionStorage 里的上次 thread，也不打开最近一条。打开会话必须用户点对话历史，或文件页「来自对话」。后台回复条仍回到当前这次对话。 |
-| v1.85 | 2026-08-24 | 主对话消息顶部的委派成员名牌显示被委派智能体的真实注册名称；模型生成的场景化 `role_name` 只作为岗位补充信息，不得覆盖智能体名称。 |
-| v1.86 | 2026-08-24 | 主对话 `@` 候选只消费 Agent API 的 `/chat/subagents` 可委派集合；该集合与执行入口共用发布态、工作流版本、租户与角色/部门 ACL，广场可见但不可委派的应用不得出现在 `@` 面板。 |
-| v1.87 | 2026-08-24 | 主对话消息顶部的委派成员以静态「缩略头像 + 真实智能体名称」白底描边胶囊显示；不使用运行呼吸动画，状态文案独立置于胶囊外。头像取当前可委派目录，历史或下架项回退内置图片。 |
-| v1.88 | 2026-08-24 | 子智能体委派按真实事件渐进呈现：主 Agent 先以 `message.commentary` 说明接下来的委派；通过准入校验的 `call_subagent` 若没有模型说明，才基于已提交的委派动作补一句包含真实智能体名和任务摘要的说明；随后才投影 `subagent.started`、子智能体过程与终态。不得用前端延迟伪造过程。 |
-| v1.89 | 2026-08-24 | 子智能体 `subagent.started` 必须携带本次已通过 ACL、发布态与工作流校验的 `app_icon`，并随 Run 事件持久化；成员胶囊优先使用该委派瞬间的真实头像，`@` 目录只作兼容补全，图片加载失败才回退内置图标，不能因目录尚未加载、筛选变化或后续下架错配为通用头像。 |
-| v1.90 | 2026-08-24 | 委派过程不展示笼统的「已完成 + 时长」头或「已完成委派任务」收尾条。`call_subagent` 的真实已提交动作先投影为「正在打开子智能体、准备委派」，工作流服务通过实时 ACL/发布态校验并发出 started 后才投影为「子智能体已开始处理」；子智能体完成仅更新成员状态并让实际结果正文承接。思考与主 Agent 的公开说明按到达顺序保留在执行过程。 |
-| v1.91 | 2026-08-24 | 主对话中的子智能体生命周期行复用普通执行步骤样式，不得渲染为独占的灰色横条；图标与文字只说明真实的打开、委派、处理或失败状态。成员胶囊仍是唯一的身份入口。 |
-| v1.92 | 2026-08-24 | 显式 `@` 直达子智能体也必须投影完整真实过程，不能只在子智能体侧窗收集 `node/delta/reasoning`、最后一次性把结果写回主对话：主对话先显示已选中委派方向，服务完成 ACL/发布态校验后显示打开和开始处理，工作流节点按到达顺序显示，子智能体原始输出与 reasoning 留在其工作窗口。供应商未提供 reasoning 时不得伪造思考内容，应展示可验证的公开过程事实。 |
-| v1.93 | 2026-08-24 | 委派后的主对话正文必须由主 Agent 再次流式总结，不能直接透传子智能体的 `delta` 或最终原文。子智能体的真实节点、输出增量和 reasoning 仍保留在其运行档/工作窗口；主对话依次显示委派、子智能体处理完成、主 Agent 正在核对整理，再使用子智能体交付作为不可信参考材料生成最终回答。 |
-| v1.94 | 2026-08-24 | 子智能体成员胶囊不得预先挂在消息顶部；只有 `subagent.started` 证明任务已真实交给子智能体后，才在“已打开并交付任务”动作的下方按事件位置插入。对齐 Codex 的协作项更新语义：主时间线只保留一个子智能体当前节点并原位更新，不把瞬时工作流节点一次堆成多行；完整节点历史继续保留在子智能体工作窗口。 |
+| v1.84 | 2026-08-24 | 主对话入口不再自动打开会话：`/center/chat` 落地、刷新、从其他板块返回都停在欢迎/新对话，不恢复 sessionStorage 里的上次 thread，也不打开最近一条。打开会话必须用户点对话历史，或文件页「来自对话」。后台回复条仍回到当前这次对话。 |
 | v1.95 | 2026-08-25 | 公开过程叙述对齐 Codex 源码的 preamble / progress update 节奏：由模型根据真实上下文自然生成，相关动作成组，只在新发现、阶段变化或长耗时块前简短承上启下；琐碎读取和无新信息动作保持安静，执行行仍只投影真实工具事件。DeepSeek 首句辅助轮使用同一选定模型的非思考模式以降低首句等待，主任务思考与工具循环不变。 |
 | v1.95 | 2026-08-25 | 会话内模型切换对齐 Codex Thread settings：Thread 持久化下一轮模型，Run/HITL/已排队项冻结受理时模型；运行中可修改下一轮并明确显示“本轮/下一轮”；新 Run 注入有界切换说明，按新窗口做发送前压缩预检，直答路径也不得绕过。 |
-| v1.96 | 2026-08-25 | 主 Agent 正文、子智能体委派输出与子智能体独立对话统一使用 60fps、按时间与积压自适应的共享流式节奏器；网络全文与视觉全文分离，终态尾段平滑排空，后台页签、减弱动画、恢复和权威全文契约不变。 |
+| v1.96 | 2026-08-25 | 主 Agent 正文统一使用 60fps、按时间与积压自适应的共享流式节奏器；网络全文与视觉全文分离，终态尾段平滑排空，后台页签、减弱动画、恢复和权威全文契约不变。 |
 | v1.97 | 2026-08-25 | Codex 式 commentary 不是每工具一句的动作播报：首段用「目标 + 约束 + 下一组动作」给出小型计划，中途只在新发现、阶段切换、路线变化或长耗时块前更新，并把已确认结果、差异/影响与下一步至少连起两项；琐碎读取、工具探测和同动作重试保持安静。Skill 读取以权威目录 ID 为持久化事实；经 ACL/取包成功后才注册受控的第一方语义别名，保证不透明 `extract_*` 的 ppt-studio 在同一 Run 立即解锁 PPTD 工具，选中未读取时仍失败关闭。 |
 | v1.98 | 2026-08-25 | `message.commentary` 仍是服务端落库的完整权威事件；实时页面对 preamble 与轮间 note 复用 60fps 节奏器渐进提交，不伪造 token，计划卡、系统占位和历史回放保持整体语义。复杂任务首段可按需写 1–3 句，有实质新信息的阶段更新通常用 2–3 句连起结果、差异/影响和下一步，不压成孤立动作标题。对话态列表底部只保留悬浮输入框占位与有上限的呼吸距离，不再用过大 padding 制造输出与输入框间的空白。 |
 | v1.99 | 2026-08-25 | Codex 式可见顺序收口为单次主模型调用：撤销独立 preamble 模型请求，工具轮在确认 `tool_calls` 后按模型本轮真实输出发布 `commentary → reasoning → tool`。前端 SSE 消费增加可见背压，commentary 与 reasoning 各自渐进排空后才处理下一权威事件；真实 reasoning 进行中显示 `Thinking`，完成后才显示带 provider 或客户端实测耗时的 `Thoughts for Ns`，不得与叙述或工具行同帧跳出，也不得出现无耗时的裸 `Thoughts`。普通无工具回答仍保持 `reasoning → final`。 |
@@ -1145,7 +1079,6 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 | v1.102 | 2026-08-25 | 主对话从 Chat Completions 切换为 Responses 协议：旧 chat message/tool cursor 在供应商边界转成 Responses input item，工具 schema 转成扁平 function tool；输出按 commentary/final message phase、reasoning summary 和 function call 分流。公开首句兼容请求也改走 `/responses`，不再另调 `/chat/completions`。请求持久化由 Harness 管理，供应商 `store=false`；历史、HITL 恢复和工具回执继续使用单一内部 cursor，不引入第二会话事实源。 |
 | v1.103 | 2026-08-25 | NewAPI `v1.0.0-rc.10` 的 DeepSeek adaptor 对 Responses 仍为 `not implemented`；`deepseek-v4-flash` 渠道改用 OpenAI 兼容 adaptor 并显式指向 DeepSeek 官方 Base URL。渠道管理把 Chat / Responses 两个测试收进单一“测试”菜单，Responses 测试通过 `endpoint_type=openai-response` 验证真实协议路径。`deepseek-v4-pro` 与 `deepseek-v4-flash-vision-exp` 不视为 Responses 可用模型。 |
 | v1.104 | 2026-08-25 | 产品决策覆盖 v1.103 的 DeepSeek 白名单：DeepSeek 全系强制 Responses，其他主 Agent 模型使用 Chat Completions；reasoning-first preamble 仅是 DeepSeek Responses 的首句兼容层。同步收紧 commit-before-publish，贯通工具 `call_id`，并为 commentary 增加可选证据与下一步字段。 |
-| v1.105 | 2026-08-26 | 主 Agent 新增高准确率 `recommend_agent` 控制工具：服务端二次校验明确请求/专业缺口，从独立蓝绿 Qdrant 索引做向量+元数据+触发样例混合召回，再经负例、多信号、分差、冷却和数据库 ACL/状态复核。只在索引签名与黄金集门禁 ready 时注册；成功以 `recommend_agents` 结构化 SSE 在当轮输出底部展示克制卡片，点击新窗口打开，低置信度/超时/异常均静默拒绝并继续主回答。 |
 | v1.106 | 2026-08-26 | 历史执行轨迹跨环境恢复：Run/Plan/Event 在活动期仍只认 Runtime PG；终态后把已提交事件编译为不可变的消息展示投影，随共享 MySQL 会话保存。本机与服务器使用不同 Runtime PG 时，历史接口优先读当前权威 Run，查不到才回放终态投影，保留真实蓝色执行框、Plan/Research 步骤与思考记录，不伪造进度。 |
 | v1.107 | 2026-08-26 | Deep Research 改为当前会话的显式持续 Profile：用户开启后，每个 Run 终态只清理本轮账本，不自动关闭 Research 开关；后续第 2/N 轮仍以 `agent_mode=research` 建 Run，因而始终走同一份研究报告白卡与全屏查看器。用户再次点击、改选 Plan 或离开会话时才关闭。 |
 | v1.108 | 2026-08-26 | Profile 在用户按下发送时冻结进 TurnContext，停止收尾、目录回源等异步窗口不得把已选 Plan 静默降成 Standard。Plan 回合若已同时产出完整计划报告并成功提交 `update_plan`，平台立即保留该报告并转 `waiting_confirmation`；执行步骤保持 pending 是等用户批准的正常事实，不得因 `plan_incomplete=true` 重复请求模型改计划或重写报告。 |
@@ -1169,20 +1102,17 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 | v1.126 | 2026-08-31 | 修复 Skill 编辑重发丢失：正常发送仍清空 composer 的一次性 Skill；用户编辑已发消息时按该消息的 Skill 快照重发，不读当前或最近其他轮次的选择。用户消息的 Skill 引用元数据新增稳定 ID，保证刷新后仍可恢复；旧历史仅在当前目录名称唯一命中时兼容恢复，服务端仍重验 ACL/启用状态。 |
 | v1.127 | 2026-09-01 | 修复执行中切页后历史步骤与计时消失：初始 user 行与 Run 受理同步持久 `run_id`；旧 Run 无消息锚点时，历史响应追加唯一临时 assistant 轨迹投影。前端将完整快照合并到活动锚点，保留截止 `event_cursor` 的全部 Thought/工具/公开说明与 `startedAt`，新 SSE 事件只在其后追加。 |
 | v1.128 | 2026-09-01 | 修复切换到新对话窗口后历史列表滞后：左侧「主对话」保持原有 `openNewChat()`/`resetChat()` 语义，原 Run 继续后台执行；顶栏不新增「新对话」。历史抽屉每次打开时重拉服务端会话列表，不刷新整页也能立即点回刚才的活动会话；整页刷新仍不自动打开最近会话。 |
-| v1.129 | 2026-09-01 | 修复切页后活动工具步骤被误标失败：前端导航只 abort 本地 SSE 观察者，不发送 Run cancel；恢复活动 Run 快照时保留工具、Thought、子智能体与验证步骤的 `running` 状态，等后续 SSE 事件正常收口。仅终态轨迹中的 `running` 孤儿步骤保留「未跑完/中断」提示。 |
-| v1.130 | 2026-09-01 | 新增主对话内置「演示文稿助手」presentation 预设：欢迎页第二张卡和智能体广场使用稳定内置入口；点击不创建空 Thread，首次发送才持久化 `origin=presentation`，历史据此恢复专属页。执行仍唯一进入 AXIOM Agent Harness，服务端每轮强制从权威目录加载 `ppt-studio`，并在真实 Tool Registry 中移除 Skill 选择、智能体推荐与子智能体委派；失败时明确报错，不降级普通主对话。 |
-| v1.131 | 2026-09-01 | 演示文稿助手空态恢复主页面式欢迎层级，使用“你好，今天想制作什么演示文稿？”和专属说明；继续隐藏推荐智能体、`@`、Skill 与子智能体入口。运行前将 `ppt-studio` 权威校验与可选记忆/个性化预取解耦，避免非 Skill 服务超时误报，并在计划/HITL 快照中保存 ACL 解析后的真实 Skill ID。 |
-| v1.132 | 2026-09-01 | 主对话皮肤与子智能体外观分域管理；校园百事通发布配置只引用已安装的 `main_chat` 皮肤版本。皮肤改为可移植声明式 ZIP 包，素材随包持久化，导入后无需部署前端代码；禁止 JS/Vue/HTML/任意 CSS/SVG 与外部路径。包内强制 desktop/tablet/mobile 三端布局，缺少移动端规则的版本只能待完善、不能发布；皮肤只改变展示，不进入 Harness、Thread、模型、知识库、工具或 Run 状态。 |
-| v1.133 | 2026-09-02 | 主对话与子智能体皮肤包分域补齐导入、查询、管理信息修改、引用保护删除和导出；包内内容仍以 key/version/content hash 不可变，效果更改通过导入新版本完成。校园百事通在欢迎态和对话态始终保留同一已发布背景。 |
-| v1.134 | 2026-09-02 | 子智能体皮肤删除改为事务性回退：锁定皮肤版本，先将草稿/已发布分配与当前草稿定义改为 `default`，再删除或撤下包。已发布 JSON 和历史版本不改写，以保持发布审计链；线上页面由已发布分配立即回退，历史运行时因安装不存在而安全回退。管理页去除非必要辅助小字，实际运行页与试衣预览的移动端会话按钮改为纯图标。 |
-| v1.135 | 2026-09-02 | 主对话历史项改为两层信息结构：首层稳定展示智能体图标/名称与时间或运行态，次层独立展示会话标题，悬浮操作不再改变标题宽度；组名已表达今天/昨天/近期时，行内只显示钟点。主对话皮肤不得把内置智能体形象当成皮肤装饰隐藏；校园百事通蓝色助手在欢迎态、对话输出后的固定输入框以及管理端皮肤预览中都必须持续可见。 |
-| v1.136 | 2026-09-02 | 演示文稿助手与校园百事通升级为不可删除、可启停并可按角色/部门授权的系统内置应用；统一进入智能体广场目录，点击分别新开 `/center/chat/ppt` 与 `/center/chat/campus`。普通主对话、presentation、campus_services 按 Thread origin 隔离历史、搜索、分页、草稿与恢复；旧会话按已有 origin 直接归类。专属页只复用子智能体会话外壳，执行继续唯一进入 AXIOM Agent Harness；权限由服务端覆盖 Run 受理、续接、队列、历史与引用，不能只靠前端隐藏。 |
+| v1.129 | 2026-09-01 | 修复切页后活动工具步骤被误标失败：前端导航只 abort 本地 SSE 观察者，不发送 Run cancel；恢复活动 Run 快照时保留工具、Thought 与验证步骤的 `running` 状态，等后续 SSE 事件正常收口。仅终态轨迹中的 `running` 孤儿步骤保留「未跑完/中断」提示。 |
+| v1.130 | 2026-09-01 | 新增主对话内置「演示文稿助手」presentation 预设：欢迎页第二张卡和智能体广场使用稳定内置入口；点击不创建空 Thread，首次发送才持久化 `origin=presentation`，历史据此恢复专属页。执行仍唯一进入 AXIOM Agent Harness，服务端每轮强制从权威目录加载 `ppt-studio`，并在真实 Tool Registry 中移除 Skill 选择；失败时明确报错，不降级普通主对话。 |
+| v1.131 | 2026-09-01 | 演示文稿助手空态恢复主页面式欢迎层级，使用“你好，今天想制作什么演示文稿？”和专属说明；继续隐藏欢迎页智能体卡片区、`@` 与 Skill 入口。运行前将 `ppt-studio` 权威校验与可选记忆/个性化预取解耦，避免非 Skill 服务超时误报，并在计划/HITL 快照中保存 ACL 解析后的真实 Skill ID。 |
+| v1.135 | 2026-09-02 | 主对话历史项改为两层信息结构：首层稳定展示智能体图标/名称与时间或运行态，次层独立展示会话标题，悬浮操作不再改变标题宽度；组名已表达今天/昨天/近期时，行内只显示钟点。校园百事通蓝色助手在欢迎态和对话输出后的固定输入框中都必须持续可见。 |
+| v1.136 | 2026-09-02 | 演示文稿助手与校园百事通升级为不可删除、可启停并可按角色/部门授权的系统内置应用；统一进入智能体广场目录，点击分别新开 `/center/chat/ppt` 与 `/center/chat/campus`。普通主对话、presentation、campus_services 按 Thread origin 隔离历史、搜索、分页、草稿与恢复；旧会话按已有 origin 直接归类。专属页只复用会话外壳，执行继续唯一进入 AXIOM Agent Harness；权限由服务端覆盖 Run 受理、续接、队列、历史与引用，不能只靠前端隐藏。 |
 | v1.137 | 2026-09-02 | 两个系统内置 Harness 应用改为全局唯一目录记录，不再按租户生成副本或限定可见范围；启停与角色/部门 ACL 继续作为全局应用权限事实源，空 ACL 表示所有已登录用户可用。 |
 | v1.138 | 2026-09-02 | 演示文稿助手不对用户开放计划模式和深度研究。前端 `presentation_authoring` 隐藏入口、建议条和胶囊；发送、队列派发和 Run 受理强制 standard，禁止进入 Plan/Research Profile。ppt-studio 仍可调用 `update_plan` 作为制作待办，不得据此点亮用户侧计划模式。 |
-| v1.139 | 2026-09-02 | 手机与 iPad 的普通智能体、委派子智能体和系统内置 Harness 应用共用同一紧凑对话顶栏与底部输入区。空对话的输入框不得卡在欢迎文案下方；左侧会话历史保持固定抽屉布局，按主 Agent 的 0.24s 曲线滑入并配合 0.18s 遮罩渐变。普通与委派智能体保留右上角场景问题推荐入口，系统内置页不额外增加该入口。 |
+| v1.139 | 2026-09-02 | 手机与 iPad 的主对话和系统内置 Harness 应用共用同一紧凑对话顶栏与底部输入区。空对话的输入框不得卡在欢迎文案下方；左侧会话历史保持固定抽屉布局，按主 Agent 的 0.24s 曲线滑入并配合 0.18s 遮罩渐变。 |
 | v1.140 | 2026-09-02 | 纠正内置 Harness 应用的目录责任：代码只提供 `/center/chat/ppt` 与 `/center/chat/campus` 独立页面及固定预设；管理员手工新增 `external` 应用记录并维护名称、图标、启停与角色/部门 ACL。取消迁移播种、懒修复、租户副本和不可删除约束；记录可删除，重新新增同路径即恢复。广场只消费原应用目录，并展示实际创建人的姓名与头像。 |
-| v1.141 | 2026-09-02 | 智能体广场与主对话推荐区对已授权、已返回的固定路径应用恢复内置智能体照片：管理员未配置 `app_icon` 时回退默认照片，已配置时优先使用配置图标。图片回退只装饰现有记录，不补卡、不改写数据库。推荐入选改按固定路径/预设识别，不依赖可编辑名称；卡片底部创建人头像和姓名仍来自实际创建人。 |
-| v1.142 | 2026-09-02 | 管理员未填写应用描述时，固定路径记录回退对应内置默认描述；管理员配置值优先。智能体广场和主对话推荐区统一将已授权、已返回的校园百事通与演示文稿助手置于前两位，内部顺序为校园百事通第一、演示文稿助手第二；其他应用相对顺序不变，仍不静态补卡或绕过 ACL。 |
+| v1.141 | 2026-09-02 | 智能体广场与主对话欢迎页卡片区对已授权、已返回的固定路径应用恢复内置智能体照片：管理员未配置 `app_icon` 时回退默认照片，已配置时优先使用配置图标。图片回退只装饰现有记录，不补卡、不改写数据库。入选改按固定路径/预设识别，不依赖可编辑名称；卡片底部创建人头像和姓名仍来自实际创建人。 |
+| v1.142 | 2026-09-02 | 管理员未填写应用描述时，固定路径记录回退对应内置默认描述；管理员配置值优先。智能体广场和主对话欢迎页卡片区统一将已授权、已返回的校园百事通与演示文稿助手置于前两位，内部顺序为校园百事通第一、演示文稿助手第二；其他应用相对顺序不变，仍不静态补卡或绕过 ACL。 |
 | v1.143 | 2026-09-02 | 校园百事通继续走主对话同一工具循环，只保留 `search_knowledge` 与 `search_web`。先收集已审核知识库和学校官网依据再整合回答，检索步骤对用户可见。知识库原图与官网相关图片可由模型判断以 `[图N]` 输出，不得使用非官方配图或为此新增工具。 |
 | v1.144 | 2026-09-02 | 修复广场卡片同一创建人显示不同名称：兼容 `create_by` 中的用户 ID 和登录名，归一到 `sys_user` 的真实姓名与头像。移除智能体广场卡片标题旁的“外部”视觉标签；应用在管理端仍保持 `external` 类型并可正常编辑、授权和删除。 |
 | v1.145 | 2026-09-02 | 系统设置的应用新增、编辑与列表筛选统一复用智能体广场 8 项正典能力分类，不再读取可能残留旧值的 `app_category` 通用字典缓存。历史旧分类不批量迁移；管理员编辑保存时必须显式改选标准分类。 |
@@ -1191,7 +1121,7 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 | v1.148 | 2026-09-02 | 校园图片输入复用主对话视觉能力路由：校园固定模型支持视觉时直接注入原图；固定模型为纯文本时，在持久 Run 建立后调用平台配置的独立视觉模型读取原图，把带来源标记的完整视觉描述回灌给同一 Harness 与文本模型。视觉调用沿用 Run/thread 审计归属，不另建校园识图循环。 |
 | v1.149 | 2026-09-03 | 手机与 iPad 点选左侧会话历史后，历史抽屉立即按主 Agent 的 0.24s 曲线滑出并配合 0.18s 遮罩渐变收起，同时加载选中会话；置顶、重命名、删除仍不关闭抽屉。桌面点选仍等加载成功后再关，失败可继续点其它会话。 |
 | v1.150 | 2026-09-03 | 校园回答增加面向学生的简短结论、关键信息清单、编号办理步骤与必要提醒；不改写既有正文或凭空补事实。图片与引用随消息展示投影保存并在 Runtime 缺失时恢复，避免换设备打开历史只剩 `[图N]`。校园配图独立成块、移动端保持完整比例；加载失败保留来源和重试，不再静默隐藏整卡。共享 Less 改为各页面自有样式入口引入，消除主壳与独立应用页的外部样式描述符覆盖和 `scoped` 编译报错。 |
-| v1.151 | 2026-09-03 | 手机与 iPad 点选会话历史后，普通智能体运行页、委派子智能体浮窗和系统内置应用页立即按 0.24s 曲线滑出侧栏并配合 0.18s 遮罩渐变收起，同时加载该会话；不再等消息拉取完成才关抽屉。置顶、重命名、删除仍不关。 |
+| v1.151 | 2026-09-03 | 手机与 iPad 点选会话历史后，主对话和系统内置应用页立即按 0.24s 曲线滑出侧栏并配合 0.18s 遮罩渐变收起，同时加载该会话；不再等消息拉取完成才关抽屉。置顶、重命名、删除仍不关。 |
 | v1.152 | 2026-09-03 | 修复校园 Worker 应用预设时清空已验证图片附件的断点；主对话、演示文稿助手、校园百事通复用同一图像预处理入口，并将视觉识别后的状态同步到附件提示与回答约束。增加三入口九组合回归测试，验证原图直传、配置视觉模型委托及失败如实降级；实际服务加载与真实上传验收仍单独确认。 |
 | v1.153 | 2026-09-03 | 校园百事通的手机/平板图片添加面板改为内容自适应高度，图片入口使用明确的图片图标和可触控操作行，消除单一入口下的大片留白；保持主对话、演示文稿助手的多级资源面板与共享上传链路不变。 |
 | v1.154 | 2026-09-03 | 修复共享流式绘制器对动画帧的无限等待：帧暂停时用有界计时兜底，切后台立即同步权威文本；公开首句、思考正文、绘制屏障与最终回答沿用同一保障。自动跟随及手势监听改为查找真实滚动容器，覆盖没有 `.workspace` 的内置应用外壳；去掉手机输入区重复的底部占位。正常前台流式速度、阅读暂停、事件顺序、Run 完成事实及三个入口的共用 Harness 均不变。 |
@@ -1206,7 +1136,6 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 | v1.163 | 2026-09-04 | H2 / H3 / H5：收紧面试语义与专业评分证据要求，正确回答复验通过，证据不足样本修正后另行复验；修复真实页面历史抽屉层级、长输入区遮挡、折叠侧栏及恢复完成后的面试快照同步。真实页面三档响应式通过，前端会话 13 项通过；恢复简历板并同步静态与动态形象。第二身份联验与共享历史时长异常单列。 |
 | v1.164 | 2026-09-04 | H3 / H5：证据不足独立首答复验通过，面试验收矩阵 17 项通过、1 项等待第二身份。Runtime 无时区创建时间按 UTC 回放，修复缺少开场事件的恢复场次多出 8 小时，原真实历史页复验通过；三种时区与既有投影回归 33 项通过。不改业务记录、终态或租约。 |
 | v1.165 | 2026-09-04 | H2 / H3 / H5：整理面试材料与题量设置，增加常驻题目/反馈入口、主问题记录导航及复盘下载；暂停/结束收起输入，继续/重答恢复。新场次自动保存 URL 并支持生成中刷新续接；评分与改进重点直接可见。文字复盘规则收紧后真实复验通过，首答保持不变。前端 46 项、后端 63 项及 7 个真实增量 Run 通过；响应式、实际下载与启动时迁移处理记录于 QA，第二身份与真机仍单列。 |
-| v1.166 | 2026-09-04 | H2 / H3 共享基础能力：工作流对话 Agent 和 toolCall 保持原入口，取消固定 30 轮终止，按需压缩当前执行上下文、校验完整模型终态与工具参数，并提供执行隔离的长结果/引用分页及重复结果事实反馈。共享 SSE 重连与 assistant cursor 构造从主 Agent 提取，主 Agent 既有入口/重试策略不变；不新增 Harness、Worker、计划器或后台恢复。既有结果表新增工作流归属字段（runtime_0020_workflow_results），不制造主 Agent Run。295 项聚合测试通过；3 个旧失败以 HEAD 复现，旧网关权限测试另有 SQLite LONGBLOB 夹具阻断。当前 Runtime 为远程开发库，迁移、服务重启及浏览器图文/时延验收尚未执行，需遵守本次不改远程环境的授权边界。 |
 | v1.167 | 2026-09-04 | H5：面试页面删去重复介绍与提示，次要设置折叠；逐答反馈和复盘默认突出评分与一个行动重点，完整评价和证据保留在展开内容中。用户本机 Chrome 的 :3200 已核对真实历史记录、展开交互及 390 宽度设备模拟；定向 ESLint 与补丁检查通过。本次仅调整前端展示。 |
 | v1.168 | 2026-09-04 | H2 / H3：面试操作规则随冻结动作按需提供，控制动作仅携带提交模板；已有题按 ID 原样选择，避免复制题目导致不可变校验失败后重复调用。反馈强调简洁重点，三维与原文证据校验保留。71 项领域与接线测试通过；真实时延基于 SSE epoch 与 Provider attempt audit 另记 QA，不以 SQL 混合时区时间差或单样本推断稳定提速比例。 |
 | v1.169 | 2026-09-04 | H6：双账号联验发现事件订阅先发 200 后在生成器中拒绝归属，导致客户端等待。公共订阅入口前置 Run 归属与当前应用 ACL 检查，拒绝以 JSON HTTP 状态返回；合法订阅仍复用原共享事件流与恢复游标。 |
@@ -1249,6 +1178,5 @@ Runtime PG 只能由 Alembic 从当前 revision 顺序升级。`create_all` 只�
 | v1.206 | 2026-09-11 | H2 / H5、§6.6.2：面试报告明确“做得好的地方”和“需要提升的地方”，整场已保存评价分组去重，不丢前面题目的表现，辅导后练习单列。正文取消能力小标题，题目、评分依据与下一步练习按需展开；所有折叠箭头复用主 Agent 的 PremiumChevron，收起向右、展开向下。生成政策改为直接、具体的自然短评，不强凑不足或模板赞美，不暴露内部提交规则；真实新场次文案、下载与页面验收见 qa/interview-assistant/runtime-recovery-0911.md。 |
 | v1.207 | 2026-09-11 | 文档与当前工作区源码对齐：整理当前入口/状态与历史验收边界，移除正文中已被替代的 Research 预算、全员互审和报告硬截止，明确 Completion 诊断与实际收尾、Job 与公开 Run 状态、当前迁移头及本地 Worker 监护；补齐文档导航、功能清单、开发和部署说明。保留既有未提交功能与 §15 全部历史行，本轮仅修改文档；不代表重新完成模型 E2E 或生产发布。 |
 | v1.208 | 2026-09-11 | H2 / H5、§6.6.2：按用户最终明确的范围，面试过程中只保留问答，整场结束后才显示一个白灰报告。删除逐题反馈组件、题目/维度选择器和菜单入口；报告与下载统一读取整场复盘，不再拼接各题评价或附逐答记录。每轮评价仍保存供整场评分和总结使用，公开正文只输出下一问或结束确认；回归及真实页面证据见 qa/interview-assistant/runtime-recovery-0911.md。 |
-| v1.209 | 2026-09-11 | H5 / §6.6：三个已登记定制助手纳入智能体管理，复用原版六项运营趋势与时间筛选，按真实 Thread origin 统计，保留目录记录、来源与权限；原应用管理行转向统一入口。汇总监控不扩大面试明细读取权，不生成虚构工作流版本。源码回归与只读数据库汇总通过；后端重载、三个面板和配置入口的浏览器联验待完成，见 qa/builtin-agent-management-20260911.md。 |
 | v1.210 | 2026-09-11 | H2 / §6.6.2：面试增加有界的同用户近期已问题目参考、开场角度轮换与原题重复提交拦截；只使用已问的题干，不携带旧答案/分数。策略随开场受理冻结并供恢复复用，前端与评分规则保持原契约。隔离数据库验证相关性、用户/应用隔离、失败回滚、原题更正提交和历史容量边界；重载后的真实相同材料多场出题验收另记于 qa/interview-assistant/question-diversity-0911.md。 |
-| v1.211 | 2026-09-11 | H5 / §6.6：服务重载后在 :3200 完成三个定制助手的真实监控、时间切换、合并列表分页/筛选、原目录跳转及配置表单只读验收，普通智能体监控和治理页回归正常。修复管理抽屉固定宽度在手机视口下裁切的问题，并在 390×620 视口重新打开验证；未执行真实权限保存、启停或删除。证据见 qa/builtin-agent-management-20260911.md。 |
+| v2.0 | 2026-09-19 | 随工作流编排、子智能体委派（`call_subagent`）、智能体推荐（`recommend_agent`）、对外 Agent API 与皮肤系统整体删除（`mysql_0023_drop_skins`、`mysql_0024_drop_orchestration`、`runtime_0024_drop_eval_runs`），删去 §6.5、原 §6.7 皮肤契约及各处委派/推荐从句，§0.2 核对入口与 §4.4 事件表按当前源码更新；主对话、三个内置助手、Research、计划模式、工具网关审批、上下文压缩与记忆机制不变。 |

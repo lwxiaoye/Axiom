@@ -1,6 +1,6 @@
 # AXIOM 本地认证服务
 
-提供原 `/sys/*` 协议的最小兼容实现：单管理员登录、图形验证码、Token 校验/注销以及只读菜单、角色视图。不是完整用户管理平台，也不提供知识检索实现。
+提供原 `/sys/*` 协议的最小兼容实现：单管理员登录、带验证码的自助注册（`POST /sys/user/register`）、个人资料修改（`/sys/user/login/setting/userEdit`，姓名 / 头像 / 邮箱 / 手机）、头像上传（`/sys/common/upload`）、图形验证码、Token 校验/注销、只读用户与角色列表（`/sys/user/list`、`/sys/role/list`）。不是完整用户管理平台；知识库与 Skill 目录由 agent-api 自持，这里的 `/ai/skill/list`、`/app/appInfo/my/all/list` 只是返回空的兼容桩。
 
 ## 配置
 
