@@ -15,10 +15,6 @@ const campusModuleSource = ['definition.ts', 'ui.ts']
   .map((file) => readFileSync(resolve(root, 'builtinAssistants/campusServices', file), 'utf8'))
   .join('\n');
 const registrySource = readFileSync(resolve(root, 'builtinAssistants/registry.ts'), 'utf8');
-const skinBackdropSource = readFileSync(resolve(root, 'mainChatSkin/MainChatSkinBackdrop.vue'), 'utf8');
-const skinPreviewSource = readFileSync(resolve(root, 'mainChatSkin/MainChatSkinPreview.vue'), 'utf8');
-const skinApiSource = readFileSync(resolve(root, 'mainChatSkin/api.ts'), 'utf8');
-const campusAdminSource = readFileSync(resolve(root, '../newapi/campusAssistant/index.vue'), 'utf8');
 const messageListSource = readFileSync(resolve(root, 'components/MessageList.vue'), 'utf8');
 
 describe('校园百事通前端契约', () => {
@@ -64,8 +60,6 @@ describe('校园百事通前端契约', () => {
     expect(chatTabSource).toContain("builtinAssistant.value?.mascotVariant || 'main'");
     expect(chatTabSource).toContain('v-if="!uiPolicy?.showAvatar && !uiPolicy?.hideComposerMascot && chatMessages.length === 0"');
     expect(chatTabSource).not.toContain('chatMessages.length === 0 || campusMode');
-    expect(chatTabSource).not.toContain('!uiPolicy?.showAvatar && !activeMainChatSkin');
-    expect(skinPreviewSource).toContain('/agent-icons/builtin/campus-services-static-v2.png');
     expect(existsSync(resolve(root, '../../../public/agent-icons/builtin/campus-services-mascot-v3.png'))).toBe(true);
     expect(campusModuleSource).toContain('hideModelSelector: true');
     expect(chatTabSource).toContain('!uiPolicy?.hideModelSelector && currentRunModel');
@@ -103,30 +97,4 @@ describe('校园百事通前端契约', () => {
     expect(chatTabSource).toContain('bottom: calc(12px + env(safe-area-inset-bottom));');
   });
 
-  it('输出后继续使用已发布背景，不用白蒙层洗掉皮肤', () => {
-    expect(chatTabSource).toContain(':empty-state="chatMessages.length === 0"');
-    expect(skinBackdropSource).toContain('opacity: String(props.layout.background.opacity)');
-    expect(skinBackdropSource).toContain('.main-chat-skin-backdrop.is-conversation::after');
-    expect(skinBackdropSource).not.toContain('.main-chat-skin-backdrop.is-conversation img');
-    expect(skinBackdropSource).not.toContain('opacity: 0.28');
-    expect(skinBackdropSource).not.toContain('rgba(255, 255, 255, 0.78)');
-  });
-
-  it('主对话皮肤包提供导入、详情、管理信息修改、安全删除和导出', () => {
-    expect(skinApiSource).toContain("requestJson('/admin/skins')");
-    expect(skinApiSource).toContain("requestJson('/admin/skins/import'");
-    expect(skinApiSource).toContain("method: 'PATCH'");
-    expect(skinApiSource).toContain("method: 'DELETE'");
-    expect(skinApiSource).toContain('/export`');
-    expect(campusAdminSource).toContain('编辑皮肤管理信息');
-    expect(campusAdminSource).toContain('@confirm="deleteSelectedSkin"');
-    expect(campusAdminSource).toContain('要改图片或布局，请升级包版本后重新导入');
-  });
-
-  it('管理端显式配置官网白名单，官网文字和配图不能回退第三方来源', () => {
-    expect(campusAdminSource).toContain('学校官网域名');
-    expect(campusAdminSource).toContain('v-model:value="officialDomainHosts"');
-    expect(campusAdminSource).toContain('官网正文与配图都会按此白名单过滤');
-    expect(campusAdminSource).toContain('officialDomains.map((host) => ({ host, include_subdomains: true }))');
-  });
 });

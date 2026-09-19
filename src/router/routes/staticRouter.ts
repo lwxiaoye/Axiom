@@ -21,23 +21,4 @@ export const staticRoutesList: AppRouteRecordRaw[] = [
       },
     ],
   },
-  {
-    path: '/newapi/campus-assistant',
-    name: 'CampusAssistantConfigParent',
-    component: LAYOUT,
-    meta: {
-      title: '校园百事通配置',
-      hideMenu: true,
-    },
-    children: [
-      {
-        path: '',
-        name: 'CampusAssistantConfigPage',
-        component: () => import('/@/views/newapi/campusAssistant/index.vue'),
-        meta: {
-          title: '校园百事通配置',
-        },
-      },
-    ],
-  },
 ];

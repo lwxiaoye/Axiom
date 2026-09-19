@@ -3994,9 +3994,9 @@ watch(
   max-width: 100%;
   border: 0;
   border-radius: 20px;
-  background: var(--main-chat-skin-user-bubble, #f4f4f5);
+  background: #f4f4f5;
   padding: 11px 16px;
-  color: var(--main-chat-skin-user-bubble-text, #111);
+  color: #111;
   font-size: 16px;
   line-height: 1.6;
   letter-spacing: 0;

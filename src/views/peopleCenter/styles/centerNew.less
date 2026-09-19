@@ -1545,61 +1545,6 @@ html:has(.tox-center.sidebar-collapsed) {
   padding: 48px 44px 132px;
 }
 
-/* 主对话皮肤只是显示层：皮肤根容器建立独立图层，聊天内容始终压在背景/装饰之上。 */
-.chat-home.has-main-chat-skin {
-  position: relative;
-  isolation: isolate;
-  max-width: none;
-  overflow: clip;
-  background: var(--main-chat-skin-page, var(--surface));
-  color: var(--main-chat-skin-title, var(--ink));
-}
-
-.chat-home.has-main-chat-skin > .chat-intro,
-.chat-home.has-main-chat-skin > .message-list,
-.chat-home.has-main-chat-skin > .composer-dock,
-.chat-home.has-main-chat-skin > .recommend-grid {
-  position: relative;
-  z-index: 3;
-}
-
-.chat-home.has-main-chat-skin > .chat-intro,
-.chat-home.has-main-chat-skin > .message-list,
-.chat-home.has-main-chat-skin > .recommend-grid {
-  width: min(100%, var(--chat-content-max-width));
-  margin-right: auto;
-  margin-left: auto;
-}
-
-.chat-home.has-main-chat-skin .chat-intro h1 {
-  color: var(--main-chat-skin-title, var(--ink));
-}
-
-.chat-home.has-main-chat-skin .chat-intro p {
-  color: var(--main-chat-skin-body, var(--muted));
-}
-
-.chat-home.has-main-chat-skin .composer {
-  border-color: var(--main-chat-skin-composer-border, var(--subtle));
-  border-radius: var(--main-chat-skin-composer-radius, 24px);
-  background-color: var(--main-chat-skin-composer, var(--surface));
-  box-shadow: var(--main-chat-skin-composer-shadow, 0 10px 28px rgba(0, 0, 0, 0.045));
-}
-
-.chat-home.has-main-chat-skin .composer-send:not(:disabled),
-.chat-home.has-main-chat-skin .composer-stop:not(:disabled) {
-  background: var(--main-chat-skin-accent, var(--ink));
-}
-
-.chat-home.has-main-chat-skin.empty-state {
-  padding-top: var(--main-chat-skin-top-gap, 128px);
-}
-
-.chat-home.has-main-chat-skin.empty-state .composer-dock {
-  /* 装饰图与输入框上边线故意重叠 3~4px，不留透背景的缝。 */
-  overflow: visible;
-}
-
 .chat-home.empty-state {
   justify-content: flex-start;
   /* 顶距加大：欢迎语+输入框整体下移，不再贴顶栏（下方本就有大片留白，更居中平衡） */
@@ -2175,15 +2120,6 @@ html:has(.tox-center.sidebar-collapsed) {
     font-size: 34px;
   }
 
-  /* 平板端将皮肤的顶距限制在可读区间：既保留皮肤节奏，也不让输入框掉出首屏。 */
-  .chat-home.has-main-chat-skin.empty-state {
-    padding-top: clamp(68px, var(--main-chat-skin-top-gap, 80px), 92px);
-  }
-
-  .chat-home.has-main-chat-skin.empty-state .composer-dock {
-    margin-top: 68px;
-  }
-
   .chat-home:not(.empty-state) .composer-dock,
   .tox-center.sidebar-collapsed .chat-home:not(.empty-state) .composer-dock {
     width: min(820px, calc(100vw - var(--center-nav-width, 72px) - 24px));
@@ -2318,10 +2254,6 @@ html:has(.tox-center.sidebar-collapsed) {
     padding-bottom: calc(var(--mobile-nav-height) + 24px);
   }
 
-  .chat-home.has-main-chat-skin.empty-state {
-    padding-top: clamp(42px, var(--main-chat-skin-top-gap, 52px), 62px);
-  }
-
   .chat-home.empty-state.builtin-state .chat-intro,
   .chat-home.empty-state.builtin-state .composer-dock {
     margin-top: 0;
@@ -2349,10 +2281,6 @@ html:has(.tox-center.sidebar-collapsed) {
     margin-top: 46px;
   }
 
-  .chat-home.has-main-chat-skin.empty-state .composer-dock {
-    margin-top: 58px;
-  }
-
   .chat-home:not(.empty-state) {
     padding: 0 12px 16px;
   }
@@ -2364,9 +2292,8 @@ html:has(.tox-center.sidebar-collapsed) {
     width: calc(100vw - 24px);
   }
 
-  .composer,
-  .chat-home.has-main-chat-skin .composer {
-    border-radius: min(var(--main-chat-skin-composer-radius, 22px), 22px);
+  .composer {
+    border-radius: 22px;
   }
 
   .composer textarea,
@@ -2448,8 +2375,7 @@ html:has(.tox-center.sidebar-collapsed) {
 /* 手机横屏/矮窗口首屏优先保留输入能力；说明和推荐仍可在下方滚动查看。 */
 @media (max-width: 980px) and (max-height: 520px) {
   .chat-home.empty-state,
-  .chat-home.empty-state.builtin-state,
-  .chat-home.has-main-chat-skin.empty-state {
+  .chat-home.empty-state.builtin-state {
     padding-top: 14px;
     padding-bottom: 24px;
   }
@@ -2477,8 +2403,7 @@ html:has(.tox-center.sidebar-collapsed) {
   }
 
   .chat-home.empty-state .composer-dock,
-  .chat-home.empty-state.presentation-state .composer-dock,
-  .chat-home.has-main-chat-skin.empty-state .composer-dock {
+  .chat-home.empty-state.presentation-state .composer-dock {
     margin-top: 52px;
   }
 }
@@ -2923,8 +2848,7 @@ html:has(.tox-center.sidebar-collapsed) {
   }
 
   .chat-home.empty-state,
-  .chat-home.empty-state.builtin-state,
-  .chat-home.has-main-chat-skin.empty-state {
+  .chat-home.empty-state.builtin-state {
     padding-top: clamp(52px, 9vh, 92px);
     padding-bottom: 220px;
   }
@@ -2935,7 +2859,6 @@ html:has(.tox-center.sidebar-collapsed) {
 
   .chat-home.empty-state .composer-dock,
   .chat-home.empty-state.presentation-state .composer-dock,
-  .chat-home.has-main-chat-skin.empty-state .composer-dock,
   .chat-home:not(.empty-state) .composer-dock,
   .tox-center.sidebar-collapsed .chat-home:not(.empty-state) .composer-dock {
     position: fixed;
@@ -2947,9 +2870,8 @@ html:has(.tox-center.sidebar-collapsed) {
     transform: translateX(-50%);
   }
 
-  .composer,
-  .chat-home.has-main-chat-skin .composer {
-    border-radius: min(var(--main-chat-skin-composer-radius, 22px), 22px);
+  .composer {
+    border-radius: 22px;
   }
 
   .composer textarea,
@@ -3208,8 +3130,7 @@ html:has(.tox-center.sidebar-collapsed) {
 
   .chat-home,
   .chat-home.empty-state,
-  .chat-home.empty-state.builtin-state,
-  .chat-home.has-main-chat-skin.empty-state {
+  .chat-home.empty-state.builtin-state {
     padding: clamp(44px, 8vh, 72px) 14px 190px;
   }
 
@@ -3231,7 +3152,6 @@ html:has(.tox-center.sidebar-collapsed) {
 
   .chat-home.empty-state .composer-dock,
   .chat-home.empty-state.presentation-state .composer-dock,
-  .chat-home.has-main-chat-skin.empty-state .composer-dock,
   .chat-home:not(.empty-state) .composer-dock,
   .tox-center.sidebar-collapsed .chat-home:not(.empty-state) .composer-dock {
     bottom: calc(10px + env(safe-area-inset-bottom));

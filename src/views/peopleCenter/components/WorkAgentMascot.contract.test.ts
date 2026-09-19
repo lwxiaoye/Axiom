@@ -46,8 +46,6 @@ describe('AXIOM Agent mascot identity contract', () => {
     expect(chatTabSource).toContain('<WorkAgentMascot');
     expect(chatTabSource).toContain('v-if="!uiPolicy?.showAvatar && !uiPolicy?.hideComposerMascot && chatMessages.length === 0"');
     expect(chatTabSource).not.toContain('chatMessages.length === 0 || campusMode');
-    expect(chatTabSource).toContain("'with-main-chat-skin': Boolean(activeMainChatSkin)");
-    expect(chatTabSource).not.toContain('!uiPolicy?.showAvatar && !activeMainChatSkin');
     expect(chatTabSource).toContain(':state="workAgentMascotState"');
     expect(chatTabSource).not.toContain(':draggable=');
     expect(chatTabSource).not.toContain(':position-key=');

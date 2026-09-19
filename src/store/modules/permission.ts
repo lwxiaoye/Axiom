@@ -267,8 +267,7 @@ export const usePermissionStore = defineStore({
           routeList = transformObjToRoute(routeList);
 
           // 构建后台路由菜单
-          // 不再往侧栏硬塞「校园百事通配置」(/newapi/campus-assistant)：那是 Jeecg 时代的旧页，
-          // 功能已并入 /admin 管理页的「校园百事通」tab，留着只会让所有人看到一个死入口。
+          // 「校园百事通配置」已并入 /admin 管理页的「校园百事通」tab，侧栏不再硬塞独立入口。
           const backMenuList = ensureSubAgentSkinMenu(transformRouteToMenu(routeList));
           this.setBackMenuList(backMenuList);
 

@@ -11,33 +11,12 @@
         'interview-practice': interviewMode && interviewSurfaceOpen,
         'builtin-state': Boolean(builtinAssistant) && Boolean(uiPolicy?.showAvatar),
         'work-welcome': !builtinAssistant && !presentationMode && !interviewMode,
-        'has-main-chat-skin': Boolean(activeMainChatSkin && mainChatSkinLayout),
         [uiPolicy?.emptyStateClass || '']: Boolean(uiPolicy?.emptyStateClass),
       },
     ]"
-    :style="mainChatSkinStyleVars"
-    :data-main-chat-skin="activeMainChatSkin?.key || undefined"
   >
-    <MainChatSkinBackdrop
-      v-if="activeMainChatSkin && mainChatSkinLayout"
-      :skin="activeMainChatSkin"
-      :layout="mainChatSkinLayout"
-      :empty-state="chatMessages.length === 0"
-    />
-    <MainChatSkinDecorations
-      v-if="activeMainChatSkin && mainChatSkinLayout"
-      :skin="activeMainChatSkin"
-      :layout="mainChatSkinLayout"
-      region="page"
-    />
     <!-- 首屏：内置智能体欢迎文案/形象来自 builtinAssistants registry 的 uiPolicy。 -->
     <div v-if="chatMessages.length === 0 && !interview?.hasSession.value" class="chat-intro" :aria-busy="restoringHistory || undefined">
-      <MainChatSkinDecorations
-        v-if="activeMainChatSkin && mainChatSkinLayout"
-        :skin="activeMainChatSkin"
-        :layout="mainChatSkinLayout"
-        region="intro"
-      />
       <WorkAgentMascot
         v-if="uiPolicy?.showAvatar && builtinAssistant"
         class="chat-intro-agent-mascot"
@@ -97,12 +76,6 @@
     />
 
     <div v-if="interviewComposerVisible" ref="interviewComposerRef" class="composer-dock">
-    <MainChatSkinDecorations
-      v-if="activeMainChatSkin && mainChatSkinLayout"
-      :skin="activeMainChatSkin"
-      :layout="mainChatSkinLayout"
-      region="composer"
-    />
     <div
       :class="[
         'composer',
@@ -123,7 +96,6 @@
       <WorkAgentMascot
         v-if="!uiPolicy?.showAvatar && !uiPolicy?.hideComposerMascot && chatMessages.length === 0"
         class="composer-agent-mascot"
-        :class="{ 'with-main-chat-skin': Boolean(activeMainChatSkin) }"
         :state="workAgentMascotState"
         :variant="mascotVariant"
         :label="mascotLabel"
@@ -780,19 +752,6 @@ import SideChatPanel from '../components/SideChatPanel.vue';
 import DocPagesViewer from '../components/DocPagesViewer.vue';
 import { type Artifact, type ArtifactSavedFile } from '../utils/artifactParser';
 import FileVersionsModal from '../components/FileVersionsModal.vue';
-import MainChatSkinBackdrop from '../mainChatSkin/MainChatSkinBackdrop.vue';
-import MainChatSkinDecorations from '../mainChatSkin/MainChatSkinDecorations.vue';
-import {
-  getPublishedMainChatSkin,
-  hydrateMainChatSkin,
-  releaseHydratedMainChatSkin,
-} from '../mainChatSkin/api';
-import {
-  mainChatSkinStyle,
-  resolveMainChatSkinLayout,
-  useMainChatSkinDevice,
-} from '../mainChatSkin/runtime';
-import type { HydratedMainChatSkin } from '../mainChatSkin/types';
 import { useCenterContext } from '../centerContext';
 import { MAIN_CHAT_FEATURE_VISIBILITY } from '../mainChatFeatureVisibility';
 import { CHAT_IMAGE_UPLOAD_ACCEPT, CHAT_UPLOAD_ACCEPT, isChatImageFile } from '../utils/chatUploadTypes';
@@ -921,48 +880,6 @@ const uploadAccept = computed(() => (
 ));
 const mascotVariant = computed(() => builtinAssistant.value?.mascotVariant || 'main');
 const mascotLabel = computed(() => `和${builtinAssistant.value?.name || '主 Agent'}互动`);
-const activeMainChatSkin = ref<HydratedMainChatSkin | null>(null);
-const mainChatSkinDevice = useMainChatSkinDevice();
-const mainChatSkinLayout = computed(() => (
-  resolveMainChatSkinLayout(activeMainChatSkin.value?.manifest, mainChatSkinDevice.value)
-));
-const mainChatSkinStyleVars = computed(() => (
-  mainChatSkinStyle(activeMainChatSkin.value, mainChatSkinLayout.value)
-));
-let mainChatSkinRequest = 0;
-
-function clearMainChatSkin() {
-  releaseHydratedMainChatSkin(activeMainChatSkin.value);
-  activeMainChatSkin.value = null;
-}
-
-async function loadMainChatSkin(enabled: boolean) {
-  const requestId = ++mainChatSkinRequest;
-  if (!enabled) {
-    clearMainChatSkin();
-    return;
-  }
-  try {
-    const payload = await getPublishedMainChatSkin();
-    const hydrated = payload.skin ? await hydrateMainChatSkin(payload.skin) : null;
-    if (requestId !== mainChatSkinRequest || !campusMode.value) {
-      releaseHydratedMainChatSkin(hydrated);
-      return;
-    }
-    clearMainChatSkin();
-    activeMainChatSkin.value = hydrated;
-  } catch (error) {
-    if (requestId !== mainChatSkinRequest) return;
-    clearMainChatSkin();
-    console.warn('主对话皮肤加载失败，已回退标准外观', error);
-  }
-}
-
-watch(campusMode, (enabled) => { void loadMainChatSkin(enabled); }, { immediate: true });
-onUnmounted(() => {
-  mainChatSkinRequest += 1;
-  clearMainChatSkin();
-});
 
 // Run 等待用户输入时锁定 Profile 开关，避免本地 UI 与权威 Run 状态分叉。
 const hasPendingHitlCard = computed(() =>
@@ -1844,13 +1761,13 @@ function pickSkillFromMenu(item: SkillItem) {
   color: #969aa3;
 }
 
-.chat-home.work-welcome.empty-state:not(.has-main-chat-skin) .composer-dock { margin-top: 36px; }
+.chat-home.work-welcome.empty-state .composer-dock { margin-top: 36px; }
 
 @media (max-width: 600px) {
   .chat-home.work-welcome > .chat-intro { padding-inline: 8px; }
   .chat-intro .work-welcome-description { max-width: 360px; margin-top: 16px; font-size: 13px; line-height: 1.8; }
   .work-welcome-secondary { margin-top: 6px; }
-  .chat-home.work-welcome.empty-state:not(.has-main-chat-skin) .composer-dock { margin-top: 42px; }
+  .chat-home.work-welcome.empty-state .composer-dock { margin-top: 42px; }
 }
 
 .chat-home.interview-state {
