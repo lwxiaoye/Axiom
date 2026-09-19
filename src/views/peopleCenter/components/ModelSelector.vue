@@ -137,6 +137,7 @@ import { useMediaQuery } from '@vueuse/core';
 import PremiumChevron from './PremiumChevron.vue';
 import { getAgentModels, type AgentModelItem } from '../agentApi';
 import { usePickerPlacement } from '../composables/usePickerPlacement';
+import { readUserScoped, writeUserScoped } from '../utils/userScopedStorage';
 
 interface ModelProvider {
   key: string;
@@ -231,6 +232,7 @@ const models = ref<ModelItem[]>([]);
 const modelsLoading = ref(true);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const PICKER_OPEN_EVENT = 'center-chat-picker-open';
+// 按登录用户作用域读写（见 utils/userScopedStorage）：公用机换账号不能继承别人的默认模型
 const STORAGE_KEY = 'agent-active-model';
 const { placement: pickerPlacement, panelStyle: pickerPanelStyle } = usePickerPlacement(pickerWrapRef, isOpen, {
   preferredHeight: 480,
@@ -329,7 +331,7 @@ async function loadModels() {
   try {
     const list = await getAgentModels();
     models.value = list.map((item) => ({ ...item, provider: resolveModelProvider(item) }));
-    const savedId = localStorage.getItem(STORAGE_KEY);
+    const savedId = readUserScoped(STORAGE_KEY);
     // v2.73: 默认优先 deepseek-v4-flash（本地 free-quota 下 qwen 默认常 403 导致「任务执行失败」）
     // 有用户显式缓存时仍尊重缓存。
     const preferredIds = ['deepseek-v4-flash', 'deepseek-chat'];
@@ -352,7 +354,7 @@ async function loadModels() {
         emit('update:modelValue', fallbackId);
         // 无缓存时把稳定默认写回，避免下次又落到 free-quota 默认
         if (!savedId && preferred?.id === fallbackId) {
-          localStorage.setItem(STORAGE_KEY, fallbackId);
+          writeUserScoped(STORAGE_KEY, fallbackId);
         }
       }
     }

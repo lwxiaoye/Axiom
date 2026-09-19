@@ -3,6 +3,7 @@ import type { UploadedFile } from '../../agentApi';
 import { getInterviewSession } from './api';
 import { createInterviewAnswerInput, createInterviewComposerInput, isInterviewProgressConflict } from './session';
 import { interviewStartMessage, validateInterviewConfig } from './setup';
+import { readUserScoped, removeUserScoped, writeUserScoped } from '../../utils/userScopedStorage';
 import type { InterviewAction, InterviewConfig, InterviewInput, InterviewPressureLevel, InterviewSnapshot } from './types';
 
 type InterviewSessionOptions = {
@@ -108,13 +109,17 @@ export function useInterviewSession(options: InterviewSessionOptions) {
     persistSubmissionConflict(submissionConflict.value);
   }
 
+  // 冲突提示按「登录用户 + 会话」作用域落盘（utils/userScopedStorage）：公用机换账号后
+  // 不能读到别人的面试进度提示；退出登录时随作用域一起清掉。未登录时不读不写。
+  function submissionConflictKey(threadId: string) {
+    return `interview:submission-conflict:${threadId}`;
+  }
+
   function persistSubmissionConflict(message: string) {
     if (typeof window === 'undefined' || !options.currentThreadId.value) return;
-    const key = `interview:submission-conflict:${options.currentThreadId.value}`;
-    try {
-      if (message) window.localStorage.setItem(key, message);
-      else window.localStorage.removeItem(key);
-    } catch { /* The in-memory guard still protects this page when storage is unavailable. */ }
+    const key = submissionConflictKey(options.currentThreadId.value);
+    if (message) writeUserScoped(key, message);
+    else removeUserScoped(key);
   }
 
   function acknowledgeCurrentQuestion() {
@@ -128,11 +133,10 @@ export function useInterviewSession(options: InterviewSessionOptions) {
     snapshot.value = null;
     submissionConflict.value = '';
     if (typeof window !== 'undefined' && options.currentThreadId.value) {
-      try {
-        const stored = window.localStorage.getItem(`interview:submission-conflict:${options.currentThreadId.value}`) || '';
-        submissionConflict.value = /仍在执行|排队或先停止|加入排队/.test(stored) ? '' : stored;
-        if (stored && !submissionConflict.value) window.localStorage.removeItem(`interview:submission-conflict:${options.currentThreadId.value}`);
-      } catch { /* Continue with a fresh server snapshot if browser storage is unavailable. */ }
+      const key = submissionConflictKey(options.currentThreadId.value);
+      const stored = readUserScoped(key) || '';
+      submissionConflict.value = /仍在执行|排队或先停止|加入排队/.test(stored) ? '' : stored;
+      if (stored && !submissionConflict.value) removeUserScoped(key);
     }
     void refresh();
   }, { immediate: true });

@@ -120,6 +120,7 @@ import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, watch } f
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { Modal, message } from 'ant-design-vue';
 import { useUserStore } from '/@/store/modules/user';
+import { readUserScoped, removeUserScoped, writeUserScoped } from '/@/views/peopleCenter/utils/userScopedStorage';
 import {
   ArrowLeftOutlined,
   BarChartOutlined,
@@ -791,29 +792,24 @@ async function loadOptions() {
 
 // ---------- 本地草稿备份（蓝本：离开/卸载自动保存 + 本地草稿兜底） ----------
 
+// 备份里是整张编排图，按登录用户作用域存（peopleCenter/utils/userScopedStorage）：
+// 公用机换账号打开同一应用不能被弹「恢复别人的本地草稿」；退出登录随作用域一起清。
 const backupKey = computed(() => `wf-draft-backup:${workflowApp.value?.id || appInfoId.value || 'unknown'}`);
 
 function writeLocalBackup() {
-  try {
-    localStorage.setItem(backupKey.value, JSON.stringify({ json: serializeGraph(graph.value), savedAt: Date.now() }));
-  } catch {
-    // 本地存储不可用（隐私模式/配额满）时静默放弃，不阻塞主流程
-  }
+  // 未登录 / 存储不可用（隐私模式、配额满）时 writeUserScoped 静默放弃，不阻塞主流程
+  writeUserScoped(backupKey.value, JSON.stringify({ json: serializeGraph(graph.value), savedAt: Date.now() }));
 }
 
 function clearLocalBackup() {
-  try {
-    localStorage.removeItem(backupKey.value);
-  } catch {
-    /* 同上 */
-  }
+  removeUserScoped(backupKey.value);
 }
 
 /** 载入后检查本地备份：比服务器草稿新且内容不同 -> 询问恢复（保存失败/意外关闭的兜底） */
 function offerLocalBackupRestore() {
   let backup: { json?: string; savedAt?: number } | null = null;
   try {
-    backup = JSON.parse(localStorage.getItem(backupKey.value) || 'null');
+    backup = JSON.parse(readUserScoped(backupKey.value) || 'null');
   } catch {
     backup = null;
   }

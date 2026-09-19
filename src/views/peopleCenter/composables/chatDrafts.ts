@@ -206,6 +206,34 @@ export async function clearAllDraftRecords(): Promise<void> {
   }
 }
 
+/** 只清某个用户的草稿（退出登录清理）。为什么不用 clearAllDraftRecords：
+ *  草稿本就按 userId 落库，退出只该抹掉自己的，别的账号（同机多人）的草稿不动。 */
+export async function clearDraftRecordsForUser(userId: string): Promise<void> {
+  const uid = String(userId || '').trim();
+  if (!uid) return;
+  for (const [id, record] of memoryStore) {
+    if (record?.userId === uid) memoryStore.delete(id);
+  }
+  const db = await openDb();
+  if (!db) return;
+  try {
+    const store = db.transaction(STORE, 'readwrite').objectStore(STORE);
+    // 建库时就有 byUser 索引（见 onupgradeneeded），按索引游标删，不必整表 getAll
+    const cursorReq = store.index('byUser').openCursor(IDBKeyRange.only(uid));
+    await new Promise<void>((resolve) => {
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (!cursor) { resolve(); return; }
+        cursor.delete();
+        cursor.continue();
+      };
+      cursorReq.onerror = () => resolve(); // 清不掉不阻断退出：草稿是增强，不是主链路
+    });
+  } catch {
+    // 同上
+  }
+}
+
 /** 当前登录用户 id（草稿按用户隔离，防同浏览器多账号串看）。
  *  动态 import：单测环境无 Pinia/别名时静默退回 'anon'，不拖垮 composable。 */
 export async function currentDraftUserId(): Promise<string> {

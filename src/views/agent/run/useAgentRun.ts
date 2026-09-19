@@ -19,6 +19,7 @@ import { runAgentStream, type RunInteractive, type RunResult } from './agentRunS
 import { speakBrowserTts, stopBrowserTts } from '../../workflow/shared/browserTts';
 import type { GeneratedFile } from '../../peopleCenter/agentApi';
 import { createSmoothStreamText } from '../../peopleCenter/composables/smoothStreamText';
+import { readUserScoped, writeUserScoped } from '../../peopleCenter/utils/userScopedStorage';
 import { createSessionLiveRuns } from './sessionLiveRuns';
 
 /**
@@ -119,14 +120,24 @@ export function useAgentRun(getAppId: () => string) {
     });
   }
 
+  // 运行变量是用户填的输入，按登录用户作用域写 sessionStorage（utils/userScopedStorage）：
+  // 同一标签页换账号不能把别人填过的变量回填出来；退出登录随作用域一起清。
   function runtimeStorageKey(sessionId = activeSessionId.value) {
     return `agent-run:variables:${getAppId()}:${sessionId || 'new'}`;
+  }
+
+  function sessionStore(): Storage | null {
+    try {
+      return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+    } catch {
+      return null;
+    }
   }
 
   function restoreRuntimeVariables() {
     resetRuntimeVariables();
     try {
-      const saved = JSON.parse(sessionStorage.getItem(runtimeStorageKey()) || '{}');
+      const saved = JSON.parse(readUserScoped(runtimeStorageKey(), sessionStore()) || '{}');
       runtimeVariableItems.value.forEach((item) => {
         if (item.type !== 'password' && Object.prototype.hasOwnProperty.call(saved, item.key)) {
           runtimeVariableValues[item.key] = saved[item.key];
@@ -143,7 +154,7 @@ export function useAgentRun(getAppId: () => string) {
     runtimeVariableItems.value.forEach((item) => {
       if (item.type !== 'password') safe[item.key] = runtimeVariableValues[item.key];
     });
-    try { sessionStorage.setItem(runtimeStorageKey(), JSON.stringify(safe)); } catch { /* storage is optional */ }
+    writeUserScoped(runtimeStorageKey(), JSON.stringify(safe), sessionStore());
   }, { deep: true });
 
   function collectRuntimeVariables(extra?: Record<string, any>) {
