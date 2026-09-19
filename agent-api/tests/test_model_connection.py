@@ -17,7 +17,10 @@ def storage(monkeypatch):
     data = {}
 
     async def read(key, defaults):
-        return dict(defaults) | data.get(key, {})
+        # 与真实 _get_raw 同款：只保留 defaults 里有的键。之前这里是 defaults | data，
+        # 把旧单连接行的 base_url/model 也透传出去，测试因此没抓到「名册读成空」的上线事故。
+        stored = data.get(key, {})
+        return dict(defaults) | {k: v for k, v in stored.items() if k in defaults}
 
     async def save(key, value):
         data[key] = dict(value)
