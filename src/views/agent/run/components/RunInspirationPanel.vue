@@ -28,9 +28,6 @@
       }"
       aria-label="场景与推荐"
     >
-    <span v-if="decoration" class="run-presentation-rail-decoration" aria-hidden="true">
-      <component :is="decoration" v-bind="decorationProps || {}" region="inspiration" />
-    </span>
     <div
       v-show="!collapsed"
       class="run-inspiration-resizer"
@@ -103,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, type Component } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { BulbOutlined, CloseOutlined, RightOutlined } from '@ant-design/icons-vue';
 import type { RunInspirationScene } from '../agentRunPresentation';
 
@@ -111,8 +108,6 @@ const props = defineProps<{
   collapsed: boolean;
   width: number;
   scenes: RunInspirationScene[];
-  decoration?: Component;
-  decorationProps?: Record<string, unknown>;
 }>();
 
 const emit = defineEmits<{
@@ -173,12 +168,6 @@ watch(
   background: var(--run-right-rail-bg, #f8f8f9);
   color: var(--run-right-heading, #191a1e);
   transition: width 0.28s cubic-bezier(0.22, 1, 0.36, 1), flex-basis 0.28s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.28s ease;
-}
-.run-presentation-rail-decoration {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  pointer-events: none;
 }
 .run-inspiration-shell.is-collapsed .run-inspiration-panel {
   border-left-color: transparent;

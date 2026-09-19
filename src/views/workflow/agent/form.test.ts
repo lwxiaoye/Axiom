@@ -6,7 +6,6 @@ describe('agent form graph conversion', () => {
     const form = createDefaultAgentForm();
     form.model = 'glm-5.1';
     form.extractFiles = true;
-    form.presentationPreset = 'campus-welcome-v1';
     form.recommendationScenes = [
       { key: 'start', label: '开始', textList: ['介绍一下你的能力'] },
       { key: 'document', label: '文档', textList: ['帮我总结知识库'] },
@@ -35,17 +34,9 @@ describe('agent form graph conversion', () => {
       sceneList: form.recommendationScenes,
     });
     expect(graph.chatConfig.variables).toEqual(form.variables);
-    expect(graph.chatConfig.presentation).toEqual({
-      schemaVersion: 1,
-      preset: 'campus-welcome-v1',
-    });
-    expect(parsePersistedGraph(serializeGraph(graph)).graph.chatConfig.presentation).toEqual({
-      schemaVersion: 1,
-      preset: 'campus-welcome-v1',
-    });
+    expect(parsePersistedGraph(serializeGraph(graph)).graph.chatConfig.variables).toEqual(form.variables);
     expect(graphToAgentForm(graph)?.recommendationScenes).toEqual(form.recommendationScenes);
     expect(graphToAgentForm(graph)?.extractFiles).toBe(true);
-    expect(graphToAgentForm(graph)?.presentationPreset).toBe('campus-welcome-v1');
     expect(graphToAgentForm(graph)?.variables).toEqual(form.variables);
   });
 

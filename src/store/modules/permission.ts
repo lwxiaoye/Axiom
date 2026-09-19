@@ -15,8 +15,6 @@ import { PermissionModeEnum } from '/@/enums/appEnum';
 
 import { asyncRoutes } from '/@/router/routes';
 import { ERROR_LOG_ROUTE, PAGE_NOT_FOUND_ROUTE } from '/@/router/routes/basic';
-import { staticRoutesList } from '../../router/routes/staticRouter';
-import { ensureSubAgentSkinMenu } from '/@/views/workflow/skins/ensureSubAgentSkinMenu';
 
 import { filter } from '/@/utils/helper/treeHelper';
 
@@ -268,7 +266,7 @@ export const usePermissionStore = defineStore({
 
           // 构建后台路由菜单
           // 「校园百事通配置」已并入 /admin 管理页的「校园百事通」tab，侧栏不再硬塞独立入口。
-          const backMenuList = ensureSubAgentSkinMenu(transformRouteToMenu(routeList));
+          const backMenuList = transformRouteToMenu(routeList);
           this.setBackMenuList(backMenuList);
 
           // 删除meta.ignoreRoute项
@@ -276,8 +274,7 @@ export const usePermissionStore = defineStore({
           routeList = routeList.filter(routeRemoveIgnoreFilter);
 
           routeList = flatMultiLevelRoutes(routeList);
-          // 代码逻辑说明: 【TV360X-522】ai助手路由写死在前端
-          routes = [PAGE_NOT_FOUND_ROUTE, ...routeList, ...staticRoutesList];
+          routes = [PAGE_NOT_FOUND_ROUTE, ...routeList];
           break;
       }
 

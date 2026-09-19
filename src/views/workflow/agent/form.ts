@@ -40,7 +40,6 @@ export type AgentFormType = {
   temperature?: number;
   maxHistories: number;
   welcomeText: string;
-  presentationPreset: string;
   variables: VariableItemType[];
   selectedTools: AgentToolRef[];
   skills: AgentSkillRef[];
@@ -72,7 +71,6 @@ export function createDefaultAgentForm(): AgentFormType {
     temperature: undefined,
     maxHistories: 6,
     welcomeText: '',
-    presentationPreset: 'default',
     variables: [],
     selectedTools: [],
     skills: [],
@@ -227,14 +225,6 @@ export function agentFormToGraph(form: AgentFormType): WorkflowGraphType {
 
   const chatConfig: AppChatConfigType = {
     welcomeText: form.welcomeText || '',
-    ...(form.presentationPreset && form.presentationPreset !== 'default'
-      ? {
-          presentation: {
-            schemaVersion: 1 as const,
-            preset: form.presentationPreset,
-          },
-        }
-      : {}),
     variables: form.variables || [],
     fileSelectConfig: {
       canSelectFile: !!form.extractFiles,
@@ -276,7 +266,6 @@ export function graphToAgentForm(graph: WorkflowGraphType | undefined | null): A
   const history = inputValue('history');
   form.maxHistories = typeof history === 'number' ? history : 6;
   form.welcomeText = String(graph?.chatConfig?.welcomeText || '');
-  form.presentationPreset = String(graph?.chatConfig?.presentation?.preset || 'default');
   form.variables = Array.isArray(graph?.chatConfig?.variables)
     ? JSON.parse(JSON.stringify(graph.chatConfig.variables))
     : [];

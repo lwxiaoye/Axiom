@@ -12,12 +12,6 @@
     </section>
 
     <section class="config-section">
-      <h4>外观试衣间</h4>
-      <p class="section-tip">这里只展示当前客户已获授权的外观；保存草稿时后端会再次校验。</p>
-      <RunPresentationPicker v-model="presentationPreset" :app-id="appId" :disabled="readonly" />
-    </section>
-
-    <section class="config-section">
       <div class="section-head">
         <h4>全局变量</h4>
         <a-button size="small" type="primary" ghost @click="openVariableModal()">
@@ -209,30 +203,15 @@ import { flattenRecommendationScenes, preserveRecommendationSceneDrafts } from '
 import { useEditorContext } from '../composables/useEditorContext';
 import RecommendationSceneEditor from '../../shared/RecommendationSceneEditor.vue';
 import VariableTextarea from './VariableTextarea.vue';
-import RunPresentationPicker from '../../../agent/run/presentation/RunPresentationPicker.vue';
 
-/** systemConfig 节点内嵌配置（开场白/外观/变量/TTS/问题引导/右侧推荐内容/文件） */
-const { graph, appId, readonly } = useEditorContext();
+/** systemConfig 节点内嵌配置（开场白/变量/TTS/问题引导/右侧推荐内容/文件） */
+const { graph } = useEditorContext();
 
 const chatConfig = computed(() => graph.value.chatConfig);
 
 function setWelcomeText(value: string) {
   chatConfig.value.welcomeText = value;
 }
-
-const presentationPreset = computed({
-  get: () => chatConfig.value.presentation?.preset || 'default',
-  set: (preset: string) => {
-    if (preset === 'default') {
-      delete chatConfig.value.presentation;
-      return;
-    }
-    chatConfig.value.presentation = {
-      schemaVersion: 1,
-      preset,
-    };
-  },
-});
 
 if (!Array.isArray(graph.value.chatConfig.variables)) {
   graph.value.chatConfig.variables = [];

@@ -232,13 +232,13 @@ const knowledgeLoading = ref(false);
 
 /** VIEWER 只读态：后端 _require_permission 会 403 拒绝写入，前端同步禁用编辑入口 */
 const readonly = computed(() => workflowApp.value?.sharePermission === 'VIEWER');
-const presentationAppId = computed(
+const editorAppId = computed(
   () => workflowApp.value?.id || workflowAppId.value || appInfoId.value || '',
 );
 
 provideEditorContext({
   graph,
-  appId: presentationAppId,
+  appId: editorAppId,
   modelOptions,
   modelLoading,
   knowledgeOptions,

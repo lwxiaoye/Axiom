@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 const runRoot = __dirname;
@@ -12,17 +12,6 @@ const senderBadgeSource = readFileSync(resolve(runRoot, 'components/RunMessageSe
 const sidebarToggleSource = readFileSync(resolve(runRoot, 'components/RunSidebarToggle.vue'), 'utf8');
 const inspirationPanelSource = readFileSync(resolve(runRoot, 'components/RunInspirationPanel.vue'), 'utf8');
 const sidebarResizeSource = readFileSync(resolve(runRoot, 'useSidebarResize.ts'), 'utf8');
-const presentationCatalogSource = readFileSync(resolve(runRoot, 'presentation/catalog.ts'), 'utf8');
-const presentationRegistrySource = readFileSync(resolve(runRoot, 'presentation/registry.ts'), 'utf8');
-const portablePresentationSource = readFileSync(resolve(runRoot, 'presentation/portable.ts'), 'utf8');
-const presentationPickerSource = readFileSync(resolve(runRoot, 'presentation/RunPresentationPicker.vue'), 'utf8');
-const presentationStudioSource = readFileSync(resolve(runRoot, '../../workflow/manage/PresentationStudioPanel.vue'), 'utf8');
-const presentationApiSource = readFileSync(resolve(runRoot, '../../workflow/api/presentation.api.ts'), 'utf8');
-const campusBackdropSource = readFileSync(
-  resolve(runRoot, 'presentation/presets/campus-welcome-v1/CampusWelcomeBackdrop.vue'),
-  'utf8',
-);
-const portableBackdropSource = readFileSync(resolve(runRoot, 'presentation/portable/PortableRunBackdrop.vue'), 'utf8');
 const runApiSource = readFileSync(resolve(runRoot, 'agentRun.api.ts'), 'utf8');
 const runMessageActionsSource = readFileSync(resolve(runRoot, 'components/RunMessageActions.vue'), 'utf8');
 
@@ -95,40 +84,6 @@ describe('子智能体运行页与主对话浮窗视觉契约', () => {
     expect(shellSource).toMatch(/\.run-composer > :deep\(\.agent-output-disclaimer\)[\s\S]*?background: transparent/);
     expect(shellSource).not.toContain('.run-composer > :deep(.agent-output-disclaimer) { display: none; }');
     expect(shellSource).not.toContain('padding: 36px 32px 220px');
-  });
-
-  it('自定义输入框插画在输出后继续显示，并由主题扩展消息底部安全区', () => {
-    const shellSource = readFileSync(resolve(runRoot, 'agent-run-shell.less'), 'utf8');
-    expect(runPageSource).toContain('v-if="runPresentation.composerDecoration"');
-    expect(runPageSource).toContain(':empty-state="isEmptyState"');
-    expect(runPageSource).not.toContain('v-if="isEmptyState && runPresentation.composerDecoration"');
-    expect(shellSource).toContain('var(--run-messages-bottom-padding)');
-    expect(presentationRegistrySource).toContain("'--run-messages-bottom-padding': '256px'");
-    expect(presentationRegistrySource).not.toContain("'--run-messages-bottom-padding': '214px'");
-    expect(portablePresentationSource).toContain('--run-messages-bottom-padding');
-    expect(portablePresentationSource).toContain('PORTABLE_RUN_MESSAGE_BOTTOM_PADDING_BASE = 148');
-  });
-
-  it('发送消息后保留完整皮肤背景，不用白蒙层把素材洗掉', () => {
-    expect(campusBackdropSource).toContain('opacity: 0.9');
-    expect(campusBackdropSource).not.toContain('opacity: 0.28');
-    expect(campusBackdropSource).not.toContain('rgba(255, 255, 255, 0.8)');
-    expect(portableBackdropSource).not.toContain('opacity: 0.28');
-    expect(portableBackdropSource).not.toContain('rgba(255, 255, 255, 0.72)');
-    expect(portableBackdropSource).toContain('filter: saturate(0.94)');
-  });
-
-  it('子智能体皮肤包在独立外观工坊提供 CRUD 与导出', () => {
-    expect(presentationApiSource).toContain('importSubAgentSkin');
-    expect(presentationApiSource).toContain('getSubAgentSkin');
-    expect(presentationApiSource).toContain('updateSubAgentSkinMetadata');
-    expect(presentationApiSource).toContain('deleteSubAgentSkin');
-    expect(presentationApiSource).toContain("method: 'PATCH'");
-    expect(presentationApiSource).toContain("method: 'DELETE'");
-    expect(presentationStudioSource).toContain('编辑子智能体皮肤信息');
-    expect(presentationStudioSource).toContain('wrap-class-name="subagent-skin-modal"');
-    expect(presentationStudioSource).toContain('@confirm="deleteSelected"');
-    expect(presentationStudioSource).toContain('图片或布局变更需升级包版本后重新导入');
   });
 
   it('会话搜索框使用紧凑侧栏比例，并保持中性无光圈焦点', () => {
@@ -267,7 +222,6 @@ describe('子智能体运行页与主对话浮窗视觉契约', () => {
     expect(shellSource).toContain('width: min(86vw, 340px)');
     expect(shellSource).toContain('.run-sidebar-toggle { width: 44px; height: 44px;');
     expect(shellSource).toContain('.send-btn { width: 44px; height: 44px; }');
-    expect(shellSource).toContain('padding-top: clamp(42px, var(--run-empty-top-gap, 52px), 62px)');
     expect(shellSource).toContain('env(safe-area-inset-bottom)');
     expect(inspirationPanelSource).toContain('class="run-inspiration-mobile-backdrop"');
     expect(inspirationPanelSource).toContain('class="run-inspiration-mobile-close"');
@@ -276,9 +230,6 @@ describe('子智能体运行页与主对话浮窗视觉契约', () => {
     expect(inspirationPanelSource).toContain('height: min(72dvh, 620px)');
     expect(inspirationPanelSource).toContain('width: 42px');
     expect(inspirationPanelSource).toContain('height: 4px');
-    expect(presentationStudioSource).toContain('grid-template-rows: 56px minmax(0, 1fr)');
-    expect(presentationStudioSource).toContain('margin-top: 52px');
-    expect(presentationStudioSource).not.toContain('margin-top: 112px');
   });
 
   it('手机与 iPad 点选会话历史后立即收起抽屉，不等消息加载完成', () => {
@@ -338,31 +289,28 @@ describe('子智能体运行页与主对话浮窗视觉契约', () => {
     expect(mobileComposerSource).not.toContain('margin-top: var(--run-composer-empty-gap-mobile)');
   });
 
-  it('独立运行页按受控 preset key 换装，浮窗和未配置智能体继续使用标准外观', () => {
-    expect(runPageSource).toContain('resolveRunPresentation(runtimePresentationConfig.value, runSkinDevice.value)');
-    expect(runPageSource).toContain('hydratePortableRunSkin(portableSkin)');
-    expect(runPageSource).toContain('已安全回退为标准外观');
-    expect(runPageSource).toContain(':data-presentation-preset="runPresentation.key"');
-    expect(runPageSource).toContain("'has-custom-presentation': runPresentation.key !== 'default'");
-    expect(panelSource).not.toContain('resolveRunPresentation');
-    expect(presentationCatalogSource).toContain("CAMPUS_WELCOME_PRESENTATION_PRESET = 'campus-welcome-v1'");
-    expect(presentationRegistrySource).toContain('[CAMPUS_WELCOME_PRESENTATION_PRESET]');
-    expect(presentationRegistrySource).toContain('normalizeRunPresentationPreset(config?.preset)');
-    expect(portablePresentationSource).toContain("skin.scope === 'sub_agent'");
-    expect(presentationRegistrySource).toContain('PortableRunBackdrop');
-    expect(presentationPickerSource).toContain('RUN_PRESENTATION_PRESETS');
-    expect(existsSync(resolve(runRoot, 'presentation/presets/campus-welcome-v1/assets/campus-background.jpg'))).toBe(true);
-    expect(existsSync(resolve(runRoot, 'presentation/presets/campus-welcome-v1/assets/backpack.png'))).toBe(true);
-    expect(existsSync(resolve(runRoot, 'presentation/presets/campus-welcome-v1/assets/student-group.png'))).toBe(true);
+  it('独立运行页与浮窗只有一套默认外观，欢迎语和占位符是固定文案', () => {
+    expect(runPageSource).toContain("const RUN_WELCOME_TITLE = '你好，有什么我可以帮你？'");
+    expect(runPageSource).toContain("const RUN_COMPOSER_PLACEHOLDER = '输入你的问题...'");
+    expect(runPageSource).toContain('<h1>{{ RUN_WELCOME_TITLE }}</h1>');
+    expect(runPageSource).toContain(':placeholder="RUN_COMPOSER_PLACEHOLDER"');
+    for (const source of [runPageSource, panelSource, inspirationPanelSource]) {
+      expect(source).not.toContain('runPresentation');
+      expect(source).not.toContain('presentation/');
+      expect(source).not.toContain('portableSkin');
+      expect(source).not.toContain('has-custom-presentation');
+      expect(source).not.toContain('run-presentation-rail-decoration');
+    }
+    expect(runApiSource).not.toContain('RunPresentationConfig');
+    expect(runApiSource).not.toContain('presentation?:');
   });
 
-  it('关闭文件上传时不渲染加号，自定义皮肤空态欢迎区略下移', () => {
+  it('关闭文件上传时不渲染加号', () => {
     const shellSource = readFileSync(resolve(runRoot, 'agent-run-shell.less'), 'utf8');
     expect(runPageSource).toContain('v-if="fileUploadEnabled" class="composer-input-actions"');
     expect(panelSource).toContain('v-if="fileUploadEnabled" class="composer-input-actions"');
     expect(shellSource).toContain('.send-btn { margin-left: auto;');
-    expect(shellSource).toContain(
-      'padding-top: calc(var(--run-empty-top-gap, 128px) + 40px)',
-    );
+    expect(shellSource).not.toContain('has-custom-presentation');
+    expect(shellSource).not.toContain('--run-empty-top-gap');
   });
 });

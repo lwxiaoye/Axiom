@@ -1,5 +1,5 @@
 import { defHttp } from '/@/utils/http/axios';
-import type { RunPresentationConfig, VariableItemType } from '../../workflow/core/type';
+import type { VariableItemType } from '../../workflow/core/type';
 import { requestAgentApi, type GeneratedFile } from '../../peopleCenter/agentApi';
 import type { RunInspirationScene } from './agentRunPresentation';
 
@@ -17,7 +17,6 @@ export type RunAppMeta = {
   sharePermission?: string;
   previewMode?: boolean;
   welcomeText?: string;
-  presentation?: RunPresentationConfig;
   quickQuestions?: string[];
   inspirationScenes?: RunInspirationScene[];
   variables?: VariableItemType[];

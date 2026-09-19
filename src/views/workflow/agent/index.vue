@@ -266,21 +266,6 @@
               <RecommendationSceneEditor v-model="form.recommendationScenes" />
             </div>
           </div>
-
-          <div class="config-section">
-            <div class="section-head">
-              <div>
-                <EyeOutlined class="section-icon blue" />
-                <strong>外观试衣间</strong>
-              </div>
-            </div>
-            <p class="quick-guide-desc">给这个智能体选择一件客户已获授权的外观；保存草稿时后端会再次校验。</p>
-            <RunPresentationPicker
-              v-model="form.presentationPreset"
-              :app-id="workflowApp?.id || workflowAppId || appInfoId"
-              :disabled="workflowApp?.sharePermission === 'VIEWER'"
-            />
-          </div>
         </section>
 
         <section class="preview-panel">
@@ -627,7 +612,6 @@ import VariableTextarea from '../editor/components/VariableTextarea.vue';
 import PromptDebugDrawer from '../components/PromptDebugDrawer.vue';
 import EChartsOutputPreview from '../editor/components/EChartsOutputPreview.vue';
 import RecommendationSceneEditor from '../shared/RecommendationSceneEditor.vue';
-import RunPresentationPicker from '../../agent/run/presentation/RunPresentationPicker.vue';
 import { VariableInputEnum, VariableInputLabelMap, WorkflowIOValueTypeEnum } from '../core/constants';
 import type { VariableItemType } from '../core/type';
 import { buildTextareaVariableOptions, getNanoid } from '../core/utils';

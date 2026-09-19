@@ -5,9 +5,7 @@
     :class="{
       'is-splitting': splitting,
       'sidebar-collapsed': sidebarCollapsed,
-      'has-custom-presentation': runPresentation.key !== 'default',
     }"
-    :data-presentation-preset="runPresentation.key"
     :style="runPageStyle"
   >
     <RunCompactHeader
@@ -28,13 +26,6 @@
       ></button>
     </Transition>
     <aside class="agent-run-sidebar">
-      <span v-if="runPresentation.sidebarDecoration" class="run-presentation-rail-decoration" aria-hidden="true">
-        <component
-          :is="runPresentation.sidebarDecoration"
-          v-bind="runPresentation.componentProps || {}"
-          region="sidebar"
-        />
-      </span>
       <button
         type="button"
         class="run-back"
@@ -96,12 +87,6 @@
     ></div>
 
     <main class="agent-run-main">
-      <component
-        :is="runPresentation.backdrop"
-        v-if="runPresentation.backdrop"
-        v-bind="runPresentation.componentProps || {}"
-        :empty-state="isEmptyState"
-      />
       <div ref="listRef" :class="['run-messages', { 'is-empty-state': isEmptyState }]" @scroll.passive="updateScrollState">
         <div v-if="appLoading" class="run-empty">正在加载应用...</div>
         <div v-else-if="!runnable" class="run-tip">
@@ -110,7 +95,7 @@
         <div v-else-if="!messages.length" class="run-start">
           <article class="run-welcome">
             <p class="run-welcome-kicker">{{ appMeta?.name || '智能体' }}</p>
-            <h1>{{ runPresentation.welcomeTitle }}</h1>
+            <h1>{{ RUN_WELCOME_TITLE }}</h1>
             <!-- eslint-disable-next-line vue/no-v-html --><!-- 开场白经 xss(md.render()) 白名单过滤 -->
             <div class="markdown-body run-welcome-body" v-html="renderMarkdown(welcomeText)"></div>
           </article>
@@ -222,12 +207,6 @@
             @dragleave="onComposerDragLeave"
             @drop.prevent="onComposerDrop"
           >
-            <component
-              :is="runPresentation.composerDecoration"
-              v-if="runPresentation.composerDecoration"
-              v-bind="runPresentation.componentProps || {}"
-              :empty-state="isEmptyState"
-            />
             <div v-if="uploadedFiles.length" class="file-chip-list">
               <AttachmentCard
                 v-for="file in uploadedFiles"
@@ -243,7 +222,7 @@
               v-model="input"
               rows="1"
               :disabled="!runnable || !!interactive"
-              :placeholder="runPresentation.composerPlaceholder"
+              :placeholder="RUN_COMPOSER_PLACEHOLDER"
               aria-label="输入消息"
               @keydown="onKeydown"
               @paste="onComposerPaste"
@@ -299,8 +278,6 @@
       :collapsed="inspirationCollapsed"
       :width="inspirationWidth"
       :scenes="inspirationScenes"
-      :decoration="runPresentation.inspirationDecoration"
-      :decoration-props="runPresentation.componentProps"
       @toggle="toggleInspiration"
       @resize-start="onInspirationResizeStart"
       @select="fillSuggestedTask"
@@ -350,14 +327,6 @@ import RunTaskParameters from './components/RunTaskParameters.vue';
 import { runAgentStream, type RunInteractive, type RunResult } from './agentRunStream';
 import { speakBrowserTts, stopBrowserTts } from '../../workflow/shared/browserTts';
 import { resolveRunInspirationScenes, resolveRunWelcomeText } from './agentRunPresentation';
-import { resolveRunPresentation } from './presentation/registry';
-import {
-  hydratePortableRunSkin,
-  isPortableRunSkin,
-  releaseHydratedPortableRunSkin,
-  usePortableRunSkinDevice,
-  type HydratedPortableRunSkin,
-} from './presentation/portable';
 import { uploadChatFile, type GeneratedFile } from '../../peopleCenter/agentApi';
 import { filesFromClipboard, longTextAsPastedFile } from '../../peopleCenter/utils/composerClipboard';
 import { createSmoothStreamText } from '../../peopleCenter/composables/smoothStreamText';
@@ -463,8 +432,6 @@ const previewVersionId = queryText(route.query.previewVersionId);
 const previewDraft = truthyQueryFlag(route.query.previewDraft);
 
 const appMeta = ref<RunAppMeta | null>(null);
-const hydratedPortableSkin = ref<HydratedPortableRunSkin | null>(null);
-const runSkinDevice = usePortableRunSkinDevice();
 const appLoading = ref(true);
 const loadError = ref('');
 const sessions = ref<RunSession[]>([]);
@@ -532,17 +499,11 @@ const isDraftPreview = computed(() => previewDraft && !!appMeta.value?.previewMo
 const isPreview = computed(() => isReviewPreview.value || isDraftPreview.value);
 const runnable = computed(() => !!appMeta.value && (appMeta.value.status === 'published' || isPreview.value));
 const isEmptyState = computed(() => !appLoading.value && runnable.value && messages.value.length === 0);
-const runtimePresentationConfig = computed(() => {
-  const config = appMeta.value?.presentation;
-  if (!config) return config;
-  if (hydratedPortableSkin.value) return { ...config, portableSkin: hydratedPortableSkin.value };
-  // An unhydrated server manifest must never hand its authenticated endpoint URL to an <img>.
-  return config.portableSkin ? { ...config, portableSkin: undefined } : config;
-});
-const runPresentation = computed(() => resolveRunPresentation(runtimePresentationConfig.value, runSkinDevice.value));
+/** 运行页只有一套默认外观：欢迎语与输入框占位符是固定文案，不再随外观预设/皮肤包变化。 */
+const RUN_WELCOME_TITLE = '你好，有什么我可以帮你？';
+const RUN_COMPOSER_PLACEHOLDER = '输入你的问题...';
 const runPageStyle = computed(() => ({
   '--run-sidebar-width': `${sidebarWidth.value}px`,
-  ...runPresentation.value.styleVars,
 }));
 const notRunnableReason = computed(() => {
   if (loadError.value) return loadError.value;
@@ -782,17 +743,7 @@ async function saveEdit() {
 async function loadApp() {
   appLoading.value = true;
   try {
-    releaseHydratedPortableRunSkin(hydratedPortableSkin.value);
-    hydratedPortableSkin.value = null;
     appMeta.value = await getRunApp(appId, previewVersionId || undefined, previewDraft || undefined);
-    const portableSkin = appMeta.value?.presentation?.portableSkin;
-    if (isPortableRunSkin(portableSkin)) {
-      try {
-        hydratedPortableSkin.value = await hydratePortableRunSkin(portableSkin);
-      } catch {
-        message.warning('运行页皮肤素材加载失败，已安全回退为标准外观');
-      }
-    }
     syncRuntimeVariableValues();
     restoreRuntimeVariables();
     if (!fileUploadEnabled.value) clearUploadedFiles();
@@ -1401,8 +1352,6 @@ onBeforeUnmount(() => {
   runMobileQuery = null;
   live.abortAll();
   stopBrowserTts();
-  releaseHydratedPortableRunSkin(hydratedPortableSkin.value);
-  hydratedPortableSkin.value = null;
 });
 </script>
 

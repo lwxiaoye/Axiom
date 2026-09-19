@@ -63,16 +63,6 @@
   border-right: 1px solid var(--run-left-rail-border);
   transition: width 0.24s cubic-bezier(0.22, 1, 0.36, 1), padding 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.run-presentation-rail-decoration {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  pointer-events: none;
-}
-.agent-run-sidebar > :not(.run-presentation-rail-decoration) {
-  position: relative;
-  z-index: 1;
-}
 .agent-run-page.sidebar-collapsed .agent-run-sidebar {
   width: 64px;
   align-items: center;
@@ -285,7 +275,6 @@
 .session-empty { color: var(--run-left-muted); text-align: center; padding: 24px 0; font-size: 13px; }
 
 .agent-run-main { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--run-main-bg); }
-.agent-run-page.has-custom-presentation .agent-run-main { isolation: isolate; overflow: hidden; }
 .run-header {
   display: flex;
   align-items: center;
@@ -299,7 +288,6 @@
 .run-title span { font-size: 12px; color: #92959c; }
 
 .run-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 36px 32px var(--run-messages-bottom-padding); display: flex; flex-direction: column; gap: 28px; scroll-behavior: smooth; }
-.agent-run-page.has-custom-presentation .run-messages { position: relative; z-index: 1; }
 .run-composer > :deep(.agent-output-disclaimer) {
   margin: 8px auto 0;
   padding: 0;
@@ -308,10 +296,7 @@
   box-shadow: none;
 }
 /* 顶栏已移入侧栏；空态保留原顶栏的 64px 垂直空间，避免欢迎区整体上移。 */
-.run-messages.is-empty-state { flex: 0 0 auto; min-height: 0; overflow: visible; padding: var(--run-empty-top-gap, clamp(128px, calc(12vh + 64px), 200px)) 32px 0; }
-.agent-run-page.has-custom-presentation .run-messages.is-empty-state {
-  padding-top: calc(var(--run-empty-top-gap, 128px) + 40px);
-}
+.run-messages.is-empty-state { flex: 0 0 auto; min-height: 0; overflow: visible; padding: clamp(128px, calc(12vh + 64px), 200px) 32px 0; }
 .run-empty, .run-tip { color: #92959c; text-align: center; margin-top: 40px; }
 .run-start {
   width: min(100%, var(--run-reading-width));
@@ -588,12 +573,9 @@
     flex: 1 1 auto;
     overflow-y: auto;
     padding:
-      var(--run-empty-top-gap, clamp(58px, 10vh, 92px))
+      clamp(58px, 10vh, 92px)
       16px
       calc(var(--run-messages-bottom-padding-mobile) + env(safe-area-inset-bottom));
-  }
-  .agent-run-page.has-custom-presentation .run-messages.is-empty-state {
-    padding-top: clamp(62px, var(--run-empty-top-gap, 76px), 88px);
   }
   .run-welcome h1 { font-size: 30px; }
   .run-welcome-body { font-size: 14px; line-height: 1.68; }
@@ -626,9 +608,6 @@
 
 @media (max-width: 719px) {
   .run-messages { padding-right: 12px; padding-left: 12px; }
-  .agent-run-page.has-custom-presentation .run-messages.is-empty-state {
-    padding-top: clamp(42px, var(--run-empty-top-gap, 52px), 62px);
-  }
   .run-welcome { max-width: 340px; }
   .run-welcome-kicker { margin-bottom: 8px; font-size: 11.5px; }
   .run-welcome h1 { font-size: clamp(24px, 7vw, 27px); line-height: 1.24; }
