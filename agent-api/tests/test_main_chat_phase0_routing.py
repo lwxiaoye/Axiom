@@ -209,20 +209,6 @@ def test_readonly_user_context_tools_are_pinned_without_web_search():
     assert "get_user_location" in pinned
 
 
-def test_resolve_core_pins_exposes_subagent_when_candidates_exist():
-    without_candidates = resolve_core_pins(
-        action_authority="mutate",
-        has_subagent_candidates=False,
-    )
-    with_candidates = resolve_core_pins(
-        action_authority="mutate",
-        has_subagent_candidates=True,
-    )
-
-    assert "call_subagent" not in without_candidates
-    assert "call_subagent" in with_candidates
-
-
 def test_resolve_core_pins_artifact_coding_keeps_update_plan():
     default = resolve_core_pins(action_authority="mutate", turn_intent="conversation")
     ppt = resolve_core_pins(

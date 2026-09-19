@@ -348,26 +348,6 @@ class SSEChannel:
         data.setdefault('stage', 'researching')
         return self._env('research.progress', data)
 
-    def route_selected(self, subagent_id: str, name: str) -> str:
-        """自动路由命中：已把本轮转交给某子智能体（§8.3/§15.3 route.selected）。"""
-        data = {'subagent_id': subagent_id, 'name': name}
-        return self._env('route.selected', data)
-
-    def clarification(self, options: list, prompt: str='', skill_ids: Optional[list]=None, attachments: Optional[list]=None) -> str:
-        """R5 消歧：多个候选智能体，交用户选择（§8/§15.3 clarification.required）。
-
-        options: [{id, name}]；前端渲染选择卡，点选后按显式 subagent_id 发起新一轮。
-        skill_ids/attachments 携带**原轮一次性上下文**（技能 id + 附件文本 refs，非 data URL）：
-        后台重订阅（切走→后台产生消歧→切回）时前端本地已无原轮 skill/附件快照，靠事件回放
-        才能在点选重发时精确复用原轮上下文（三轮评审 P2a）。
-        """
-        data = {'prompt': prompt or '匹配到多个可用智能体，请选择要使用的：', 'options': options}
-        if skill_ids:
-            data['skill_ids'] = skill_ids
-        if attachments:
-            data['attachments'] = attachments
-        return self._env('clarification.required', data)
-
     def context_compacted(self, note: str='') -> str:
         """自动压缩已发生（§13）：已把较早对话整理为摘要以继续，用户无感续接。"""
         data = {'note': note or 'Context compacted'}
@@ -403,137 +383,11 @@ class SSEChannel:
         data = {'items': items}
         return self._env('attachments.status', data)
 
-    def recommendation(self, items: list) -> str:
-        """R6 外部应用推荐（§8.3/§8.4 recommend_application）：external_app「前往使用」卡，不派发。
-
-        items: [{id, name, description, url}]；前端渲染推荐卡，点选打开外部地址（新窗口）。
-        """
-        data = {'items': items}
-        return self._env('recommendation', data)
-
-    def recommend_agents(
-        self,
-        ids: list,
-        *,
-        intent: str = "",
-        confidence: str = "",
-        reasons: Optional[dict] = None,
-    ) -> str:
-        """平台智能体推荐卡：候选范围是当前用户可见的整个智能体广场，
-        包含不可 ``@`` 委派的外部智能体。前端在广场目录里按 id 回源并渲染
-        「打开智能体」卡；这个事件不授予委派权限。"""
-        data = {'ids': [str(i) for i in ids]}
-        if intent:
-            data['intent'] = str(intent)
-        if confidence:
-            data['confidence'] = str(confidence)
-        if reasons:
-            data['reasons'] = {
-                str(key): str(value)[:120] for key, value in reasons.items() if str(key)
-            }
-        return self._env('recommend_agents', data)
-
     def memory_updated(self, items: list) -> str:
         """「已更新记忆」提示（§14 Phase 2，best-effort）：上一轮抽取新记的记忆摘要，
         本轮首帧下发，前端渲染可点击 chip（点开记忆管理抽屉）。items: [str]。"""
         data = {'items': [str(i) for i in items]}
         return self._env('memory.updated', data)
-
-    def subagent_preparing(self, subagent_id: str, name: str, task: str='') -> str:
-        """主 Agent 已提交且通过工具准入的委派，尚未冒充子智能体已启动。"""
-        data = {'subagent_id': subagent_id, 'name': name}
-        if task:
-            data['task'] = task[:200]
-        return self._env('subagent.preparing', data)
-
-    def subagent_started(self, subagent_id: str, name: str, task: str='', role_name: str='', subtasks=None, acceptance_criteria=None, manager_role: str='', icon: str='') -> str:
-        """主模型 call_subagent 派发开始（前端渲染「正在调用「X」…」chip + 思考时间线协作节点）。
-
-        task：委派的自包含任务描述（截断），时间线上随节点展示"主对话让子智能体做什么"。
-        role_name/subtasks/acceptance_criteria（执行团队一期）：模型按场景生成的岗位名、
-        子任务清单（准确进度条的分母）与验收标准——服务端已在工具护栏截断，这里只兜底。
-        """
-        data = {'subagent_id': subagent_id, 'name': name}
-        if icon:
-            data['icon'] = str(icon)[:512]
-        if task:
-            data['task'] = task[:200]
-        if role_name:
-            data['role_name'] = str(role_name)[:12]
-        if manager_role:
-            data['manager_role'] = str(manager_role)[:12]
-        if subtasks:
-            data['subtasks'] = [str(s)[:30] for s in list(subtasks)[:8]]
-        if acceptance_criteria:
-            data['acceptance_criteria'] = [str(s)[:60] for s in list(acceptance_criteria)[:5]]
-        return self._env('subagent.started', data)
-
-    def subagent_completed(self, subagent_id: str, name: str, preview: str='', acceptance=None, role_name: str='', files=None) -> str:
-        """子智能体委派收尾帧；files 只发已签发 file_id 的持久化回执。"""
-        data = {'subagent_id': subagent_id, 'name': name, 'result_preview': (preview or '')[:6000]}
-        if role_name:
-            data['role_name'] = str(role_name)[:12]
-        if isinstance(acceptance, dict) and acceptance.get('total'):
-            data['acceptance'] = {'passed_count': int(acceptance.get('passed_count') or 0), 'total': int(acceptance.get('total') or 0)}
-        safe_files = []
-        for item in list(files or [])[:20]:
-            if not isinstance(item, dict):
-                continue
-            file_id = str(item.get('id') or item.get('file_id') or '').strip()
-            filename = str(item.get('filename') or item.get('name') or '').strip()
-            if not file_id or not filename:
-                continue
-            row = {'id': file_id, 'filename': filename}
-            for key in (
-                'size', 'mime', 'origin', 'review', 'source', 'versionNo',
-                'deliverable', 'draft', 'previewOnly',
-            ):
-                if item.get(key) is not None:
-                    row[key] = item[key]
-            safe_files.append(row)
-        if safe_files:
-            data['files'] = safe_files
-        return self._env('subagent.completed', data)
-
-    def subagent_review(self, subagent_id: str, name: str, acceptance: dict) -> str:
-        """交付验收单（执行团队一期）：主对话按委派时的验收标准逐条裁定的结果。
-        verdicts=[{criterion, passed(bool|null), evidence}]；无打回闭环，未过项由最终总结承接。
-        页面口径（产品定义 §验收环节）：成员卡只显示 passed_count/total 正向计数，
-        逐条明细供 @ 窗与总结引用。"""
-        if isinstance(acceptance, dict):
-            verdicts = [{'criterion': str(v.get('criterion') or '')[:60], 'passed': v.get('passed') if isinstance(v.get('passed'), bool) else None, 'evidence': str(v.get('evidence') or '')[:120]} for v in (acceptance.get('verdicts') or [])[:5] if isinstance(v, dict)]
-            return self._env('subagent.review', {'subagent_id': subagent_id, 'name': name, 'verdicts': verdicts, 'passed_count': int(acceptance.get('passed_count') or 0), 'total': int(acceptance.get('total') or 0)})
-        return ''
-
-    def subagent_failed(self, subagent_id: str, name: str, error: str='') -> str:
-        return self._env('subagent.failed', {'subagent_id': subagent_id, 'name': name, 'error': (error or '')[:300]})
-
-    def subagent_node(self, subagent_id: str, label: str, status: str) -> str:
-        """子智能体工作流的一个节点起止（label=节点名，status=success/failed/…）。"""
-        return self._env('subagent.node', {'subagent_id': subagent_id, 'label': (label or '')[:80], 'status': status or ''})
-
-    def subagent_delta(self, subagent_id: str, text: str) -> str:
-        """子智能体节点产出的输出文本（增量）。"""
-        if text:
-            return self._env('subagent.delta', {'subagent_id': subagent_id, 'text': text})
-        return ''
-
-    def subagent_reasoning(self, subagent_id: str, text: str) -> str:
-        """子智能体思考流：仅当前连接瞬时展示，不进历史白名单。"""
-        if text:
-            return self._env('subagent.reasoning', {'subagent_id': subagent_id, 'text': text})
-        return ''
-
-    def subagent_reasoning_completed(self, subagent_id: str, text: str = '') -> str:
-        """子智能体思考收束：瞬时帧，供工作窗口停驻当前 burst。"""
-        summary = compact_reasoning_summary(text)
-        data: Dict[str, Any] = {'subagent_id': subagent_id}
-        if summary:
-            data['text'] = summary[:20000]
-        return self._env('subagent.reasoning.completed', data)
-
-    def subagent(self, text: str, info: Dict[str, Any]) -> str:
-        return self._env('message.completed', {'text': text, 'subagent': info})
 
     def error(self, message: str) -> str:
         return self._env('run.failed', {'message': message})

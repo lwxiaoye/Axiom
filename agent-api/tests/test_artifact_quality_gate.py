@@ -126,7 +126,7 @@ class ArtifactQualityGateTests(unittest.IsolatedAsyncioTestCase):
         }
         frames = []
         async for frame in map_tool_loop_events(
-            SSEChannel(HARNESS, "t1", "r1"), source(), {}, {}, meta,
+            SSEChannel(HARNESS, "t1", "r1"), source(), {}, meta,
         ):
             frames.append(frame)
         payload = "".join(frames)

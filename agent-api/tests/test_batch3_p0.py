@@ -83,37 +83,6 @@ class AppendRunEventTests(unittest.TestCase):
         self.assertEqual(run.state_version, 3)
 
 
-class TraceSubagentDetailTests(unittest.TestCase):
-    def test_private_reasoning_hidden_but_output_restored(self):
-        from datetime import datetime
-        from app.runtime_models import AgentRun, AgentRunEvent
-
-        def _ev(seq, etype, data):
-            e = AgentRunEvent(run_id="r1", event_id=f"e{seq}", sequence=seq, type=etype, data=data)
-            e.created_at = datetime(2026, 7, 17, 12, 0, 0)
-            return e
-
-        run = AgentRun(id="r1", thread_id="t1", user_id="u1", status="completed", kind="chat")
-        run.created_at = datetime(2026, 7, 17, 11, 59)
-        run.completed_at = datetime(2026, 7, 17, 12, 1)
-        events = [
-            _ev(1, "subagent.started", {"subagent_id": "s1", "name": "小助手", "task": "做事"}),
-            _ev(2, "subagent.completed", {"subagent_id": "s1", "name": "小助手", "result_preview": "最终报告"}),
-            _ev(3, "message.completed", {"text": "答", "message_id": 42}),
-        ]
-        orig = trs.runtime_session
-        trs.runtime_session = lambda: (lambda: _FakeSession(  # type: ignore[assignment]
-            [_FakeResult([run]), _FakeResult(events), _FakeResult([])], []))
-        try:
-            traces = asyncio.run(trs.get_execution_traces_by_thread("t1"))
-        finally:
-            trs.runtime_session = orig  # type: ignore[assignment]
-        sub = traces[42]["subagents"][0]
-        self.assertEqual(sub["reasoning"], "")
-        self.assertEqual(sub["output"], "最终报告")
-        self.assertEqual(sub["status"], "completed")
-
-
 class _FakeTask:
     """done() 按脚本返回；cancel() 记录调用。"""
 

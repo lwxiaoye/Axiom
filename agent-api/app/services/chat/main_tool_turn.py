@@ -1,5 +1,5 @@
 """模型/工具回合的事件投影与轨迹换算：
-- map_tool_loop_events：工具循环事件流 → SSE 帧（call_subagent 映射 subagent.*，其余 tool.*）
+- map_tool_loop_events：工具循环事件流 → SSE 帧（tool.* / 挂起 / 终态）
 - trace_to_steps：编排轨迹 → agent_steps 记录（§16.5 可观测/回放）
 - strip_images_for_state：挂起游标持久化前剥离多模态图片
 """
@@ -14,26 +14,20 @@ from app.services.chat.tools.base import pop_tool_meta
 logger = logging.getLogger(__name__)
 
 
-def trace_to_steps(trace: list, sub_names: dict, message_id: Optional[int],
+def trace_to_steps(trace: list, message_id: Optional[int],
                    answer: str = "") -> list:
     """编排轨迹 → agent_steps 记录（§16.5/开发计划 Phase 3 可观测）。
 
-    subagent 步骤 meta 带 message_id + 名称，供 chip 持久化回放；最终回答落一条 message。
+    每个工具调用落一条 tool 步骤；最终回答落一条 message。
     """
     steps = []
     for t in trace or []:
         if "control" in set(t.get("semantic_tags") or []):
             continue
-        is_sub = t.get("name") == "call_subagent"
-        sid = str((t.get("args") or {}).get("subagent_id") or "")
         steps.append({
-            "type": "subagent" if is_sub else "tool",
+            "type": "tool",
             "content": (t.get("preview") or "")[:1000],
-            "meta": {
-                "name": t.get("name"), "status": t.get("status"),
-                **({"subagent_id": sid, "subagent_name": sub_names.get(sid, ""),
-                    "message_id": message_id} if is_sub else {}),
-            },
+            "meta": {"name": t.get("name"), "status": t.get("status")},
         })
     if answer:
         steps.append({"type": "message", "content": answer[:2000],
@@ -420,24 +414,20 @@ async def convert_loop_failure(runtime_policy, env, error: BaseException):
     return converted if isinstance(converted, TerminalRunError) else None
 
 
-async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, tool_meta: Optional[dict] = None,
+async def map_tool_loop_events(channel, ev_iter, out: dict, tool_meta: Optional[dict] = None,
                                ctx_window: int = 0, strict_ppt_publish: bool = False,
-                               subagent_icons: Optional[dict] = None,
                                research_profile: bool = False,
                                committed_text_only: bool = False,
                                public_event_mapper: Optional[Callable[[dict], dict]] = None):
     """把 drive_model 事件流映射为 SSE 帧；聚合结果写入 out（异步生成器无返回值）。
 
-    call_subagent 映射为 subagent.*（前端渲染子智能体 chip），其余映射 tool.*。
-    suspend 事件终止映射并存入 out["suspended"]，由调用方持久化游标。
+    工具调用映射为 tool.*；suspend 事件终止映射并存入 out["suspended"]，由调用方持久化游标。
     tool_meta：build_tools 的 tool_meta_sink——工具完成时取走（pop）对应元信息随
     tool.completed 下发（如 search_web 的结果数/已读页面，思考时间线渲染用）。
     ctx_window：上下文窗口大小，用于把逐轮真实用量换算成占比后下发（0=不发用量帧）。
     """
     reasoning_buf: list = []
     reasoning_t0 = 0.0
-    sub_reasoning: dict = {}
-    subagent_tasks: dict = {}
 
     def _flush_reasoning() -> str:
         nonlocal reasoning_t0
@@ -448,12 +438,6 @@ async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, too
         seconds = max(0.0, time.monotonic() - reasoning_t0) if reasoning_t0 else 0.0
         reasoning_t0 = 0.0
         return channel.message_reasoning_completed(full, seconds)
-
-    def _flush_sub_reasoning(sid: str) -> str:
-        parts = sub_reasoning.pop(sid, None)
-        if not parts:
-            return ""
-        return channel.subagent_reasoning_completed(sid, "".join(parts))
 
     async for ev in ev_iter:
         et = ev.get("type")
@@ -600,22 +584,9 @@ async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, too
         elif et == "capability_loaded":
             yield channel.capability_loaded(ev.get("names") or [])
         elif et == "tool_started":
-            if ev.get("name") == "recommend_agent":
-                # 推荐是无副作用控制工具：它只投影最终可选卡片，不在时间线
-                # 显示“正在调用推荐工具”这种内部执行噪音。
-                continue
-            if ev.get("name") == "call_subagent":
-                _args = ev.get("args") or {}
-                sid = str(_args.get("subagent_id") or "")
-                subagent_tasks[sid] = str(_args.get("input") or "")
-                yield channel.subagent_preparing(
-                    sid, sub_names.get(sid, ""),
-                    task=str(_args.get("input") or ""),
-                )
-            else:
-                yield channel.tool_started(
-                    ev.get("name", ""), ev.get("args"), str(ev.get("call_id") or ""),
-                )
+            yield channel.tool_started(
+                ev.get("name", ""), ev.get("args"), str(ev.get("call_id") or ""),
+            )
         elif et == "tool_progress":
             yield channel.tool_progress(
                 ev.get("name", ""), ev.get("stage", ""), ev.get("label", ""),
@@ -623,67 +594,8 @@ async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, too
                 str(ev.get("call_id") or ""),
             )
         elif et == "tool_result":
-            if ev.get("name") == "recommend_agent":
-                _obs = ev.get("observation") if isinstance(ev.get("observation"), dict) else {}
-                _structured = (
-                    _obs.get("structured_data")
-                    if isinstance(_obs.get("structured_data"), dict)
-                    else {}
-                )
-                _payload = _structured.get("ui") if isinstance(_structured.get("ui"), dict) else {}
-                _rows = _payload.get("recommendations") if isinstance(_payload.get("recommendations"), list) else []
-                if (
-                    ev.get("status") != "failed"
-                    and _payload.get("status") == "matched"
-                    and not _payload.get("shadow")
-                    and _rows
-                ):
-                    _ids = [
-                        str(item.get("id") or "") for item in _rows
-                        if isinstance(item, dict) and str(item.get("id") or "").strip()
-                    ]
-                    _reasons = {
-                        str(item.get("id")): str(item.get("reason") or "")[:120]
-                        for item in _rows
-                        if isinstance(item, dict) and str(item.get("id") or "").strip()
-                    }
-                    if _ids:
-                        yield channel.recommend_agents(
-                            _ids,
-                            intent=str(_payload.get("intent") or "capability_gap"),
-                            confidence=str(_payload.get("confidence") or "strong"),
-                            reasons=_reasons,
-                        )
-                continue
             _trace_item = _append_tool_result_trace(out, ev)
-            if ev.get("name") == "call_subagent":
-                sid = str((ev.get("args") or {}).get("subagent_id") or "")
-                _sfl = _flush_sub_reasoning(sid)
-                if _sfl:
-                    yield _sfl
-                if ev.get("status") == "failed":
-                    yield channel.subagent_failed(sid, sub_names.get(sid, ""), ev.get("preview", ""))
-                else:
-                    _result_meta = _merge_tool_result_meta(ev, tool_meta)
-                    if isinstance(_result_meta, dict):
-                        _trace_item["meta"] = _result_meta
-                    _saved_artifacts = _delivered_artifact_rows(_result_meta)
-                    if _saved_artifacts:
-                        out["any_tool_succeeded"] = True
-                        out["write_tool_succeeded"] = True
-                    # 执行团队一期：验收单帧先于收尾帧（前端先见裁定明细，再收尾归档）
-                    if isinstance(ev.get("acceptance"), dict):
-                        yield channel.subagent_review(sid, sub_names.get(sid, ""), ev["acceptance"])
-                    # 结果报告带全文（result_text，6000 上限）：执行卡滚动看完整内容
-                    yield channel.subagent_completed(
-                        sid, sub_names.get(sid, ""), ev.get("result_text") or ev.get("preview", ""),
-                        acceptance=ev.get("acceptance"),
-                        role_name=str((ev.get("args") or {}).get("role_name") or ""),
-                        files=_saved_artifacts,
-                    )
-                    if _saved_artifacts:
-                        yield channel.artifact_saved(_saved_artifacts, source="call_subagent")
-            elif ev.get("quality_retry"):
+            if ev.get("quality_retry"):
                 # 内部质检失败只驱动静默返工：丢弃本轮 review/files meta，不把评分、拦截原因、
                 # 失败草稿或返工指令下发给用户。终端行保持正常“继续优化”语义。
                 pop_tool_meta(tool_meta, ev.get("call_id", ""), ev.get("name", ""))
@@ -741,25 +653,6 @@ async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, too
                 _saved_artifacts = _delivered_artifact_rows(_result_meta)
                 if _saved_artifacts:
                     yield channel.artifact_saved(_saved_artifacts, source=_tname)
-        elif et == "subagent_event":
-            # 子智能体工作流内部过程实时冒泡（供前端「子智能体工作窗口」展示）
-            sev = ev.get("event") or {}
-            sid = str(sev.get("subagent_id") or "")
-            st = sev.get("type")
-            if st == "started":
-                yield channel.subagent_started(
-                    sid, str(sev.get("subagent_name") or sub_names.get(sid, "")),
-                    task=str(sev.get("task") or subagent_tasks.get(sid) or ""),
-                    icon=str(sev.get("icon") or (subagent_icons or {}).get(sid) or ""),
-                )
-            elif st == "node":
-                yield channel.subagent_node(sid, sev.get("label", ""), sev.get("status", ""))
-            elif st == "delta":
-                yield channel.subagent_delta(sid, sev.get("text", ""))
-            elif st == "reasoning":
-                if sev.get("text"):
-                    sub_reasoning.setdefault(sid, []).append(str(sev.get("text")))
-                    yield channel.subagent_reasoning(sid, sev.get("text", ""))
         elif et == "usage":
             # 逐轮真实用量（main_agent 每轮发一次）→ 立刻转成 context_usage(actual)。
             # 不转的话工具期一帧 actual 都没有（唯一的 actual 在整轮收尾才发），前端计量行
@@ -773,9 +666,8 @@ async def map_tool_loop_events(channel, ev_iter, sub_names: dict, out: dict, too
             # HITL 挂起（ask_user_choice 等）：此前已 tool.started，但不会再有 tool_result。
             # 不补 tool.completed 时，前端执行时间线永久停在「正在请求补充信息…」并持续闪烁，
             # 即使用户早已答完、后续 search 已开跑（2026-08-12 真机）。
-            # call_subagent 走 subagent_* 通道，不在这里补 tool 行。
             _sus_name = str(ev.get("name") or "")
-            if _sus_name and _sus_name != "call_subagent":
+            if _sus_name:
                 yield channel.tool_completed(
                     _sus_name,
                     "已请求用户补充信息" if _sus_name == "ask_user_choice" else "已挂起等待用户",
@@ -971,11 +863,10 @@ async def run_agent_turn(env):
     from app.models import ChatMessage
     from app.services import sse_protocol
     from app.services.agent_harness import model_driver
-    from app.services.agents import capability_registry
     from app.services.knowledge import citation_service, web_search_service
     from app.services.tasks import task_run_service
     from app.services.memory import memory_service
-    from app.services.chat import subagent_turn, turn_finalizer
+    from app.services.chat import turn_finalizer
     from app.services.chat.turn_context_builder import (
         _WEB_SEARCH_AUTHORIZATION_HINT, _att_field, _build_system_prompt, _collect_knowledge_ids,
         _image_sources, _make_skill_packages_provider, _resolve_kb_tenant,
@@ -1098,23 +989,6 @@ async def run_agent_turn(env):
     async def _preflight_web():
         return await web_search_service.is_enabled()
 
-    async def _preflight_discover():
-        # call_subagent 候选（ADR-046）：hybrid 发现常 300–1700ms。
-        # Discovery is an available capability fact, not a keyword-based route gate.
-        if runtime_policy or env.action_authority != "mutate" or not user_context:
-            return []
-        discovery_history = [
-            {"role": m.role, "content": m.content}
-            for m in prompt_rows[:-1]
-            if m.role in ("user", "assistant")
-        ][-4:]
-        return await capability_registry.discover_for_call(
-            user=user_context, query=message, history=discovery_history,
-            top_k=settings.SUBAGENT_DISCOVERY_TOP_K,
-            audit_run_id=str(env.run_id or ""),
-            audit_thread_id=str(env.thread_id or ""),
-        )
-
     async def _preflight_connectors():
         # 已连接的外部应用说明：无连接器时返回空串，prompt 逐字不变。
         return await _connector_tools.describe_active_connectors(user_id)
@@ -1160,7 +1034,6 @@ async def run_agent_turn(env):
     )
     kb_tenant = None
     web_enabled = False
-    subagent_candidates: list = []
     connector_block = ""
     kb_ctx = ""
     try:
@@ -1168,7 +1041,6 @@ async def run_agent_turn(env):
             asyncio.gather(
                 _preflight_kb_tenant(),
                 _preflight_web(),
-                _preflight_discover(),
                 _preflight_connectors(),
                 _preflight_kb(),
                 return_exceptions=True,
@@ -1184,10 +1056,8 @@ async def run_agent_turn(env):
             elif i == 1:
                 web_enabled = bool(r)
             elif i == 2:
-                subagent_candidates = list(r or [])
-            elif i == 3:
                 connector_block = str(r or "")
-            elif i == 4:
+            elif i == 3:
                 kb_ctx = str(r or "")
     except asyncio.TimeoutError:
         logger.warning(
@@ -1200,14 +1070,10 @@ async def run_agent_turn(env):
         except Exception:  # noqa: BLE001
             web_enabled = False
 
-    if env.action_authority != "mutate":
-        # 只读边界下不得暴露 call_subagent 候选。
-        subagent_candidates = []
-
     # 核心工具（execute_in_sandbox/create_file/edit_file/read_file/list_files/use_skill/search_web/
     # update_plan）恒可用：主对话始终进工具循环，由模型自行决定是否调用——修掉「无知识库/
-    # 无联网/无子智能体/无选中文件时，说『生成一份 PPT』却拿不到干活工具」的能力门槛（任务
-    # 模式设计稿 §7）。联网/知识库/子智能体/选中文件只按权限与选择追加能力，不再作门槛。
+    # 无联网/无选中文件时，说『生成一份 PPT』却拿不到干活工具」的能力门槛（任务
+    # 模式设计稿 §7）。联网/知识库/选中文件只按权限与选择追加能力，不再作门槛。
     # 恒进≠每轮执行：纯聊天模型不调工具；router 判 simple 时 orchestrator 直接回退老 loop，
     # 不做 graph 规划，成本可控。
     if True:
@@ -1277,21 +1143,6 @@ async def run_agent_turn(env):
         )
         if runtime_policy:
             tools = runtime_policy.bound_tools(tools)
-        else:
-            from app.services.chat.tools.recommendation import build_recommend_agent_tool
-            _recommend_tool = await build_recommend_agent_tool(
-                user=user_context,
-                raw_message=message,
-                recent_user_messages=[
-                    str(m.content or "") for m in prompt_rows[:-1] if m.role == "user"
-                ][-2:],
-                attachments=list(attachments or []),
-                thread_id=str(thread_id or ""),
-                run_id=str(run_id or ""),
-                selected_specialist=bool(selected_skill_records or getattr(env, "subagent_id", None)),
-            )
-            if _recommend_tool is not None:
-                tools.append(_recommend_tool)
         from app.services.agent_harness.tool_registry import (
             assert_tool_specs, visible_main_tools,
         )
@@ -1311,38 +1162,6 @@ async def run_agent_turn(env):
         )
         if runtime_policy:
             tools = runtime_policy.validate_tools(tools)
-            subagent_candidates = []
-        sub_names = {str(c.get("id")): str(c.get("name") or "") for c in subagent_candidates}
-        subagent_icons = {str(c.get("id")): str(c.get("icon") or "") for c in subagent_candidates}
-        # 子智能体工作流的内部工具权限不可由主 Harness 逐项裁剪；有些工作流会写文件或
-        # 调外部系统。没有 mutate 授权时宁可不暴露 call_subagent，也不能让 feedback /
-        # inspect 回合通过委派绕过主工具的只读门禁。
-        if (
-            runtime_policy is None
-            and subagent_candidates
-            and env.action_authority == "mutate"
-        ):
-            histories_for_sub = [
-                {"role": m.role, "content": m.content}
-                for m in prompt_rows[:-1]
-                if m.role in ("user", "assistant")
-            ]
-            sub_tool = model_driver.build_call_subagent_tool(
-                subagent_candidates,
-                subagent_turn.make_subagent_runner(
-                    user_context=user_context, token=token, newapi_key=newapi_key,
-                    resolved_model=resolved_model, histories=histories_for_sub,
-                    thread_id=thread_id, turn_attachments=text_atts, run_id=run_id,
-                ),
-                max_calls=settings.SUBAGENT_TOOL_MAX_CALLS,
-                runner_stream=subagent_turn.make_subagent_stream_runner(
-                    user_context=user_context, token=token, newapi_key=newapi_key,
-                    resolved_model=resolved_model, histories=histories_for_sub,
-                    thread_id=thread_id, turn_attachments=text_atts, run_id=run_id,
-                ),
-            )
-            if sub_tool:
-                tools.append(sub_tool)
         # 消歧工具（R5 编排者形态）：模型判断用户意图有真实歧义时弹选择卡（HITL 挂起）。
         # 仅注册在流式路径——非流式 chat() 无法承接挂起续接。
         if runtime_policy is None or runtime_policy.allow_choice_tool:
@@ -1389,7 +1208,6 @@ async def run_agent_turn(env):
             has_kb=bool(kb_ids),
             has_selected_files=bool(has_selected_files),
             has_trusted_skills=bool(trusted_skills),
-            has_subagent_candidates=bool(subagent_candidates),
             explicit_memory_tools=detect_explicit_memory_tools(message),
             pin_plan_tool=bool(strict_ppt_publish) or bool(_progress_plan),
             progress_tools=_progress_tools,
@@ -1397,8 +1215,6 @@ async def run_agent_turn(env):
         if runtime_policy:
             pinned = set(runtime_policy.pinned_tool_names)
         if runtime_policy is None:
-            if any(str(tool.name) == "recommend_agent" for tool in tools):
-                pinned.add("recommend_agent")
             # Skill discovery is model-owned.  The absence of an explicitly preloaded Skill must not
             # hide use_skill behind a first tool call that freezes the schema.
             if any(str(tool.name) == "use_skill" for tool in tools):
@@ -1479,13 +1295,11 @@ async def run_agent_turn(env):
                 },
             ]
             _suspended = {
-                "subagent": {
+                "interaction": {
                     "status": "needs_input",
                     "ask_user": True,
                     "resume_id": _resume,
                     "text": _question,
-                    "subagent_id": "",
-                    "subagent_name": "",
                     "interactive": {
                         "type": "userSelect",
                         "params": {
@@ -1503,7 +1317,6 @@ async def run_agent_turn(env):
             }
             partial, input_payload = await env.suspend_orchestration(
                 run_id, _suspended, 1, kb_ids, web_enabled,
-                subagent_candidates=subagent_candidates,
                 tool_env=_tool_env_snapshot(
                     action_authority=env.action_authority,
                     turn_intent=env.turn_intent,
@@ -1605,8 +1418,8 @@ async def run_agent_turn(env):
                         getattr(env, "research_synthesis_constraints", "") or ""
                     ) if getattr(env, "research_team_synthesis_only", False) else "",
                 )
-                # 工具调用经 Tool Gateway（§11）：幂等 + 敏感工具审批 + unknown 态；
-                # call_subagent 直连（内部工具）。事件实时上抛、最终轮流式（开发计划 §4.5）。
+                # 工具调用经 Tool Gateway（§11）：幂等 + 敏感工具审批 + unknown 态。
+                # 事件实时上抛、最终轮流式（开发计划 §4.5）。
                 #
                 # 生产路径直接进入唯一模型工具循环，不经过兼容分派层。
                 # 计划模式不受影响——它已改走主循环（harness_orchestrator 的 plan_in_main_loop：
@@ -1634,7 +1447,6 @@ async def run_agent_turn(env):
                             "steerable": True,
                             "kb_ids": list(kb_ids or []),
                             "web_enabled": bool(web_enabled),
-                            "subagent_candidates": list(subagent_candidates or []),
                             "capability_broker": broker,
                             "research_synthesis_only": bool(getattr(env, "research_team_synthesis_only", False)),
                         },
@@ -1647,11 +1459,10 @@ async def run_agent_turn(env):
                         execution_profile=env.execution_profile,
                         initial_messages=getattr(env, "initial_messages", None),
                     ),
-                    sub_names, out, tool_meta_sink,
+                    out, tool_meta_sink,
                     # 逐轮真实用量要换算占比才能下发（见 mapper 里 et == "usage" 分支）
                     ctx_window=ctx_window,
                     strict_ppt_publish=strict_ppt_publish,
-                    subagent_icons=subagent_icons,
                     research_profile=bool(getattr(env, "research_profile", False)),
                     committed_text_only=bool(runtime_policy and runtime_policy.project_answer),
                     public_event_mapper=(
@@ -1662,11 +1473,10 @@ async def run_agent_turn(env):
                     yield payload
 
                 if out["suspended"] is not None:
-                    # 子智能体/ask_user_choice HITL 挂起：持久化编排游标（开发计划 Phase 2），
-                    # 用户补全后经 /chat/resume 续接同一 Run
+                    # ask_user_choice / 计划确认 HITL 挂起：持久化编排游标（开发计划 Phase 2），
+                    # 用户补全后经 /chat/runs/{run_id}/inputs 续接同一 Run
                     partial, input_payload = await env.suspend_orchestration(
                         run_id, out["suspended"], 1, kb_ids, web_enabled,
-                        subagent_candidates=subagent_candidates,
                         # 本轮的工具构建上下文随游标一起存（P1 2026-07-27）：续接轮据此
                         # 复现同一套工具集。不传的话续接轮只能拿 build_tools 的默认值，
                         # 只读授权（「只分析别改」/计划模式）与 @ 选中的技能包会一起丢。
@@ -1689,12 +1499,11 @@ async def run_agent_turn(env):
                         ),
                     )
                     # 挂起审计（§16.5）：interrupt 一条（chip 回放在续接完成时才带 message_id）
-                    pend0 = out["suspended"].get("subagent") or {}
+                    pend0 = out["suspended"].get("interaction") or {}
                     env.spawn_bg(task_run_service.record_steps(run_id, [{
                         "type": "interrupt",
                         "content": (pend0.get("text") or partial or "")[:500],
-                        "meta": {"subagent_id": pend0.get("subagent_id"),
-                                 "resume_id": pend0.get("resume_id")},
+                        "meta": {"resume_id": pend0.get("resume_id")},
                     }]))
                     # 消歧提问（ask_user）的问题由选择卡卡头承载，不再作为正文重复流出
                     if not pend0.get("ask_user"):
@@ -1942,20 +1751,10 @@ async def run_agent_turn(env):
                         round(min(out["usage_prompt_tokens"] / ctx_window, 1.0), 3),
                         kind="actual",
                     )
-                # 发现观测（语义发现升级 §十三）：本轮实际选用的子智能体与其候选名次
-                sel_sid = next((str((t.get("args") or {}).get("subagent_id") or "")
-                                for t in out["trace"] if t.get("name") == "call_subagent"), "")
-                if sel_sid:
-                    cand_ids = [str(c.get("id")) for c in subagent_candidates]
-                    logger.info(
-                        "subagent_discovery_selected user_id=%s selected_subagent_id=%s selected_rank=%d",
-                        user_id, sel_sid,
-                        (cand_ids.index(sel_sid) + 1) if sel_sid in cand_ids else -1,
-                    )
-                # 编排轨迹落 agent_steps（§16.5 可观测 + chip 持久化回放）
+                # 编排轨迹落 agent_steps（§16.5 可观测 + 回放）
                 if out["trace"]:
                     env.spawn_bg(task_run_service.record_steps(
-                        run_id, trace_to_steps(out["trace"], sub_names, tool_row.id, full_response)
+                        run_id, trace_to_steps(out["trace"], tool_row.id, full_response)
                     ))
                     # Completion Verifier 只读取已持久化回执；必须在终态边界前提交，不能
                     # 用后台任务与验证并发，否则既会漏掉失败，也会暂时看不到产物证据。

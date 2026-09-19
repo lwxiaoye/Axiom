@@ -10,8 +10,9 @@ apps even if they reuse the same path. ``app_role``/``app_dept`` remain the ACL.
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import bindparam, select, text
@@ -19,8 +20,6 @@ from sqlalchemy import bindparam, select, text
 from app.core.auth import UserContext
 from app.core.database import async_session
 from app.models import ChatMessage, ChatThread
-from app.services.agents.app_info_publish_service import normalize_visible_ids
-from app.services.agents.published_visibility import load_user_relation_ids
 from app.services.chat.builtin_assistants.registry import (
     BUILTIN_ASSISTANT_DEFINITIONS,
     get_builtin_assistant_by_preset,
@@ -34,6 +33,62 @@ ORDINARY_THREAD_SCOPE = "ordinary"
 BUILTIN_RUNTIME_KIND = "harness_builtin"
 CATALOG_APP_TYPE = "external"
 CATALOG_APP_TYPES = frozenset({"external", "custom"})
+
+
+def normalize_visible_ids(value: Any) -> list[str]:
+    """把角色/部门 id 的各种形态（JSON 数组 / 逗号串 / dict 列表）归一成去重字符串列表。
+
+    原属工作流发布可见性模块（app_info_publish_service）；编排下线后内置智能体的
+    app_role/app_dept ACL 仍靠它归一 UserContext 与关系表里的 id。
+    """
+    if not value:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                items: Iterable[Any] = parsed if isinstance(parsed, list) else [parsed]
+            except json.JSONDecodeError:
+                items = value.split(",")
+        else:
+            items = value.split(",")
+    elif isinstance(value, list):
+        items = value
+    else:
+        items = [value]
+
+    result: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            item = item.get("id") or item.get("value") or item.get("roleId") or item.get("departId")
+        if item is None:
+            continue
+        text_value = str(item).strip()
+        if text_value and text_value not in result:
+            result.append(text_value)
+    return result
+
+
+async def load_user_relation_ids(session, user: UserContext) -> tuple[list[str], list[str]]:
+    """从 sys_user_role / sys_user_depart 补齐用户的角色与部门 id（失败降级为空）。"""
+    try:
+        role_ids = (
+            await session.execute(
+                text("SELECT role_id FROM sys_user_role WHERE user_id = :user_id"),
+                {"user_id": user.user_id},
+            )
+        ).scalars().all()
+        dept_ids = (
+            await session.execute(
+                text("SELECT dep_id FROM sys_user_depart WHERE user_id = :user_id"),
+                {"user_id": user.user_id},
+            )
+        ).scalars().all()
+        return normalize_visible_ids(role_ids), normalize_visible_ids(dept_ids)
+    except Exception:
+        logger.warning("Failed to load user role/dept relations for user %s", user.user_id, exc_info=True)
+        return [], []
 
 
 BUILTIN_APP_SPECS: tuple[BuiltinAppSpec, ...] = tuple(
@@ -404,8 +459,10 @@ __all__ = [
     "builtin_preset_for_catalog_routes",
     "builtin_spec_for_catalog_routes",
     "catalog_acl_allows",
+    "load_user_relation_ids",
     "normalize_catalog_route",
     "normalize_thread_scope",
+    "normalize_visible_ids",
     "require_builtin_app_access",
     "require_message_access",
     "require_thread_access",

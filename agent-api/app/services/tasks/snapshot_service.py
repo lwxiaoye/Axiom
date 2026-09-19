@@ -31,7 +31,6 @@ TASK_SNAPSHOT_SCHEMA_VERSION = 2
 _MAX_PLAN_STEPS = 20
 _MAX_TOOL_LINES = 12
 _MAX_ARTIFACTS = 12
-_MAX_SUBAGENTS = 8
 _GOAL_MAX_CHARS = 200
 # 与 turn_decision 同口径：只有光秃秃的续接控制语才继承上一份快照。
 # 「继续修改封面」是新的修订目标，不得被这里误判成裸续接。
@@ -538,22 +537,6 @@ async def build_task_snapshot_summary(
                     summary["artifacts"] = names[:_MAX_ARTIFACTS]
             except Exception as e:  # noqa: BLE001
                 logger.debug("快照产物清单失败 run=%s: %s", run_id, e)
-        try:
-            from app.services.tasks import task_run_service
-            grouped = await task_run_service.get_subagent_steps_by_thread(thread_id)
-            subs: list[dict] = []
-            for _mid, steps in sorted(grouped.items()):
-                for s in steps or []:
-                    if not isinstance(s, dict):
-                        continue
-                    subs.append({
-                        "name": str(s.get("name") or "子智能体"),
-                        "status": str(s.get("status") or "completed"),
-                    })
-            if subs:
-                summary["subagents"] = subs[:_MAX_SUBAGENTS]
-        except Exception as e:  # noqa: BLE001
-            logger.debug("快照子智能体进度失败 run=%s: %s", run_id, e)
     summary["interrupted"] = await _run_has_interrupted_message(thread_id, run_id)
     return summary
 
@@ -792,14 +775,6 @@ def format_snapshot_block(summary: dict) -> str:
         lines.append(
             f"技能记录：{len(skills)} 个（本轮须按持久化 ID 重新校验 ACL 与取包；"
             "未通过校验前不得宣称已加载或执行）"
-        )
-    subs = summary.get("subagents") or []
-    if subs:
-        lines.append(
-            "子智能体进度：" + "；".join(
-                f"{str(s.get('name') or '子智能体')}({str(s.get('status') or 'completed')})"
-                for s in subs if isinstance(s, dict)
-            )
         )
     pends = summary.get("pending_decisions") or []
     if pends:

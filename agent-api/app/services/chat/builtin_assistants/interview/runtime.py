@@ -15,7 +15,7 @@ from .tools import build_interview_tools, describe_phase, initial_observation_te
 
 
 async def prepare_request(kwargs: dict) -> None:
-    if any(kwargs.get(key) for key in ("skill_ids", "selected_skills", "subagent_id", "knowledge_ids", "selected_knowledge", "thread_ids", "web_search", "file_ids", "queue_item_id", "queue_lease_token", "resume_source_run_id", "side_chat")):
+    if any(kwargs.get(key) for key in ("skill_ids", "selected_skills", "knowledge_ids", "selected_knowledge", "thread_ids", "web_search", "file_ids", "queue_item_id", "queue_lease_token", "resume_source_run_id", "side_chat")):
         raise HTTPException(status_code=422, detail="面试助手只使用本场简历、JD与答题记录，不接受其他工具或会话覆盖。")
     if kwargs.get("regenerate") or kwargs.get("truncate_from_message_id"):
         raise HTTPException(status_code=422, detail="面试回答会保留原始记录；请使用重答本题，不要编辑或重新生成历史。")
@@ -38,7 +38,7 @@ async def prepare_request(kwargs: dict) -> None:
         ):
             raise HTTPException(status_code=422, detail="本场只接收开场已选择的简历和 JD 文件；作答请使用文字。")
     kwargs.update(assistant_preset=INTERVIEW_PRESET, agent_mode="standard", skill_ids=[], selected_skills=[],
-                  subagent_id=None, knowledge_ids=[], selected_knowledge=[], thread_ids=[], web_search=False)
+                  knowledge_ids=[], selected_knowledge=[], thread_ids=[], web_search=False)
 
 
 async def accept_input(kwargs: dict) -> dict:

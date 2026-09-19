@@ -140,15 +140,15 @@ class ToolContractViolation(ToolFailure):
 
 
 class SubagentNeedsInput(Exception):
-    """子智能体工作流挂起等待用户输入（HITL）。
+    """工具循环挂起等待用户输入（HITL；名字沿用自历史的子智能体 needs_input 协议）。
 
-    由 call_subagent 的执行体抛出、穿透工具循环上抛到 harness_orchestrator——挂起不是失败，
-    不能被 except Exception 收敛成错误文本；携带 needs_input 结果协议全量
-    （resume_id/interactive/subagent_id/...），供调用方置 Run waiting 并持久化循环游标。
+    由 ask_user_choice / 计划确认等交互工具抛出、穿透工具循环上抛到 harness_orchestrator——
+    挂起不是失败，不能被 except Exception 收敛成错误文本；携带 needs_input 结果协议全量
+    （resume_id/interactive/ask_user/...），供调用方置 Run waiting 并持久化循环游标。
     """
 
     def __init__(self, result: dict):
-        super().__init__(str(result.get("text") or "子智能体等待用户输入"))
+        super().__init__(str(result.get("text") or "等待用户输入"))
         self.result = dict(result or {})
 
 
@@ -410,7 +410,7 @@ def pop_tool_meta(sink, call_id: str, name: str):
 class MainTool:
     def __init__(self, name: str, description: str, parameters: dict,
                  execute: Callable[[dict], Awaitable[Any]], sensitive: bool = False,
-                 internal: bool = False, stream_execute: Optional[Callable] = None,
+                 internal: bool = False,
                  readonly: bool = False, parallel_safe: Optional[bool] = None,
                  output_model: Optional[Type[BaseModel]] = None,
                  render_model: Optional[Callable[[BaseModel], str]] = None,
@@ -452,9 +452,6 @@ class MainTool:
         self.sensitive = sensitive
         # 内部工具（如 fetch_tool_result）直连执行、不经网关（避免为读取再记一条网关调用）。
         self.internal = internal
-        # 可选流式执行（async gen）：call_subagent 用它把子智能体工作流逐节点过程实时冒泡上来
-        # （yield node/delta/reasoning 事件 + 最终 {type:"result"}）；流式工具循环优先用它。
-        self.stream_execute = stream_execute
         # Static safety boundaries (for example the connector prompt-injection footer) belong at
         # the end of every projected window and must survive truncation.
         self.result_safety_tail = str(result_safety_tail or "")
@@ -551,8 +548,7 @@ class MainTool:
         )
         # 可选**纯校验**准入钩子 (args) -> 拒绝话术 or ""/None（2026-07-28）。
         # 工具循环在 `tool_started` 事件**之前**调用它：护栏拒绝的调用一帧都不该发出去。
-        # call_subagent 靠它避免「先发 subagent.started、再发 failed」在执行团队面板上
-        # 留下幽灵成员卡。必须无副作用——真正的计数/锁定仍在 execute/stream_execute 内完成。
+        # 必须无副作用——真正的计数仍在 execute 内完成。
         self.precheck: Optional[Callable[[dict], Optional[str]]] = None
 
     async def observe(self, args: dict) -> ToolExecutionResult:

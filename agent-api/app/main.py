@@ -17,7 +17,6 @@ from app.core.database import engine, Base, async_session, MYSQL_SCHEMA_HEAD
 import app.models  # noqa: F401
 import app.interview_models  # noqa: F401
 from app.services.platform.migration import migrate_threads_json_if_needed
-from app.services.knowledge import vector_service
 from app.models import ChatModel, EmbeddingModel
 
 # 让业务模块（app.*）的 INFO 日志可见，便于排查鉴权等流程
@@ -74,10 +73,10 @@ async def _migrate_chat_columns():
             # 图片缩略图落库（preview_url data URL，数十 KB/张 × ≤10 张）：TEXT 64KB 不够，
             # 升 MEDIUMTEXT。MODIFY 幂等——已是 MEDIUMTEXT 时再执行是无害 no-op。
             "ALTER TABLE ai_chat_messages MODIFY COLUMN attachments_json MEDIUMTEXT NULL",
-            # WS5：独立 Agent 运行会话按 app 隔离
+            # 历史遗留列（工作流运行会话 / 子智能体子线程，功能已删）：模型仍映射它们，
+            # 主对话按 app_id IS NULL / parent_thread_id IS NULL 过滤存量行。
             "ALTER TABLE ai_chat_threads ADD COLUMN app_id VARCHAR(64) NULL",
             "ALTER TABLE ai_chat_threads ADD COLUMN ai_app_type VARCHAR(32) NULL",
-            # 子智能体独立对话窗（ADR-046 增强）：parent_thread_id 非空=子线程，subagent_id 绑定子智能体
             "ALTER TABLE ai_chat_threads ADD COLUMN parent_thread_id VARCHAR(64) NULL",
             "ALTER TABLE ai_chat_threads ADD COLUMN subagent_id VARCHAR(64) NULL",
             # v1.95：会话下一轮模型 + 最近已受理 Run 模型（模型切换不改活动 Run）
@@ -133,20 +132,6 @@ async def _assert_chat_message_columns():
                 f"ai_chat_messages 关键列缺失（缺 {sorted(missing)}），拒绝启动——"
                 "MIGRATE_ON_STARTUP=true 时请检查数据库 DDL 权限/锁等待；"
                 "=false 时请先执行 alembic 迁移（见 migrations/README.md），修复后重启")
-
-
-async def _migrate_workflow_publish_visibility():
-    """给发布版本加可见角色/部门快照列（幂等，兼容未跑 Alembic 的本地环境）。"""
-    from sqlalchemy import text
-    async with engine.begin() as conn:
-        for ddl in [
-            "ALTER TABLE agent_workflow_version ADD COLUMN visible_role_ids TEXT NULL",
-            "ALTER TABLE agent_workflow_version ADD COLUMN visible_dept_ids TEXT NULL",
-        ]:
-            try:
-                await conn.execute(text(ddl))
-            except Exception:
-                pass  # 列已存在
 
 
 async def _migrate_user_file_columns():
@@ -219,12 +204,11 @@ async def _migrate_connector_multi_account():
 
 
 async def _migrate_chat_thread_origin():
-    """给会话表补 origin 列并回填存量委派会话（幂等，三轮评审 P2b）。
+    """给会话表补 origin 列（幂等）。
 
-    委派会话（call_subagent 落库到子智能体 app_id 运行会话）此前仅靠可空的 parent_thread_id
-    识别；删来源主对话时 parent_thread_id 被清空，孤儿委派会话就会被悬浮窗误当普通独立对话
-    自动选中。origin='delegation' 是不受删除影响的稳定标记。create_all 不 ALTER 旧表，故此处
-    补列；回填按「app_id 运行会话 + (有 parent / 标题以委派· 开头 / 全局委派会话标题)」识别存量。"""
+    origin 区分主对话 / 内置助手（presentation、campus_services、interview）/ 旁路会话
+    （side_chat）。create_all 不 ALTER 旧表，故此处补列。
+    （历史上的 'delegation' 回填随子智能体委派一起删除；存量 delegation 行只是不再被列出。）"""
     from sqlalchemy import text
     async with engine.begin() as conn:
         try:
@@ -233,14 +217,6 @@ async def _migrate_chat_thread_origin():
             ))
         except Exception:
             pass  # 列已存在
-        try:
-            await conn.execute(text(
-                "UPDATE ai_chat_threads SET origin='delegation' "
-                "WHERE origin IS NULL AND app_id IS NOT NULL "
-                "AND (parent_thread_id IS NOT NULL OR title LIKE '委派·%' OR title='主对话委派')"
-            ))
-        except Exception:
-            pass  # 回填失败不阻塞启动
 
 
 async def _seed_builtin_app_catalog():
@@ -412,24 +388,6 @@ async def _encrypt_platform_config_secrets():
         log.warning("agent_platform_config 密钥字段密文迁移失败，跳过（下次启动重试）", exc_info=True)
 
 
-async def _ensure_qdrant_collection():
-    """启动时确保平台激活 Embedding 配置对应的 Qdrant 集合存在。"""
-    from app.services.knowledge.embedding_service import get_active_embedding_config
-
-    row = await get_active_embedding_config()
-    if row and row.dimension:
-        collection = vector_service.collection_name(row.model, row.dimension)
-        for attempt in range(10):
-            try:
-                await vector_service.ensure_collection(collection, row.dimension)
-                return
-            except Exception as e:
-                logging.getLogger(__name__).warning("Qdrant not ready (attempt %d): %s", attempt + 1, e)
-                await asyncio.sleep(2)
-    else:
-        logging.getLogger(__name__).info("无平台 Embedding 配置，跳过 Qdrant 集合初始化")
-
-
 async def _initialize_model_config() -> None:
     """仅在空表时按部署配置写入初始模型，避免新环境无法对话。"""
     from sqlalchemy import select
@@ -491,7 +449,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await _migrate_embedding_model()
         await _migrate_agent_skill()
         await _migrate_chat_columns()
-        await _migrate_workflow_publish_visibility()
         await _migrate_user_file_columns()
         await _migrate_connector_installation()
         await _migrate_user_file_version_constraints()
@@ -593,13 +550,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:  # noqa: BLE001
         logging.getLogger(__name__).warning("Tool Gateway 启动对账失败（不阻塞启动）: %s", e)
     await _initialize_model_config()
-    await _ensure_qdrant_collection()
-    # Capability Registry（Phase 7 + 语义发现复审二轮）：**无条件**启动自检——表空回填、
-    # index_version 落后自动重建、最新则 no-op（幂等，均后台不阻塞启动）。不再挂在
-    # AUTO_BACKFILL 之下：那个开关管的是广场智能体向量库回填；Registry 是 call_subagent
-    # 候选的硬依赖，新环境/升级环境忘配开关会让主对话一个子智能体都发现不了。
-    from app.services.agents.capability_registry import backfill_if_empty
-
     # 启动后台任务强引用托管（B4 教训，2026-07-26 收尾）：事件循环对 task 只持弱引用，
     # 裸 create_task 的长生命周期循环（心跳/轮询/清理）一旦被 GC，租约过期会让别的
     # worker 把在跑的 Run 判成僵尸。仓库已有五处正确实现（run_hub._spawn_bg 等），此处对齐。
@@ -611,27 +561,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.services.tasks import runtime_event_bus
     _spawn_startup_task(runtime_event_bus.run_listener())
 
-    _spawn_startup_task(backfill_if_empty())
-    if settings.AGENT_RECOMMEND_ENABLED:
-        # 智能体推荐使用独立蓝绿索引：后台构建、质量门禁通过后才原子切别名。
-        # 未 ready 时 recommend_agent 不进 Tool Registry，因此启动不需阻塞主对话。
-        from app.services.agents.recommendation_index import (
-            rebuild_index as rebuild_recommendation_index,
-            run_sync_loop as run_recommendation_sync_loop,
-        )
-        _spawn_startup_task(rebuild_recommendation_index())
-        _spawn_startup_task(run_recommendation_sync_loop())
-    if settings.AUTO_BACKFILL:
-        # 后台跑，不阻塞启动；内部仅在集合为空时回填（幂等）
-        from app.services.platform.backfill_service import auto_backfill_if_empty
-        _spawn_startup_task(auto_backfill_if_empty())
-        # 权威 Registry（§12.1）：无 external_app 行时从 app_info 广场应用同步（R6 外部兜底数据源）
-        from app.services.agents.app_capability_registry import backfill_if_empty as external_backfill_if_empty
-        _spawn_startup_task(external_backfill_if_empty())
-    if settings.SYNC_POLL_ENABLED:
-        # 后台轮询对账：新增/修改/删除/停用应用自动同步进向量库
-        from app.services.platform.backfill_service import run_sync_loop
-        _spawn_startup_task(run_sync_loop())
     if settings.RUN_SWEEP_INTERVAL_SECONDS > 0:
         # 用户 HITL 挂起过期清理（waiting_user/confirmation 超 TTL → failed）；
         # waiting_system/task_recovery 不受墙钟清理，靠恢复 Job 自动重排。

@@ -391,7 +391,7 @@ async def test_committed_text_mapper_hides_candidate_bank_drafts_and_tool_argume
 
     out = {"answer": "", "streamed_any": False}
     frames = [frame async for frame in map_tool_loop_events(
-        SSEChannel(HARNESS, "synthetic-thread", "synthetic-run"), events(), {}, out,
+        SSEChannel(HARNESS, "synthetic-thread", "synthetic-run"), events(), out,
         committed_text_only=True,
     )]
     payload = "".join(frames)
@@ -420,7 +420,7 @@ async def test_ordinary_mapper_still_streams_user_visible_text():
 
     out = {"answer": "", "streamed_any": False}
     frames = [frame async for frame in map_tool_loop_events(
-        SSEChannel(HARNESS, "synthetic-thread", "synthetic-run"), events(), {}, out,
+        SSEChannel(HARNESS, "synthetic-thread", "synthetic-run"), events(), out,
     )]
     assert any(json.loads(frame.removeprefix("data: "))["type"] == "message.delta" for frame in frames)
     assert "An ordinary answer." in "".join(frames)
@@ -613,7 +613,7 @@ async def test_committed_text_mapper_uses_policy_phase_projection():
 
     out = {"answer": "", "streamed_any": False}
     payload = "".join([frame async for frame in map_tool_loop_events(
-        SSEChannel(HARNESS, "synthetic-thread", "synthetic-run"), events(), {}, out,
+        SSEChannel(HARNESS, "synthetic-thread", "synthetic-run"), events(), out,
         committed_text_only=True, public_event_mapper=mapper,
     )])
     assert "SECRET" not in payload

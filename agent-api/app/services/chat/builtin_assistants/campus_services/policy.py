@@ -27,7 +27,6 @@ CAMPUS_FORBIDDEN_REQUEST_FIELDS = (
     "selected_knowledge",
     "skill_ids",
     "selected_skills",
-    "subagent_id",
     "file_ids",
     "thread_ids",
 )

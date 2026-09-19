@@ -132,7 +132,7 @@ def test_successful_delivery_emits_canonical_artifact_saved_after_tool_receipt()
         channel = SSEChannel(HARNESS, "thread", "run")
         return [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
 
     frames = asyncio.run(collect())
@@ -177,7 +177,7 @@ def test_research_progress_is_emitted_only_for_explicit_research_profile(monkeyp
         return [
             json.loads(frame.removeprefix("data: "))
             async for frame in map_tool_loop_events(
-                channel, events(), {}, out, research_profile=research_profile,
+                channel, events(), out, research_profile=research_profile,
             )
         ]
 
@@ -198,7 +198,7 @@ def test_tool_round_public_commentary_precedes_buffered_reasoning():
         channel = SSEChannel(HARNESS, "thread", "run")
         return [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
 
     frames = asyncio.run(collect())
@@ -235,7 +235,7 @@ def test_model_connection_recovery_is_a_structured_visible_event():
         channel = SSEChannel(HARNESS, "thread", "run")
         return [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
 
     frames = asyncio.run(collect())
@@ -263,7 +263,7 @@ def test_turn_outcome_accepts_public_commentary_state():
         out = TurnOutcome()
         frames = [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
         return out, frames
 
@@ -283,7 +283,7 @@ def test_existing_public_preamble_suppresses_first_tool_round_repeat():
         channel = SSEChannel(HARNESS, "thread", "run")
         frames = [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
         return out, frames
 
@@ -312,7 +312,7 @@ def test_short_temporal_action_commentary_stays_quiet_after_tool_result():
         channel = SSEChannel(HARNESS, "thread", "run")
         return [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
 
     frames = asyncio.run(collect())
@@ -340,7 +340,7 @@ def test_reasoning_burst_closes_when_driver_stream_ends():
         channel = SSEChannel(HARNESS, "thread", "run")
         return [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
 
     frames = asyncio.run(collect())
@@ -370,7 +370,7 @@ def test_n_reasoning_bursts_emit_n_completed_summaries():
         channel = SSEChannel(HARNESS, "thread", "run")
         return [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
 
     frames = asyncio.run(collect())
@@ -386,8 +386,6 @@ def test_reasoning_completed_is_persisted_in_event_catalog():
 
     assert EVENT_CATALOG["message.reasoning.delta"].persisted is False
     assert EVENT_CATALOG["message.reasoning.completed"].persisted is True
-    assert EVENT_CATALOG["subagent.reasoning"].persisted is False
-    assert EVENT_CATALOG["subagent.reasoning.completed"].persisted is False
 
 
 def test_compact_reasoning_summary_keeps_replay_body():
@@ -427,7 +425,7 @@ def test_raw_bash_output_is_not_duplicated_as_commentary():
         channel = SSEChannel(HARNESS, "thread", "run")
         return [
             json.loads(frame.removeprefix("data: "))
-            async for frame in map_tool_loop_events(channel, events(), {}, out)
+            async for frame in map_tool_loop_events(channel, events(), out)
         ]
 
     frames = asyncio.run(collect())
@@ -463,7 +461,7 @@ def test_tool_observation_survives_failure_before_final_event():
         out = {"trace": [], "latest_task_plan": []}
         channel = SSEChannel(HARNESS, "thread", "run")
         try:
-            async for _frame in map_tool_loop_events(channel, events(), {}, out):
+            async for _frame in map_tool_loop_events(channel, events(), out):
                 pass
         except RuntimeError as exc:
             assert str(exc) == "final model request failed"

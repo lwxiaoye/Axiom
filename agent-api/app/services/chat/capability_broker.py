@@ -53,7 +53,6 @@ def resolve_core_pins(
     has_kb: bool = False,
     has_selected_files: bool = False,
     has_trusted_skills: bool = False,
-    has_subagent_candidates: bool = False,
     explicit_memory_tools: Iterable[str] = (),
     pin_plan_tool: bool = False,
     progress_tools: Iterable[str] = (),
@@ -85,12 +84,6 @@ def resolve_core_pins(
         pinned.update({"read_file", "glob"})
     if has_trusted_skills:
         pinned.add("use_skill")
-    # Candidate discovery already completed before the broker is built. Hiding the only
-    # delegation tool behind search_capabilities makes the main model solve domain work
-    # itself even when an ACL-safe specialist was found. Expose call_subagent only when
-    # there is a real candidate list; the tool still enforces IDs and call limits.
-    if has_subagent_candidates:
-        pinned.add("call_subagent")
     if authority == "mutate":
         pinned.update({"write_file", "edit_file", "download_url", "fetch_ppt_asset"})
         pinned.update(
@@ -125,8 +118,6 @@ def _group(name: str) -> tuple[str, str, str]:
         return "workspace", "write", "ask"
     if name == "use_skill":
         return "skill", "read", "auto"
-    if name in {"call_subagent", "delegate_task"}:
-        return "subagent", "external", "ask"
     if name.startswith("remember_") or name.startswith("forget_"):
         return "memory", "write", "ask"
     if name.startswith("connector_") or "github" in name.lower():

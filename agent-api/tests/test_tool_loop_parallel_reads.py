@@ -423,7 +423,7 @@ class MetaAttributionTests(unittest.IsolatedAsyncioTestCase):
         channel = SSEChannel(HARNESS, "th-meta", "run-meta")
         frames = [
             f async for f in map_tool_loop_events(
-                channel, self._replay(events), {}, TurnOutcome(), sink)
+                channel, self._replay(events), TurnOutcome(), sink)
             if f
         ]
         out = []

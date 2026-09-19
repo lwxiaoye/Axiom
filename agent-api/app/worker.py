@@ -174,7 +174,6 @@ async def _resolve_worker_input(payload: dict[str, Any]) -> dict[str, Any]:
                     attachments,
                     selected_skills=data.get("selected_skills"),
                     selected_knowledge=data.get("selected_knowledge"),
-                    subagent_name=str(data.get("subagent_name") or ""),
                     web_search=bool(data.get("web_search")),
                 )
                 if meta:

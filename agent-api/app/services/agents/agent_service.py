@@ -9,15 +9,16 @@ from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import ChatModel, EmbeddingModel
-from app.schemas.schemas import ModelItem, AgentItem
+from app.schemas.schemas import ModelItem
 from app.services.agent_harness.responses_protocol import responses_capability_from_metadata
 
 logger = logging.getLogger(__name__)
 
 
 class AgentService:
+    """模型目录：按用户 Key 解析可用对话模型（含 Responses 能力探测缓存）。"""
+
     def __init__(self):
-        self.agents = []
         # Refreshed together with the authenticated NewAPI model catalog.  It lets
         # the main Agent recognize an opaque model id by display/provider metadata
         # without changing the public model id persisted on Runs.
@@ -195,38 +196,6 @@ class AgentService:
 
         return result
 
-    async def get_agents(
-        self,
-        recommend: bool = False,
-        search: Optional[str] = None
-    ) -> List[AgentItem]:
-        result = self.agents
-
-        if recommend:
-            result = [a for a in result if a.is_recommend]
-
-        if search:
-            search_lower = search.lower()
-            result = [
-                a for a in result
-                if search_lower in a.name.lower() or
-                (a.description and search_lower in a.description.lower())
-            ]
-
-        return result
-
-    async def sync_agents(self, agents: List[dict]):
-        self.agents = [
-            AgentItem(
-                id=str(a.get("id", "")),
-                name=a.get("name", a.get("appName", "")),
-                description=a.get("description", a.get("appRemark", "")),
-                icon=a.get("icon", a.get("appIcon", "")),
-                is_recommend=a.get("is_recommend", a.get("isRecommend", False)),
-                status=a.get("status", 0)
-            )
-            for a in agents
-        ]
 
 
 agent_service = AgentService()

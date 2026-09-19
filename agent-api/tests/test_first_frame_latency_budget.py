@@ -28,18 +28,15 @@ async def test_prepare_turn_respects_budget_and_returns():
 
     with (
         patch.object(turn_prepare, "_get_catalog_records", AsyncMock(side_effect=slow_catalog)),
-        patch.object(turn_prepare, "_retrieve_agents", AsyncMock(return_value=[])),
         patch.object(turn_prepare.memory_service, "recall", AsyncMock(return_value=[])),
         patch.object(turn_prepare.personalization_service, "prompt_block", AsyncMock(return_value="")),
         patch.object(turn_prepare, "_fetch_trusted_skills", AsyncMock(return_value=[])),
         patch.object(turn_prepare.settings, "TURN_PREPARE_BUDGET_SECONDS", 0.6),
-        patch.object(turn_prepare.settings, "AUTO_ROUTE_ENABLED", False),
     ):
         t0 = asyncio.get_event_loop().time()
         ctx = await turn_prepare.prepare_turn(
             message="帮我做一份 200 元人体工学椅市场调研",
             user_context=None,
-            subagent_id=None,
             knowledge_ids=None,
             selected_knowledge=None,
             web_search=False,

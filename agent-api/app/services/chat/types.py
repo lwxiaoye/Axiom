@@ -12,19 +12,13 @@ from typing import Any, Callable, Optional
 
 @dataclass
 class TurnContext:
-    """回合准备结果(turn_prepare.prepare_turn 的产出,路由/预取/推荐三段)。"""
+    """回合准备结果(turn_prepare.prepare_turn 的产出,预取段)。"""
 
-    effective_subagent_id: Optional[str] = None   # 显式 @ 或自动路由命中的子智能体
-    route_info: Optional[dict] = None             # 自动路由命中信息(route.selected 事件用)
-    clarify_options: list = field(default_factory=list)   # R5 消歧候选(非空即出选择卡)
-    agents: Optional[list] = None                 # 向量检索到的推荐智能体候选(含分数)
     trusted_skills: list = field(default_factory=list)    # 已成功读取的可信技能全文（恢复段才可能非空）
     selected_skill_records: list = field(default_factory=list)  # ACL 目录元数据，尚未读取 SKILL.md
     effective_skill_ids: list = field(default_factory=list)  # 显式选择 + 服务端确定性自动选择
     memory_block: str = ""                        # 个性化 + 长期记忆召回合成的 prompt 段
     skill_catalog_block: str = ""                 # Skill 目录 prompt 段(模型自主 use_skill 用)
-    recommend_agent_ids: list = field(default_factory=list)  # 内部推荐卡:平台智能体 id
-    recommend_external: Optional[dict] = None     # 外部应用推荐(内部无相关时兜底)
 
 
 @dataclass

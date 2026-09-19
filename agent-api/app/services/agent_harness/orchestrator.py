@@ -38,7 +38,6 @@ from app.services.agent_harness.plan_execution import (
     plan_execution_already_unlocked,
 )
 from app.services.agent_harness.public_errors import RUN_ACCEPT_FAILURE
-from app.services.agents import subagent_service, router_service, capability_registry
 from app.services.files import thread_attachment_service
 from app.services.chat.history_trace_projection import decode_execution_trace_projection
 from app.services.knowledge import embedding_service, vector_service, web_search_service, citation_service
@@ -84,7 +83,6 @@ def _append_unbound_active_run_trace_projections(
             "run_id": normalized_run_id,
             "agent_mode": trace.get("agent_mode"),
             "citations": None,
-            "subagent_calls": None,
             "execution_trace": trace,
             "attachments": None,
         })
@@ -238,85 +236,12 @@ def _unavailable_selected_attachments(attachments: Optional[list]) -> list:
     ]
 
 
-def _candidate_snapshot(subagent_candidates: Optional[list]) -> list:
-    """挂起游标里的候选快照（语义发现升级 §七）：只存重建工具目录所需的最小字段。
-    快照只是恢复主模型工具上下文，**不是权限凭证**——恢复后真正调用子智能体时，
-    runner 内部仍实时重查 MySQL 权限/应用状态/线上版本。"""
-    snap = []
-    for c in subagent_candidates or []:
-        if not isinstance(c, dict) or not c.get("id"):
-            continue
-        snap.append({
-            "id": str(c.get("id")),
-            "name": str(c.get("name") or "")[:64],
-            "description": str(c.get("description") or "")[:200],
-            "route_description": str(c.get("route_description") or "")[:200],
-            "published_version": int(c.get("published_version") or 0),
-            "icon": str(c.get("icon") or "")[:512],
-        })
-    return snap[: max(1, int(settings.SUBAGENT_DISCOVERY_TOP_K or 12))] if snap else []
-
-
-def _is_explicit_cancel_choice(value: Any) -> bool:
-    """识别交互卡中用户明确选择的取消项。
-
-    这里只接受短、完整的取消指令，不做包含匹配：例如“取消后重新发起”不是终止指令。
-    表单自由文本也不会走这条规则，调用方还必须确认当前交互类型是 userSelect。
-    """
-    if not isinstance(value, str):
-        return False
-    normalized = re.sub(r"[\s。.!！?？_-]+", "", value).lower()
-    return bool(re.fullmatch(
-        r"(?:取消|终止|停止)(?:本次|当前)?(?:申请|操作|流程|任务)?|cancel|abort|stop",
-        normalized,
-    ))
-
-
-async def _resume_candidates(
-    orchestration: dict,
-    user_context,
-    *,
-    run_id: str = "",
-    thread_id: str = "",
-) -> list:
-    """恢复轮候选重建（语义发现升级 §七）：优先用挂起时写入的候选快照，避免重新召回
-    导致候选漂移（模型挂起前看到的清单与恢复后不一致）。快照缺失（存量挂起 Run）才
-    重新发现；发现失败返回空（不注册 call_subagent，恢复流程不受影响）。"""
-    orchestration = orchestration or {}
-    snap = [c for c in (orchestration.get("subagent_candidates") or [])
-            if isinstance(c, dict) and c.get("id")]
-    if snap:
-        return snap
-    if not user_context:
-        return []
-    try:
-        query = str(orchestration.get("goal") or "")
-        if not query:
-            msgs = orchestration.get("messages") or []
-            query = next(
-                (str(m.get("content") or "") for m in reversed(msgs)
-                 if isinstance(m, dict) and m.get("role") == "user"
-                 and isinstance(m.get("content"), str)),
-                "",
-            )
-        return await capability_registry.discover_for_call(
-            user=user_context, query=query,
-            top_k=settings.SUBAGENT_DISCOVERY_TOP_K,
-            audit_run_id=run_id,
-            audit_thread_id=thread_id,
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning("恢复轮候选发现失败，本轮不注册 call_subagent", exc_info=True)
-        return []
-
-
 # ===== Phase A（实施说明 §2.3）：上下文准备层已原样搬迁至 chat/turn_context_builder =====
 # 功能完全等价（§2.1）：此处 re-import 保持文件内全部调用点与既有行为零变化。
 from app.services.chat import (
     execution_profile,
     main_tool_turn,
     run_hub,
-    subagent_turn,
     turn_finalizer,
     turn_prepare,
 )
@@ -360,7 +285,6 @@ from app.services.chat.turn_context_builder import (# noqa: F401
     _PLAN_EXECUTION_GUARD,
     _split_attachments,
     model_supports_vision,
-    with_subagent_identity,
     build_resume_checkpoint,
     needs_resume_checkpoint,
 )
@@ -1063,7 +987,6 @@ class HarnessOrchestrator:
                         else kwargs.get("selected_skills")
                     ),
                     selected_knowledge=kwargs.get("selected_knowledge"),
-                    subagent_name=str(kwargs.get("subagent_name") or ""),
                     web_search=bool(kwargs.get("web_search")),
                 )
                 async with async_session() as session:
@@ -1274,7 +1197,6 @@ class HarnessOrchestrator:
         newapi_key: Optional[str] = None,
         resolved_model: Optional[str] = None,
         regenerate: bool = False,
-        subagent_id: Optional[str] = None,
         token: str = "",
         web_search: bool = False,
         agent_mode: str = "standard",
@@ -1335,10 +1257,8 @@ class HarnessOrchestrator:
                 agent_mode = "standard"
             skill_ids = []
             selected_skills = []
-            subagent_id = None
             # 上传附件已在受理入口校验；预设只收敛工具权限，不截断共享视觉处理链。
         if presentation_mode:
-            subagent_id = None
             skill_ids = [PRESENTATION_SKILL_CANONICAL_ID]
             selected_skills = [{
                 "id": PRESENTATION_SKILL_CANONICAL_ID,
@@ -1757,8 +1677,8 @@ class HarnessOrchestrator:
         # R0 活动任务优先（§7.1/§8.1/不变量 1）：Thread 有挂起（waiting_*）的 Task Run 时，
         # 聊天框新消息不重新做意图识别、不新建 run——否则"请假好了嘛"会被再路由成新请假任务。
         # 表单/选项的补全走上方卡片（/chat/resume）；此处只处理"取消"或提示先完成。
-        # 显式 subagent_id 也不豁免（2026-07-14 二轮评审）：豁免会允许在普通任务仍在跑时
-        # 提交带 subagent_id 的请求、同一 Thread 并发第二个 Run 写线性历史。消歧卡点选
+        # regenerate 也不豁免（2026-07-14 二轮评审）：豁免会允许在普通任务仍在跑时
+        # 同一 Thread 并发第二个 Run 写线性历史。消歧卡点选
         # 重发本就不需要绕行——waiting_clarification 不在 get_active_run 的活动集合里。
         if not precreated_run and not regenerate and user_context:
             active = await self._resolve_active_run(thread_id, user_id)
@@ -1898,9 +1818,9 @@ class HarnessOrchestrator:
         #     用户此时切走再切回会误清本地运行态，后台仍在跑的任务失去恢复入口；
         #  ② R0 原子占位（三轮评审）——agent_runs 有活动态部分唯一索引，同一 Thread 已有活动
         #     Run 时这里冲突即 ActiveRunConflict，堵住 get_active_run 预检与本 INSERT 之间的
-        #     TOCTOU 竞态。regenerate 与显式 subagent_id 都经此占位，无豁免；waiting_clarification
+        #     TOCTOU 竞态。regenerate 也经此占位，无豁免；waiting_clarification
         #     不在活动集，消歧点选重发不受阻。放在 yield thread() 之前，冲突时不发多余的 run.started。
-        # kind/subagent_id 先按主对话占位，自动路由命中后由 set_run_route 补写。
+        # kind 按主对话占位。
         # PG 未配置时 create_run 返回 None（无原子保护，退回仅预检）——「不阻断对话」优先。
         # regenerate 跳过了上面的 R0 预检，这里补一次僵尸清理：进程重启遗留的 stale running
         # 行会占着唯一索引，若不先清，合法的 regenerate 会被原子占位误判为"仍在生成"。
@@ -2406,7 +2326,7 @@ class HarnessOrchestrator:
         # Agent 才执行路由/预取/推荐。直答只保留必要的会话文本，不加载 Skill、记忆或
         # 候选智能体，避免普通问题被这些非必要依赖阻塞。
         prep = TurnContext() if direct_answer else await turn_prepare.prepare_turn(
-            message=message, user_context=user_context, subagent_id=subagent_id,
+            message=message, user_context=user_context,
             knowledge_ids=knowledge_ids, selected_knowledge=selected_knowledge,
             web_search=web_search, image_urls=image_urls, resolved_model=resolved_model,
             newapi_key=newapi_key, skill_ids=skill_ids, token=token,
@@ -2420,10 +2340,6 @@ class HarnessOrchestrator:
             # 后续 HITL/计划确认快照必须记录 ACL 目录解析出的真实 Skill ID；受理阶段的
             # canonical `ppt-studio` 只是不可变意图，不能拿它冒充租户侧记录 ID。
             skill_ids = list(prep.effective_skill_ids)
-        effective_subagent_id = prep.effective_subagent_id
-        route_info = prep.route_info
-        clarify_options = prep.clarify_options
-        agents = prep.agents
         trusted_skills = prep.trusted_skills
         selected_skill_records = prep.selected_skill_records
         memory_block = prep.memory_block
@@ -2527,68 +2443,10 @@ class HarnessOrchestrator:
             if is_first_turn:
                 thread.title = message[:50]
 
-            # channel + run.started + create_run 都已在上方（重活之前）完成；这里只在
-            # 显式 @ / 自动路由命中时把占位的 kind/subagent_id 补写成委派态。
-            if effective_subagent_id:
-                await task_run_service.set_run_route(
-                    run_id, kind="subagent", subagent_id=effective_subagent_id
-                )
             # 上一轮抽取的新记忆本轮首帧下发 chip（§14 Phase 2；SSE 已关流故延迟到次轮）
             _pending_mem = memory_service.pop_pending(user_id)
             if _pending_mem:
                 yield channel.memory_updated(_pending_mem)
-            # 自动路由命中：先告知前端"已转交 XX 智能体"（显式 @ 不发，用户已知）
-            if route_info:
-                yield channel.route_selected(route_info["subagent_id"], route_info["name"])
-
-            # R5 消歧：匹配到多个候选，呈现选择卡并结束本轮（用户点选后按显式 subagent_id 再发起）
-            if clarify_options and not effective_subagent_id:
-                prompt_text = "匹配到多个可用智能体，请选择要使用的："
-                # 用户消息通常已在「重活」前提前落库（early_user_message_id）；仅未提前落库的极端
-                # 分支才在此补插（消歧路径 AUTO_ROUTE 默认关，dormant）
-                if early_user_message_id is None:
-                    session.add(ChatMessage(
-                        thread_id=thread_id, role="user", content=message, run_id=run_id,
-                        # 附件元数据快照（对齐正常发送路径，P2-11）：消歧分支若不写这个字段，
-                        # 历史回放该轮会丢失附件卡（AUTO_ROUTE_ENABLED 打开后才会命中此分支）
-                        attachments_json=json.dumps(atts_meta, ensure_ascii=False) if atts_meta else None,
-                    ))
-                assistant_row = ChatMessage(thread_id=thread_id, role="assistant", content=prompt_text,
-                                            run_id=run_id, status="completed")
-                session.add(assistant_row)
-                thread.updated_at = func.now()
-                await session.commit()
-                # 原轮一次性上下文随事件回放（P2a）：技能 id + 附件正文（丢弃 image_url data URL，
-                # 只留 filename/kind/text）。⚠️ 诚实说明（三轮评审 P2 边界）：这不是"引用"，而是
-                # 附件**正文副本**——每条≤20k、≤10 条，故超限是**截断复用**而非精确复用；且 v1 事件
-                # 随后会写进 agent_run_events，附件正文由此进入 Runtime PG 事件留存（单事件上限
-                # ~200KB）。更理想是存受鉴权的附件 ID/快照 ID，重发时按 ID 重新解析——留待后续。
-                # 现状取舍：消歧路径 dormant（AUTO_ROUTE 默认关），正文回放简单可用、体量可控。
-                clarify_atts = [
-                    {
-                        "filename": _att_field(a, "filename"),
-                        "kind": _att_field(a, "kind"),
-                        "text": _att_field(a, "text")[:20000],
-                    }
-                    for a in (attachments or [])[:10]
-                    if _att_field(a, "text")
-                ]
-                await task_run_service.set_clarifying(run_id)
-                from app.services.agent_harness import run_store
-                phase_updated = await run_store.patch_run_state(
-                    run_id, {}, phase="waiting_clarification",
-                )
-                if phase_updated is None:
-                    raise RuntimeError("无法持久化等待澄清状态")
-                yield channel.clarification(
-                    clarify_options, prompt_text,
-                    skill_ids=list(skill_ids or []), attachments=clarify_atts,
-                )
-                yield channel.message_completed(prompt_text, assistant_row.id)
-                yield channel.run_phase_changed("waiting_clarification")
-                yield channel.done()
-                return
-
             # （编辑重发截断已提前到本函数开头、发送前压缩之前执行——见 ensure_compacted 上方）
 
             # 用户消息与附件资产已在「重活」之前提前落库（early_user_message_id，见上方 F2
@@ -2688,9 +2546,8 @@ class HarnessOrchestrator:
             # 最终消息再由 turn_finalizer 开一个短写事务提交。
             await session.commit()
 
-            # ==== 回合分派(Phase 2c 骨架化):以下三个回合体各自安家 ====
-            # 整轮委派(subagent_turn.run_dispatch_turn)/工具循环主路径
-            # (main_tool_turn.run_agent_turn)/直答回退(plain_turn)。回合体内部
+            # ==== 回合分派(Phase 2c 骨架化):以下回合体各自安家 ====
+            # 工具循环主路径(main_tool_turn.run_agent_turn)/直答回退(plain_turn)。回合体内部
             # 逻辑自本方法原样搬迁;session/事务边界仍由本骨架持有,行为零变化。
             goal_contract_prompt = ""
             if loop_resume_messages:
@@ -2810,11 +2667,6 @@ class HarnessOrchestrator:
                 spawn_partial_persist=self._spawn_partial_persist,
                 suspend_orchestration=self._suspend_orchestration,
             )
-            if effective_subagent_id and user_context:
-                async for payload in subagent_turn.run_dispatch_turn(env):
-                    yield payload
-                return
-
             if is_research_profile:
                 from app.services.agent_harness.research.kernel import run as run_research_turn
                 async for payload in run_research_turn(env):
@@ -2833,48 +2685,24 @@ class HarnessOrchestrator:
         async for payload in plain_turn.finish_plain_turn(env):
             yield payload
 
-    # ---- call_subagent 编排辅助（ADR-046/开发计划 Phase 1-2）----
-
-    # ===== Phase A（§2.3）：工具循环回合/子智能体回合已原样搬迁至 =====
-    # chat/main_tool_turn 与 chat/subagent_turn；同名方法委托，SSE 事件名/顺序/载荷零变化。
+    # ===== Phase A（§2.3）：工具循环回合已原样搬迁至 chat/main_tool_turn =====
+    # 同名方法委托，SSE 事件名/顺序/载荷零变化。
     _trace_to_steps = staticmethod(main_tool_turn.trace_to_steps)
     _strip_images_for_state = staticmethod(main_tool_turn.strip_images_for_state)
 
-    def _map_tool_loop_events(self, channel, ev_iter, sub_names: dict, out: dict,
-                              tool_meta: Optional[dict] = None, subagent_icons: Optional[dict] = None,
+    def _map_tool_loop_events(self, channel, ev_iter, out: dict,
+                              tool_meta: Optional[dict] = None,
                               research_profile: bool = False):
         return main_tool_turn.map_tool_loop_events(
-            channel, ev_iter, sub_names, out, tool_meta, subagent_icons=subagent_icons,
+            channel, ev_iter, out, tool_meta,
             research_profile=research_profile,
-        )
-
-    def _make_subagent_runner(self, *, user_context, token: str, newapi_key: str,
-                              resolved_model: str, histories=None, thread_id: str = "",
-                              turn_attachments=None, run_id: str = ""):
-        return subagent_turn.make_subagent_runner(
-            user_context=user_context, token=token, newapi_key=newapi_key,
-            resolved_model=resolved_model, histories=histories, thread_id=thread_id,
-            turn_attachments=turn_attachments, run_id=run_id,
-        )
-
-    def _make_subagent_stream_runner(self, *, user_context, token: str, newapi_key: str,
-                                     resolved_model: str, histories=None, thread_id: str = "",
-                                     turn_attachments=None, run_id: str = ""):
-        return subagent_turn.make_subagent_stream_runner(
-            user_context=user_context, token=token, newapi_key=newapi_key,
-            resolved_model=resolved_model, histories=histories, thread_id=thread_id,
-            turn_attachments=turn_attachments, run_id=run_id,
         )
 
     async def _suspend_orchestration(self, run_id: str, suspended: dict, rounds: int,
                                      kb_ids, web_enabled: bool, answer_prefix: str = "",
-                                     subagent_candidates: Optional[list] = None,
                                      tool_env: Optional[dict] = None):
         """持久化编排挂起游标（开发计划 Phase 2）：置 Run waiting + 存 messages/pending id/
         已出正文/工具重建参数。返回 (挂起引导语, input_required 载荷)。
-
-        subagent_candidates：本轮语义发现的候选快照，随游标持久化；恢复时优先用它
-        重建 call_subagent 工具目录，避免候选漂移。
 
         tool_env：挂起时那一轮**构建工具集用的上下文**（授权/修订/技能/原始诉求），见
         `_tool_env_snapshot`。不存这份快照，续接轮就只能拿 build_tools 的默认值重建工具集
@@ -2884,12 +2712,10 @@ class HarnessOrchestrator:
         ②@ 选中的技能脚本不再挂进 /workspace/skills/，而系统提示词还在命令模型照
           SKILL.md 用 bash 执行——「先出计划再做 PPT」这条主用例整条断掉。
         对所有 ask_user_choice 挂起通用，不只计划模式。"""
-        cand_snapshot = _candidate_snapshot(subagent_candidates)
-        # 挂起态只有统一的 subagent 交互载荷；旧开发数据不再兼容。
-        pend = suspended.get("subagent") or {}
+        # 挂起态只有统一的 interaction 交互载荷（ask_user_choice / 计划确认）。
+        pend = suspended.get("interaction") or {}
         interactive = pend.get("interactive") or {}
         resume_token = pend.get("resume_id")
-        sid = str((suspended.get("args") or {}).get("subagent_id") or "") or str(pend.get("subagent_id") or "")
         waiting_status = "waiting_confirmation" if bool((tool_env or {}).get("plan_mode")) else "waiting_user"
         extra_pending = dict(suspended.get("pending_input") or {})
         revision_gate = bool(extra_pending.get("revision_gate"))
@@ -2925,16 +2751,14 @@ class HarnessOrchestrator:
             "answer_so_far": answer_prefix + str(suspended.get("answer_so_far") or ""),
             "kb_ids": list(kb_ids or []),
             "web_enabled": bool(web_enabled),
-            "subagent_candidates": cand_snapshot,
             "tool_env": dict(tool_env or {}),
         }
         await task_run_service.save_run_state(run_id, {
-            "subagent_id": sid,
             "resume_id": resume_token,
             "interactive_type": interactive.get("type"),
-            # ask_user_choice 消歧挂起（非子智能体）：resume 时用户选择直接回灌循环
+            # ask_user_choice 挂起：resume 时用户选择直接回灌循环
             "ask_user": bool(pend.get("ask_user")),
-            "subagent_rounds": rounds,
+            "hitl_rounds": rounds,
             "orchestration": orchestration,
         })
         try:
@@ -2974,13 +2798,10 @@ class HarnessOrchestrator:
         except Exception:  # noqa: BLE001
             pass
         partial = pend.get("text") or "请在下方补全信息后提交。"
-        payload = with_subagent_identity(
-            {
-                "run_id": run_id, "resume_id": resume_token,
-                "type": interactive.get("type"), "params": interactive.get("params"),
-            },
-            subagent_id=sid, subagent_name=pend.get("subagent_name"),
-        )
+        payload = {
+            "run_id": run_id, "resume_id": resume_token,
+            "type": interactive.get("type"), "params": interactive.get("params"),
+        }
         # 消歧提问（ask_user_choice）标记随卡片下发：前端据此知道「直接打字也是回答」，
         # 用户发新消息时把旧卡收起（后端会把打字转交 resume，令牌一次性）
         if pend.get("ask_user"):
@@ -2997,10 +2818,8 @@ class HarnessOrchestrator:
         state: dict, rounds: int, result: dict,
         resume_value: Any = None,
     ) -> AsyncGenerator[str, None]:
-        """编排续接（开发计划 Phase 2）：把 resume 后的子智能体结果回灌工具循环游标，主模型继续。
+        """编排续接（开发计划 Phase 2）：把用户对交互卡的回答回灌工具循环游标，主模型继续。
 
-        - 子智能体再次 needs_input：游标不动，仅换令牌、轮次 +1（上限仍由 resume_chat 前置检查）；
-        - failed：不直接失败 Run——错误文本回灌模型（编排语义：模型可重试/换人/如实告知）；
         - 循环再次挂起：更新游标（answer_so_far 前缀累加）；
         - 完成：挂起前正文 + 续接正文合并落库。
         """
@@ -3032,74 +2851,8 @@ class HarnessOrchestrator:
         kb_ids = list(orchestration.get("kb_ids") or [])
         web_enabled = bool(orchestration.get("web_enabled"))
 
-        if result.get("status") == "needs_input":
-            interactive = result.get("interactive") or {}
-            new_resume = result.get("resume_id")
-            await task_run_service.set_waiting(run_id, "waiting_user", resume_token=new_resume)
-            await task_run_service.save_run_state(run_id, {
-                "subagent_id": state.get("subagent_id"),
-                "resume_id": new_resume, "interactive_type": interactive.get("type"),
-                "subagent_rounds": rounds + 1,
-                "orchestration": orchestration,
-            })
-            yield channel.message_delta(result.get("text") or "请在下方补全信息后提交。")
-            yield channel.input_required(with_subagent_identity(
-                {
-                    "run_id": run_id, "resume_id": new_resume,
-                    "type": interactive.get("type"), "params": interactive.get("params"),
-                },
-                subagent_id=result.get("subagent_id") or state.get("subagent_id"),
-                subagent_name=result.get("subagent_name"),
-            ))
-            yield channel.done()
-            return
-
-        sub_id = str(result.get("subagent_id") or state.get("subagent_id") or "")
-        sub_name = str(result.get("subagent_name") or "")
+        fed = str(result.get("text") or "（用户未作答）")
         is_ask_user = bool(state.get("ask_user"))
-        if result.get("status") == "failed":
-            fed = f"子智能体「{sub_name or sub_id}」执行失败：{result.get('text') or '未知原因'}"
-            if not is_ask_user:
-                yield channel.subagent_failed(sub_id, sub_name, fed)
-        else:
-            fed = str(result.get("text") or "（子智能体无输出）")
-            # ask_user_choice 消歧续接没有子智能体：不发 subagent.* chip（否则前端出一个
-            # 名为「子智能体」的幽灵 chip）
-            if not is_ask_user:
-                yield channel.subagent_completed(sub_id, sub_name, fed)
-
-        # 用户在子工作流的选择卡里明确取消，是不可重试的合法终态。此前取消结果被压成
-        # 普通 tool 文本交给主模型解释，真机上模型把“已取消、未提交”误判成“子智能体
-        # 没产出”，随即重新 call_subagent，直接违背用户选择。取消语义必须由运行时收口，
-        # 不能继续交给概率模型决定是否重试。
-        if result.get("user_cancelled"):
-            yield channel.message_delta(fed)
-            cancelled_out = TurnOutcome(
-                answer=fed,
-                streamed_any=True,
-                run_disposition="cancelled",
-            )
-
-            def _cancelled_steps(mid: int) -> list:
-                return [] if is_ask_user else [{
-                    "type": "subagent", "content": fed[:1000],
-                    "meta": {
-                        "name": "call_subagent", "status": "cancelled",
-                        "subagent_id": sub_id, "subagent_name": sub_name,
-                        "message_id": mid,
-                    },
-                }]
-
-            full_cancel_text = (answer_prefix + fed).strip() or "已取消。"
-            async for payload in turn_finalizer.finalize_resume_turn(
-                channel=channel, thread_id=thread_id, run_id=run_id,
-                out=cancelled_out, approval_sink=[], citation_sink=[], image_sink=[],
-                sub_names={sub_id: sub_name} if sub_id else {}, spawn_bg=self._spawn_bg,
-                full_text=full_cancel_text, failed_error_text=full_cancel_text,
-                steps_answer_text=fed, extra_steps_factory=_cancelled_steps,
-            ):
-                yield payload
-            return
         tool_env = dict(orchestration.get("tool_env") or {})
         from app.services.chat.builtin_assistants.runtime import (
             builtin_tool_build_options,
@@ -3122,7 +2875,7 @@ class HarnessOrchestrator:
             async for payload in turn_finalizer.finalize_resume_turn(
                 channel=channel, thread_id=thread_id, run_id=run_id,
                 out=skip_out, approval_sink=[], citation_sink=[], image_sink=[],
-                sub_names={}, spawn_bg=self._spawn_bg,
+                spawn_bg=self._spawn_bg,
                 full_text=ack,
                 failed_error_text=ack, steps_answer_text=ack,
             ):
@@ -3149,8 +2902,7 @@ class HarnessOrchestrator:
             try:
                 await task_run_service.save_run_state(run_id, {
                     **{k: state.get(k) for k in (
-                        "subagent_id", "resume_id", "interactive_type",
-                        "ask_user", "subagent_rounds",
+                        "resume_id", "interactive_type", "ask_user", "hitl_rounds",
                     ) if k in (state or {})},
                     "orchestration": orchestration,
                 })
@@ -3322,36 +3074,6 @@ class HarnessOrchestrator:
         )
         assert_tool_specs(tools)
         tools = await visible_main_tools(run_id, tools)
-        sub_names: dict = {}
-        subagent_icons: dict = {}
-        cands: list = []
-        # 委派授权与首轮同一口径（main_tool_turn）：没有 mutate 授权时不注册 call_subagent，
-        # 否则只读轮次能借委派把写操作外包给子智能体工作流，绕开主工具的只读门禁。
-        if runtime_policy is None and user_context and env_authority == "mutate":
-            # 候选快照优先（§七）：恢复轮用挂起时的候选清单重建工具，避免重新召回漂移；
-            # 真正调用时 runner 内部仍实时重查权限/状态/版本（下架/失权即明确失败）
-            cands = await _resume_candidates(
-                orchestration,
-                user_context,
-                run_id=run_id,
-                thread_id=thread_id,
-            )
-            sub_names = {str(c.get("id")): str(c.get("name") or "") for c in cands}
-            subagent_icons = {str(c.get("id")): str(c.get("icon") or "") for c in cands}
-            sub_tool = model_driver.build_call_subagent_tool(
-                cands,
-                self._make_subagent_runner(
-                    user_context=user_context, token=token, newapi_key=newapi_key,
-                    resolved_model=resolved_model, thread_id=thread_id, run_id=run_id,
-                ),
-                max_calls=settings.SUBAGENT_TOOL_MAX_CALLS,
-                runner_stream=self._make_subagent_stream_runner(
-                    user_context=user_context, token=token, newapi_key=newapi_key,
-                    resolved_model=resolved_model, thread_id=thread_id, run_id=run_id,
-                ),
-            )
-            if sub_tool:
-                tools.append(sub_tool)
         # 续接轮同样可再消歧；交互次数是观测指标，不是任务终止条件。
         if runtime_policy is None or runtime_policy.allow_choice_tool:
             tools.append(model_driver.build_ask_user_tool())
@@ -3387,7 +3109,6 @@ class HarnessOrchestrator:
                 _att_field(item, "file_id") for item in (tool_env.get("attachments") or [])
             ),
             has_trusted_skills=bool(env_skills),
-            has_subagent_candidates=bool(cands),
             explicit_memory_tools=detect_explicit_memory_tools(
                 str(tool_env.get("user_message") or "")
             ),
@@ -3467,7 +3188,7 @@ class HarnessOrchestrator:
                     # 点了「开始执行」后 plan_mode=False，不再二次确认。
                     plan_mode=bool(env_plan_mode),
                 ),
-                sub_names, out, tool_meta_sink, subagent_icons=subagent_icons,
+                out, tool_meta_sink,
             ),
         ):
             yield payload
@@ -3477,14 +3198,14 @@ class HarnessOrchestrator:
         if out["suspended"] is not None:
             partial, input_payload = await self._suspend_orchestration(
                 run_id, out["suspended"], rounds + 1, kb_ids, web_enabled,
-                answer_prefix=answer_prefix, subagent_candidates=cands,
+                answer_prefix=answer_prefix,
                 # 连环挂起（问一次→再问一次）必须把工具环境**原样传下去**：漏了这一手，
                 # 第二次挂起写出的游标就没有 tool_env，第三轮又退回默认 mutate，
                 # 等于只把缺口往后推了一轮。
                 tool_env=tool_env,
             )
             # 消歧提问（ask_user）的问题由选择卡卡头承载，不再作为正文重复流出
-            if not (out["suspended"].get("subagent") or {}).get("ask_user"):
+            if not (out["suspended"].get("interaction") or {}).get("ask_user"):
                 yield channel.message_delta(partial)
             if input_payload is not None:
                 yield (
@@ -3496,22 +3217,12 @@ class HarnessOrchestrator:
             return
 
         full = (answer_prefix + out["answer"]).strip() or "（无输出）"
-        # 续接完成统一收尾（Phase 2b）：resumed_step 需要落库后的 message_id 归属 chip
-        # 回放，经 factory 延迟构造；ask_user_choice 消歧续接没有子智能体，不落 subagent
-        # step（防回放出幽灵 chip）。
-        def _resumed_steps(mid: int) -> list:
-            return [] if is_ask_user else [{
-                "type": "subagent", "content": (fed or "")[:1000],
-                "meta": {"name": "call_subagent",
-                         "status": "failed" if result.get("status") == "failed" else "completed",
-                         "subagent_id": sub_id, "subagent_name": sub_name, "message_id": mid},
-            }]
+        # 续接完成统一收尾（Phase 2b）。
         async for payload in turn_finalizer.finalize_resume_turn(
             channel=channel, thread_id=thread_id, run_id=run_id, out=out,
             approval_sink=approval_sink, citation_sink=citation_sink, image_sink=image_sink,
-            sub_names=sub_names, spawn_bg=self._spawn_bg, full_text=full,
+            spawn_bg=self._spawn_bg, full_text=full,
             failed_error_text=full, steps_answer_text=out["answer"],
-            extra_steps_factory=_resumed_steps,
         ):
             yield payload
 
@@ -3528,7 +3239,7 @@ class HarnessOrchestrator:
         resolved_model: Optional[str] = None,
         protocol: str = sse_protocol.HARNESS,
     ) -> AsyncGenerator[str, None]:
-        """恢复一个 HITL 挂起的 Run（子智能体交互续接，§10.4）。"""
+        """恢复一个 HITL 挂起的 Run（ask_user_choice / 计划确认续接，§10.4）。"""
         if not newapi_key or not resolved_model:
             newapi_key, resolved_model = await self.prepare_resume_chat(user_id, run_id)
         run = await task_run_service.get_run(run_id, user_id)
@@ -3575,9 +3286,8 @@ class HarnessOrchestrator:
         channel = sse_protocol.SSEChannel(protocol, thread_id, run_id, start_sequence=last_sequence)
         run = await _unlock_plan_execution_before_resume(run_id, resume_value, run)
         state = run.get("state") or {}
-        subagent_id = run.get("subagent_id") or state.get("subagent_id")
         resume_id = run.get("resume_token") or state.get("resume_id")
-        rounds = int(state.get("subagent_rounds") or 1)
+        rounds = int(state.get("hitl_rounds") or state.get("subagent_rounds") or 1)
         yield channel.thread(
             agent_mode=str(run.get("agent_mode") or "standard"), model=resolved_model,
         )
@@ -3585,7 +3295,10 @@ class HarnessOrchestrator:
         # 判定「卡片不可再回滚」；响应头到达与令牌消费之间断连时，令牌仍有效、卡片可恢复重试
         yield channel.input_accepted()
         is_ask_user = bool(state.get("ask_user"))
-        if (not subagent_id and not is_ask_user) or not resume_id:
+        orchestration = state.get("orchestration") or {}
+        # 只认 ask_user_choice / 计划确认的 tool_loop 游标；子智能体 HITL 已随工作流编排删除，
+        # 存量的子智能体挂起态一律按「恢复上下文缺失」收成终态。
+        if not is_ask_user or not resume_id or orchestration.get("mode") != "tool_loop":
             from app.services.chat.turn_finalizer import finalize_terminal
             async for terminal_frame in finalize_terminal(
                 channel,
@@ -3601,133 +3314,49 @@ class HarnessOrchestrator:
         # ``rounds`` remains in RunState for diagnostics and resume continuity.  It must not
         # terminate the Run: an additional user answer or model segment is valid progress.
 
-        if is_ask_user:
-            # ask_user_choice 消歧挂起：无子智能体可恢复——用户的选择本身就是答案，
-            # 直接构造成功结果回灌工具循环游标（_resume_orchestration 会补 tool 消息）
-            # 多选卡回灌为可读文本（用户勾选多项→数组）；单选仍是字符串；其余兜底 JSON
-            if isinstance(resume_value, (list, tuple)):
-                picks = [str(x).strip() for x in resume_value if str(x or "").strip()]
-                choice = "、".join(picks)
-            elif isinstance(resume_value, dict):
-                # 多问题卡以“问题文案 -> 用户答案”回灌，保留语义而不是丢给模型一串
-                # 无法阅读的 JSON。数组值同样压成自然语言，跳过值显式说明。
-                answer_lines = []
-                for question, answer in list(resume_value.items())[:3]:
-                    if isinstance(answer, (list, tuple)):
-                        rendered = "、".join(str(item).strip() for item in answer if str(item or "").strip())
-                    else:
-                        rendered = str(answer or "").strip()
-                    if rendered == "__auto__":
-                        rendered = "用户跳过，请按最合理的默认假设继续"
-                    answer_lines.append(f"- {str(question)[:120]}：{rendered or '未作答'}")
-                choice = "\n".join(answer_lines)
-            elif isinstance(resume_value, str):
-                choice = resume_value
-            else:
-                choice = json.dumps(resume_value, ensure_ascii=False, default=str)
-            if str(choice) == "__ASK_USER_SKIP__":
-                # 用户点了「跳过」：不给答案，让模型按最合理理解继续并说明假设
-                fed_text = "用户跳过了这个问题，没有给出答案；请按你认为最合理的理解继续，并在回答中简要说明该假设。"
-            elif not str(choice).strip():
-                # 多选卡未勾任何项就提交：等同跳过，避免回灌空「用户已选择：」
-                fed_text = "用户没有选择任何选项；请按你认为最合理的理解继续，并在回答中简要说明该假设。"
-            else:
-                label = "用户对澄清问题的回答" if isinstance(resume_value, dict) else "用户已选择"
-                fed_text = f"{label}：{str(choice)[:1200]}"
-            result = {
-                "status": "succeeded",
-                "text": fed_text,
-                "subagent_id": "", "subagent_name": "",
-            }
+        # ask_user_choice 挂起：用户的选择本身就是答案，直接构造成功结果回灌工具循环游标
+        # （_resume_orchestration 会补 tool 消息）。多选卡回灌为可读文本（用户勾选多项→数组）；
+        # 单选仍是字符串；其余兜底 JSON
+        if isinstance(resume_value, (list, tuple)):
+            picks = [str(x).strip() for x in resume_value if str(x or "").strip()]
+            choice = "、".join(picks)
+        elif isinstance(resume_value, dict):
+            # 多问题卡以“问题文案 -> 用户答案”回灌，保留语义而不是丢给模型一串
+            # 无法阅读的 JSON。数组值同样压成自然语言，跳过值显式说明。
+            answer_lines = []
+            for question, answer in list(resume_value.items())[:3]:
+                if isinstance(answer, (list, tuple)):
+                    rendered = "、".join(str(item).strip() for item in answer if str(item or "").strip())
+                else:
+                    rendered = str(answer or "").strip()
+                if rendered == "__auto__":
+                    rendered = "用户跳过，请按最合理的默认假设继续"
+                answer_lines.append(f"- {str(question)[:120]}：{rendered or '未作答'}")
+            choice = "\n".join(answer_lines)
+        elif isinstance(resume_value, str):
+            choice = resume_value
         else:
-            result = await subagent_service.resume_subagent(
-                user=user_context, token=token, newapi_key=newapi_key,
-                default_model=resolved_model, subagent_id=subagent_id,
-                resume_id=resume_id, resume_value=resume_value,
-                audit_run_id=run_id, audit_thread_id=thread_id,
-            )
-            if (
-                result.get("status") == "succeeded"
-                and str(state.get("interactive_type") or "") == "userSelect"
-                and _is_explicit_cancel_choice(resume_value)
-            ):
-                result["user_cancelled"] = True
-
-        # 编排续接（ADR-046/开发计划 Phase 2）：挂起发生在 call_subagent 工具循环内——
-        # 把子智能体结果回灌保存的循环游标，主模型接着编排（成败都由模型看见并应对）
-        orchestration = state.get("orchestration") or {}
-        # 不支持已退休的挂起模式；遗留状态在本方法
-        # 上方的 _legacy_mode 守卫里被明确拒绝并收成终态，走不到这里。
-        if orchestration.get("mode") == "tool_loop":
-            async for payload in self._resume_orchestration(
-                channel=channel, run_id=run_id, thread_id=thread_id, user_id=user_id,
-                user_context=user_context, token=token, newapi_key=newapi_key,
-                resolved_model=resolved_model, state=state, rounds=rounds, result=result,
-                resume_value=resume_value,
-            ):
-                yield payload
-            return
-
-        if result.get("status") == "needs_input":
-            interactive = result.get("interactive") or {}
-            new_resume = result.get("resume_id")
-            await task_run_service.set_waiting(run_id, "waiting_user", resume_token=new_resume)
-            await task_run_service.save_run_state(run_id, {
-                "subagent_id": subagent_id,
-                "resume_id": new_resume, "interactive_type": interactive.get("type"),
-                "subagent_rounds": rounds + 1,
-            })
-            yield channel.message_delta(result.get("text") or "请在下方补全信息后提交。")
-            yield channel.input_required(with_subagent_identity(
-                {
-                    "run_id": run_id, "resume_id": new_resume,
-                    "type": interactive.get("type"), "params": interactive.get("params"),
-                },
-                subagent_id=result.get("subagent_id") or subagent_id,
-                subagent_name=result.get("subagent_name"),
-            ))
-            yield channel.done()
-            return
-
-        text = result.get("text") or "（无输出）"
-        async with async_session() as session:
-            row = ChatMessage(thread_id=thread_id, role="assistant", content=text,
-                              run_id=run_id, status="completed")
-            session.add(row)
-            th = await session.get(ChatThread, thread_id)
-            if th:
-                th.updated_at = func.now()
-            await session.commit()
-            mid = row.id
-
-        if result.get("status") == "failed":
-            yield channel.message_completed(text, mid)
-            from app.services.chat.turn_finalizer import finalize_terminal
-            async for terminal_frame in finalize_terminal(
-                channel,
-                run_id,
-                {"run_disposition": "failed"},
-                mid,
-                text,
-                text,
-            ):
-                yield terminal_frame
+            choice = json.dumps(resume_value, ensure_ascii=False, default=str)
+        if str(choice) == "__ASK_USER_SKIP__":
+            # 用户点了「跳过」：不给答案，让模型按最合理理解继续并说明假设
+            fed_text = "用户跳过了这个问题，没有给出答案；请按你认为最合理的理解继续，并在回答中简要说明该假设。"
+        elif not str(choice).strip():
+            # 多选卡未勾任何项就提交：等同跳过，避免回灌空「用户已选择：」
+            fed_text = "用户没有选择任何选项；请按你认为最合理的理解继续，并在回答中简要说明该假设。"
         else:
-            yield channel.subagent(text, {
-                "id": result.get("subagent_id"), "name": result.get("subagent_name"),
-                "status": "succeeded",
-            })
-            from app.services.chat.turn_finalizer import finalize_terminal
-            async for terminal_frame in finalize_terminal(
-                channel,
-                run_id,
-                {},
-                mid,
-                text,
-                text,
-            ):
-                yield terminal_frame
-        yield channel.done()
+            label = "用户对澄清问题的回答" if isinstance(resume_value, dict) else "用户已选择"
+            fed_text = f"{label}：{str(choice)[:1200]}"
+        result = {"status": "succeeded", "text": fed_text}
+
+        # 编排续接（开发计划 Phase 2）：挂起发生在工具循环内——把用户回答回灌保存的
+        # 循环游标，主模型接着编排。
+        async for payload in self._resume_orchestration(
+            channel=channel, run_id=run_id, thread_id=thread_id, user_id=user_id,
+            user_context=user_context, token=token, newapi_key=newapi_key,
+            resolved_model=resolved_model, state=state, rounds=rounds, result=result,
+            resume_value=resume_value,
+        ):
+            yield payload
 
     async def get_threads(
         self,
@@ -3834,8 +3463,6 @@ class HarnessOrchestrator:
         from app.services.chat.history_trace_projection import citations_from_projection
 
         citations_map = await citation_service.get_for_thread(thread_id)
-        # 子智能体 chip 回放（§16.5 steps）：刷新/切回后仍能看到「这轮谁办的事」
-        subagent_map = await task_run_service.get_subagent_steps_by_thread(thread_id)
         run_traces: dict = {}
         execution_map = await task_run_service.get_execution_traces_by_thread(
             thread_id,
@@ -3886,7 +3513,6 @@ class HarnessOrchestrator:
                 "run_id": m.run_id,
                 "agent_mode": (trace or {}).get("agent_mode") if m.role != "user" else None,
                 "citations": citations_map.get(m.id) or citations_from_projection(stored_trace) or None,
-                "subagent_calls": subagent_map.get(m.id) or None,
                 "execution_trace": trace or None,
                 "attachments": _loads_attachments(m.attachments_json),
             })

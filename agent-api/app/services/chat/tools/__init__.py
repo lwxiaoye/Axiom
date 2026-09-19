@@ -3,7 +3,7 @@
 目录即文档——base(契约与公共辅助)/plan(任务计划)/web(联网搜索)/
 knowledge(知识检索)/workspace(文件+沙箱+技能)/memory(长期记忆)。
 build_tools 保持原签名原顺序组装(工具顺序进 LLM payload,是行为的一部分);
-循环内核(drive_model)与 call_subagent/ask_user 构建器仍在 main_agent。
+循环内核(drive_model)与 ask_user 构建器仍在 model_driver。
 """
 import asyncio
 from types import SimpleNamespace

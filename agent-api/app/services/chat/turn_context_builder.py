@@ -17,7 +17,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import async_session
 from app.services.agent_time import agent_timezone_label, now_in_agent_timezone
-from app.services.knowledge import embedding_service, vector_service
+
 from app.services.platform.token_estimator import estimate_tokens, estimate_messages
 
 logger = logging.getLogger(__name__)
@@ -783,28 +783,6 @@ def split_system_prompt_context(prompt: str) -> PromptContextParts:
     )
 
 
-def with_subagent_identity(payload: dict, *, subagent_id: Any = "", subagent_name: Any = "") -> dict:
-    """给 input.required 载荷直带挂起来源的子智能体身份（2026-07-26）。
-
-    前端 HITL 卡片的「来自子智能体「××」」此前只能从 message.subagentCalls 的 chip 反推，
-    有两个洞：① `@` 模式整场会话就是子智能体，压根不发 chip 事件 → 卡片无任何来源标注；
-    ② 刷新回放时 running 态被归一成 completed，只能靠「取最后一个 chip」猜。身份随卡片
-    直带后两个洞都堵上，且事件回放天然携带。
-
-    消歧提问（ask_user_choice）是主模型自己发问、不来自子智能体，协议里这两个字段为空串
-    （model_driver.py 的 raise 处显式置空）→ 这里的真值判断天然不写入，前端据此不标注。
-
-    就地修改并返回 payload，便于在 `channel.input_required(...)` 调用点直接包一层。
-    """
-    sid = str(subagent_id or "")
-    name = str(subagent_name or "")
-    if sid:
-        payload["subagent_id"] = sid
-    if name:
-        payload["subagent_name"] = name
-    return payload
-
-
 def _build_system_prompt(
     agents: Optional[List[dict]] = None,
     trusted_skills: Optional[List[dict]] = None,
@@ -1091,43 +1069,6 @@ def _image_sources(image_sink: Optional[list]) -> list:
     ]
 
 
-async def _retrieve_agents(message: str, user_context) -> Optional[List[dict]]:
-    """向量检索相关智能体，失败时返回 None（不推荐）。
-
-    租户（深扫 P0）：user_context.tenant_id 一路传进 Qdrant filter。这条召回既驱动
-    推荐卡、也整段写进每一轮的系统提示词（智能体目录），漏传租户 = 跨租户曝光应用名
-    与描述。取不到租户时退化为 '0'（只见全局应用，宁可丢召回不越权）。
-    """
-    try:
-        # 使用平台 embedding 配置
-        embed_config = await embedding_service.get_active_embedding_config()
-        if not embed_config:
-            logger.debug("未配置平台 Embedding 模型，跳过智能体检索")
-            return None
-
-        collection = vector_service.collection_name(embed_config.model, embed_config.dimension)
-        query_vec = await embedding_service.embed_query(message, config=embed_config)
-
-        if len(query_vec) != embed_config.dimension:
-            logger.warning("Embedding 维度不匹配: %d != %d", len(query_vec), embed_config.dimension)
-            return None
-
-        from app.core.auth import is_admin
-        top = await vector_service.search(
-            collection=collection,
-            query_vec=query_vec,
-            user_role_ids=user_context.role_ids,
-            user_dept_ids=user_context.dept_ids,
-            is_admin_user=is_admin(user_context),
-            top_k=settings.AGENT_RETRIEVE_TOP_K,
-            tenant_id=getattr(user_context, "tenant_id", "0") or "0",
-        )
-        return top if top else None
-    except Exception as e:
-        logger.warning("智能体检索失败，跳过推荐: %s", e)
-        return None
-
-
 _CONTEXT_WINDOW = 32000  # 兜底窗口（真实窗口按模型经 model_window 解析；此值仅用于无模型上下文的读取端点）
 
 
@@ -1171,24 +1112,6 @@ _CANCEL_WORDS = ("取消", "算了", "不做了", "不请了", "不请假了", "
 def _is_cancel_intent(message: str) -> bool:
     text = (message or "").strip().lower()
     return any(w in text for w in _CANCEL_WORDS)
-
-
-# R6 外部兜底触发词（§8.1：只有「用户明确索要推荐 / 能力外需求」才进外部推荐，
-# 而非所有 direct_answer 都触发——避免每轮闲聊都多花一次外部路由 LLM 调用）
-_RECOMMEND_SEEK_WORDS = (
-    "推荐", "有没有", "有什么", "有啥", "哪个应用", "哪个工具", "哪款", "用什么",
-    "找一个", "找个", "找款", "介绍个", "介绍一个", "什么软件", "什么app", "什么应用",
-)
-
-
-def _seeks_recommendation(message: str) -> bool:
-    text = (message or "").strip().lower()
-    return any(w in text for w in _RECOMMEND_SEEK_WORDS)
-
-
-# 内部智能体推荐相关性阈值：向量相似度 ≥ 此值才算「相关」。实测校准——相关命中 0.63~0.73、
-# 无关约 0.43~0.51，0.55 可干净区分（避免把无关智能体也推成卡）。
-_RECOMMEND_MIN_SCORE = 0.55
 
 
 # 会话附件（ADR-041 v1.18）：Thread 级持久 + 每轮按当轮问题重检索，
@@ -1433,7 +1356,7 @@ def _attachments_meta(attachments: Optional[List[Any]]) -> list[dict]:
     return out
 
 
-COMPOSER_REFERENCE_KINDS = frozenset({"skill", "knowledge", "subagent", "web"})
+COMPOSER_REFERENCE_KINDS = frozenset({"skill", "knowledge", "web"})
 
 
 def _ref_item_name(item: Any) -> str:
@@ -1452,10 +1375,9 @@ def composer_reference_meta(
     *,
     selected_skills: Optional[List[Any]] = None,
     selected_knowledge: Optional[List[Any]] = None,
-    subagent_name: str = "",
     web_search: bool = False,
 ) -> list[dict]:
-    """用户气泡上的引用标签（Skill / 知识库 / @智能体 / 网页搜索）。
+    """用户气泡上的引用标签（Skill / 知识库 / 网页搜索）。
 
     只进 attachments_json 供历史回放，不进入模型附件通道。
     """
@@ -1479,7 +1401,6 @@ def composer_reference_meta(
         push(_ref_item_name(item), "skill", reference_id=_ref_item_id(item))
     for item in selected_knowledge or []:
         push(_ref_item_name(item), "knowledge")
-    push(str(subagent_name or "").strip(), "subagent")
     if web_search:
         push("网页搜索", "web")
     return cards
@@ -1490,7 +1411,6 @@ def merge_composer_reference_meta(
     *,
     selected_skills: Optional[List[Any]] = None,
     selected_knowledge: Optional[List[Any]] = None,
-    subagent_name: str = "",
     web_search: bool = False,
 ) -> list[dict]:
     """文件附件元数据 + composer 引用标签，去重后写入用户消息 attachments_json。"""
@@ -1502,7 +1422,6 @@ def merge_composer_reference_meta(
     for card in composer_reference_meta(
         selected_skills=selected_skills,
         selected_knowledge=selected_knowledge,
-        subagent_name=subagent_name,
         web_search=web_search,
     ):
         key = f"{card['kind']}:{card['filename']}"

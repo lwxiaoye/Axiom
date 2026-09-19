@@ -14,14 +14,11 @@ from .definition import (
 PRESENTATION_SKILL_CANONICAL_ID = "ppt-studio"
 PRESENTATION_FORBIDDEN_TOOL_NAMES = frozenset({
     "use_skill",
-    "recommend_agent",
-    "call_subagent",
-    "delegate_task",
     "search_capabilities",
 })
 
 # ppt-studio SKILL.md 点名的工具面。首轮与续接都只开放这些：
-# 不做子智能体调用、推荐、能力发现或其他 Skill。
+# 不做能力发现或其他 Skill。
 # glob 是读工程文件的配套能力；ask_user_choice 承接计划确认。
 # download_url / browser / search_knowledge 不在 Skill 流程里，故不开放。
 PRESENTATION_PINNED_TOOL_NAMES = frozenset({

@@ -203,7 +203,6 @@ async def test_prepare_retains_completed_memory_and_cancels_pending_jobs(monkeyp
         finally:
             cancelled.set()
 
-    monkeypatch.setattr(tp.settings, "AUTO_ROUTE_ENABLED", False)
     monkeypatch.setattr(tp.settings, "TURN_PREPARE_BUDGET_SECONDS", 0.5)
     monkeypatch.setattr(tp, "_get_catalog_records", catalog)
     monkeypatch.setattr(tp, "recent_history", AsyncMock(return_value=[]))
@@ -213,7 +212,7 @@ async def test_prepare_retains_completed_memory_and_cancels_pending_jobs(monkeyp
     ]))
     monkeypatch.setattr(tp.personalization_service, "prompt_block", AsyncMock(return_value="自定义偏好"))
     result = await tp.prepare_turn(
-        message="起草活动通知", user_context=None, subagent_id=None, knowledge_ids=None,
+        message="起草活动通知", user_context=None, knowledge_ids=None,
         selected_knowledge=None, web_search=False, image_urls=[], resolved_model="m", newapi_key="",
         skill_ids=["selected-skill"], token="", user_id="u", thread_id="t",
     )

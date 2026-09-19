@@ -5,7 +5,7 @@ import pytest
 
 from app.core.config import settings
 from app.services.agent_harness import model_usage_audit
-from app.services.agents import agent_executor, router_service
+from app.services.agents import agent_executor
 from app.services.chat.tools import browser
 from app.services.knowledge import embedding_service, web_search_service
 from app.services.workflow_runtime import compiler as workflow_compiler
@@ -71,31 +71,6 @@ class _PostClient:
 
     async def post(self, *_args, **_kwargs):
         return self.response
-
-
-@pytest.mark.asyncio
-async def test_router_uses_one_attempt_handle_for_success(monkeypatch, audit):
-    _PostClient.response = _Response({
-        "id": "resp-router",
-        "choices": [{"message": {"content": '{"decision":"direct_answer"}'}}],
-        "usage": {"prompt_tokens": 11, "completion_tokens": 2},
-    })
-    monkeypatch.setattr(router_service.httpx, "AsyncClient", _PostClient)
-
-    decision = await router_service.route(
-        message="hello",
-        candidates=[{"id": "agent-1", "name": "A", "description": "d"}],
-        model="m",
-        api_key="k",
-        run_id="run-1",
-        thread_id="thread-1",
-    )
-
-    assert decision["decision"] == "direct_answer"
-    assert audit.logical[0]["purpose"] == "router"
-    assert len(audit.attempts) == len(audit.attempt_finishes) == 1
-    assert audit.attempt_finishes[0][0] is audit.attempts[0][2]
-    assert audit.attempt_finishes[0][1]["terminal_status"] == "completed"
 
 
 class _StreamResponse:
@@ -358,111 +333,6 @@ async def test_workflow_checkpoint_hydrate_restores_lineage_but_keeps_resume_seg
     assert ctx.audit_execution_segment == "segment-resume"
     assert ctx.outputs == {"node-1": {"answer": "ok"}}
     assert ctx.variables == {"remembered": True}
-
-
-def test_subagent_identity_inherits_root_from_current_tool_context():
-    from app.services.agents import subagent_service
-    from app.services.chat.tools.base import CURRENT_TOOL_CONTEXT, ToolExecutionContext
-
-    token = CURRENT_TOOL_CONTEXT.set(ToolExecutionContext(
-        call_id="tool-1",
-        run_id="run-1",
-        root_run_id="root-1",
-        thread_id="thread-1",
-        parent_logical_call_id="logical-1",
-        execution_segment="segment-1",
-    ))
-    try:
-        identity = subagent_service._provider_audit_identity()  # noqa: SLF001
-        lineage = subagent_service._provider_audit_lineage()  # noqa: SLF001
-    finally:
-        CURRENT_TOOL_CONTEXT.reset(token)
-
-    assert identity == ("run-1", "thread-1", "root-1", "tool-1")
-    assert lineage == ("logical-1", "segment-1")
-
-
-@pytest.mark.asyncio
-async def test_subagent_runners_forward_full_tool_lineage(monkeypatch):
-    from app.services.agents import subagent_service
-    from app.services.chat import subagent_turn
-    from app.services.chat.tools.base import CURRENT_TOOL_CONTEXT, ToolExecutionContext
-
-    delegated: list[dict] = []
-    streamed: list[dict] = []
-    accepted: list[dict] = []
-
-    async def _resolve_files(*_args, **_kwargs):
-        return "", "", []
-
-    async def _run_subagent(**kwargs):
-        delegated.append(kwargs)
-        return {"status": "succeeded", "text": "done"}
-
-    async def _run_subagent_stream(**kwargs):
-        streamed.append(kwargs)
-        yield {"type": "result", "status": "succeeded", "text": "done"}
-
-    async def _accept(*_args, **kwargs):
-        accepted.append(kwargs)
-
-    async def _persist(**_kwargs):
-        return None
-
-    monkeypatch.setattr(subagent_turn, "_resolve_delegation_files", _resolve_files)
-    monkeypatch.setattr(subagent_service, "run_subagent", _run_subagent)
-    monkeypatch.setattr(subagent_service, "run_subagent_stream", _run_subagent_stream)
-    monkeypatch.setattr(subagent_turn, "_attach_acceptance", _accept)
-    monkeypatch.setattr(subagent_service, "persist_delegation_turn", _persist)
-
-    user = SimpleNamespace(user_id="user-1")
-    context = ToolExecutionContext(
-        call_id="tool-2",
-        run_id="run-2",
-        root_run_id="root-2",
-        thread_id="thread-2",
-        parent_logical_call_id="logical-2",
-        execution_segment="segment-2",
-    )
-    token = CURRENT_TOOL_CONTEXT.set(context)
-    try:
-        runner = subagent_turn.make_subagent_runner(
-            user_context=user,
-            token="token",
-            newapi_key="key",
-            resolved_model="model",
-            thread_id="thread-2",
-            run_id="run-2",
-        )
-        await runner("agent-1", "task", extras={"acceptance_criteria": ["done"]})
-
-        stream_runner = subagent_turn.make_subagent_stream_runner(
-            user_context=user,
-            token="token",
-            newapi_key="key",
-            resolved_model="model",
-            thread_id="thread-2",
-            run_id="run-2",
-        )
-        events = [
-            event async for event in stream_runner(
-                "agent-1", "task", extras={"acceptance_criteria": ["done"]},
-            )
-        ]
-    finally:
-        CURRENT_TOOL_CONTEXT.reset(token)
-
-    assert events == [{"type": "result", "status": "succeeded", "text": "done"}]
-    for forwarded in (*delegated, *streamed):
-        assert forwarded["audit_run_id"] == "run-2"
-        assert forwarded["audit_thread_id"] == "thread-2"
-        assert forwarded["audit_root_run_id"] == "root-2"
-        assert forwarded["audit_parent_tool_call_id"] == "tool-2"
-        assert forwarded["audit_parent_logical_call_id"] == "logical-2"
-        assert forwarded["audit_execution_segment"] == "segment-2"
-    assert len(accepted) == 2
-    assert all(item["root_run_id"] == "root-2" for item in accepted)
-    assert all(item["parent_logical_call_id"] == "logical-2" for item in accepted)
 
 
 @pytest.mark.asyncio

@@ -652,27 +652,6 @@ async def get_run_by_client_request(
         raise RunLookupUnavailable("Runtime 状态库暂时不可用") from e
 
 
-async def set_run_route(run_id: str, *, kind: str, subagent_id: Optional[str]) -> bool:
-    """补写 Run 的 kind/subagent_id：create_run 已提前落库占位（kind=chat），
-    自动路由/显式 @ 命中子智能体后再把委派信息写回。"""
-    factory = runtime_session()
-    if factory is None:
-        return False
-    from app.runtime_models import AgentRun
-    try:
-        async with factory() as session:
-            run = await session.get(AgentRun, run_id)
-            if not run:
-                return False
-            run.kind = kind
-            run.subagent_id = subagent_id
-            await session.commit()
-        return True
-    except Exception as e:  # noqa: BLE001
-        logger.warning("set_run_route 失败（不影响对话）: %s", e)
-        return False
-
-
 async def _set_status(run_id: str, status: str, *, error: Optional[str] = None,
                       resume_token: Optional[str] = None, completed: bool = False,
                       skip_if_terminal: bool = False, outcome: Optional[str] = None) -> bool:
@@ -954,11 +933,10 @@ async def consume_resume_token(run_id: str, client_resume_id: Optional[str]) -> 
 
 
 async def set_clarifying(run_id: str) -> bool:
-    """R5 消歧：置 waiting_clarification（§9.3）。
+    """置 waiting_clarification（§9.3）。
 
-    注意：**不**纳入 get_active_run 的 R0 阻塞集——本平台的澄清由用户点选澄清卡后
-    以显式 subagent_id 发起**新一轮**解决（chooseClarifiedAgent），而非 resume 同一 Run，
-    故该态是本轮的等待终点＋审计记录，不拦截下一条消息的重新路由。
+    注意：**不**纳入 get_active_run 的 R0 阻塞集——该态是本轮的等待终点＋审计记录，
+    不拦截下一条消息。
     """
     return await _set_status(run_id, "waiting_clarification", completed=True)
 
@@ -981,7 +959,6 @@ def _active_run_payload(row: Any) -> Dict[str, Any]:
             else None
         ),
         "interactive_type": state.get("interactive_type"),
-        "subagent_id": row.subagent_id,
         "resume_token": row.resume_token,
         # 租约字段（P1 多 worker）：run_hub._is_zombie_run 据此分流僵尸判定。
         "owner_instance_id": getattr(row, "owner_instance_id", None),
@@ -1053,8 +1030,7 @@ async def get_active_run(thread_id: str, user_id: str) -> Optional[Dict[str, Any
 async def record_steps(run_id: str, steps: List[Dict[str, Any]]) -> None:
     """批量落 Run 执行步骤（§16.5，开发计划 Phase 3 可观测）。
 
-    step: {type: message/tool/subagent/interrupt, content?, meta?, seq?}；
-    subagent 步骤的 meta 携带 message_id，供 get_subagent_steps_by_thread 做 chip 回放。
+    step: {type: message/tool/interrupt, content?, meta?, seq?}。
     best-effort：由调用方 fire-and-forget，不阻塞对话流。
     """
     factory = runtime_session()
@@ -1072,42 +1048,6 @@ async def record_steps(run_id: str, steps: List[Dict[str, Any]]) -> None:
             await session.commit()
     except Exception as e:  # noqa: BLE001
         logger.warning("record_steps 失败: %s", e)
-
-
-async def get_subagent_steps_by_thread(thread_id: str) -> Dict[int, List[Dict[str, Any]]]:
-    """按 message_id 聚合会话内 subagent 步骤（chip 持久化回放）。
-
-    返回 {message_id: [{name, status}, ...]}；Runtime 库未配置/异常时返回空 dict。
-    """
-    factory = runtime_session()
-    if factory is None:
-        return {}
-    from app.runtime_models import AgentRun, AgentStep
-    try:
-        async with factory() as session:
-            rows = (
-                await session.execute(
-                    select(AgentStep)
-                    .join(AgentRun, AgentRun.id == AgentStep.run_id)
-                    .where(AgentRun.thread_id == thread_id)
-                    .where(AgentStep.type == "subagent")
-                    .order_by(AgentStep.created_at.asc(), AgentStep.seq.asc())
-                )
-            ).scalars().all()
-        out: Dict[int, List[Dict[str, Any]]] = {}
-        for r in rows:
-            meta = r.meta or {}
-            mid = meta.get("message_id")
-            if mid is None:
-                continue
-            out.setdefault(int(mid), []).append({
-                "name": str(meta.get("subagent_name") or meta.get("name") or "子智能体"),
-                "status": str(meta.get("status") or "completed"),
-            })
-        return out
-    except Exception as e:  # noqa: BLE001
-        logger.warning("get_subagent_steps_by_thread 失败: %s", e)
-        return {}
 
 
 async def save_run_state(run_id: str, state: Dict[str, Any]) -> bool:
@@ -1224,7 +1164,7 @@ async def set_agent_mode(run_id: str, agent_mode: str) -> bool:
 
 
 async def get_run(run_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-    """按 id + user 取 Run（含 state / resume_token / subagent_id / model）。"""
+    """按 id + user 取 Run（含 state / resume_token / model）。"""
     factory = runtime_session()
     if factory is None:
         return None
@@ -1235,7 +1175,7 @@ async def get_run(run_id: str, user_id: str) -> Optional[Dict[str, Any]]:
             if not run or run.user_id != user_id:
                 return None
             return {"id": run.id, "thread_id": run.thread_id, "status": run.status,
-                    "kind": run.kind, "subagent_id": run.subagent_id, "model": run.model,
+                    "kind": run.kind, "model": run.model,
                     "agent_mode": getattr(run, "agent_mode", None) or "standard",
                     # error/outcome：断流仲裁接口（/chat/runs/{id}/state）回传真实终态细节
                     "error": run.error, "outcome": getattr(run, "outcome", None),
@@ -1402,13 +1342,6 @@ _TRACE_EVENT_TYPES = (
     "run.started", "run.completed", "run.partial", "run.failed", "run.cancelled",
     "plan.updated", "research.team",
     "tool.started", "tool.progress", "tool.completed", "tool.failed",
-    # 子智能体只回收结构化节点与终态摘要；不拉取 per-token delta/reasoning，
-    # 既能刷新还原协作过程，也避免长会话历史接口被 token 事件拖慢。
-    # subagent.review 是逐条验收明细（每次委派至多一帧、≤5 条），必须在列：漏掉它时
-    # 下面 1400 行那段 `subagent_run["review"] = {...}` 是**永远执行不到的死代码**，
-    # 表现为活流期验收明细正常、一刷新就永久消失（2026-07-28 修复）。
-    "subagent.preparing", "subagent.started", "subagent.node", "subagent.completed", "subagent.failed",
-    "subagent.review",
     "message.completed", "message.commentary",
     "message.reasoning.completed",
     # 运行中引导生效帧：刷新后要能还原「这条引导是在轮中被吸收的」，否则时间线上
@@ -1416,13 +1349,11 @@ _TRACE_EVENT_TYPES = (
     "input.received", "input.applied", "input.rejected",
     # 附件读取置信度（P0）：降级提示条随历史回放还原
     "attachments.status",
-    # 消息级卡片/贴条（2026-07-29 补齐）：这四种在**实时**会话里一旦出现就一直挂在那条
-    # 助手消息上（MessageList 的 compactedNote / routedAgent / externalRecs /
-    # recommendedAgents），用户不点也不会消失——但它们此前不在本白名单里，于是「刷新一次
-    # 就全没了」。判据是「实时侧不会主动收起」：能被用户操作收起的卡（消歧、审批、
-    # input.required）**故意不在这里**，回放它们等于把已经答完的卡片复活或给出一张点不动的
-    # 死卡，比丢失更糟。逐条理由与豁免清单见 tests/test_trace_event_whitelist.py。
-    "context.compacted", "context.compaction", "route.selected", "recommendation", "recommend_agents",
+    # 消息级贴条（2026-07-29 补齐）：压缩提示在**实时**会话里一旦出现就一直挂在那条
+    # 助手消息上，用户不点也不会消失——不在白名单里就会「刷新一次就没了」。判据是
+    # 「实时侧不会主动收起」：能被用户操作收起的卡（审批、input.required）**故意不在这里**，
+    # 回放它们等于把已经答完的卡片复活或给出一张点不动的死卡，比丢失更糟。
+    "context.compacted", "context.compaction",
 )
 
 #: 会在时间线上留下「已生成并保存 N 个文件」产物行的工具。
@@ -1572,7 +1503,6 @@ async def get_execution_traces_by_thread(
             task_plan_diverged = False
             task_plan_version: Optional[int] = None
             active_plan_key: Optional[str] = None  # 当前进行中的任务步骤 title（交错归属）
-            subagent_runs: List[Dict[str, Any]] = []
             files: List[Dict[str, Any]] = []
             # 已计过的 file_id（本 Run 内）：产物行按「首次出现」计数，覆写/二次同步回带的
             # 同一个 id 不再重复出行，与实时侧 applyTimelineTool 的 known 集合同义。
@@ -1582,10 +1512,6 @@ async def get_execution_traces_by_thread(
             # 刷新后必须原样回来。每种都是**整帧替换**（最后一帧为准），不做累加——
             # 同一轮里后发的那帧就是模型/后端最终认定的结果。
             compacted_note = ""
-            routed_agent: Optional[Dict[str, Any]] = None
-            recommendations: List[Dict[str, Any]] = []
-            recommended_agent_ids: List[str] = []
-            recommendation_meta: Dict[str, Any] = {}
             accepted_route = ""
             run_phase = ""
             loaded_capabilities: List[str] = []
@@ -1614,17 +1540,6 @@ async def get_execution_traces_by_thread(
                          s.get("callId") == call_id
                          if call_id else s.get("name") == name
                      )),
-                    None,
-                )
-
-            def _last_running_subagent(subagent_id: str = "", name: str = "") -> Optional[Dict[str, Any]]:
-                return next(
-                    (
-                        item for item in reversed(subagent_runs)
-                        if item.get("status") == "running"
-                        and (not subagent_id or item.get("id") == subagent_id)
-                        and (not name or item.get("name") == name)
-                    ),
                     None,
                 )
 
@@ -1883,163 +1798,6 @@ async def get_execution_traces_by_thread(
                             "files": delivered,
                             "planKey": active_plan_key,
                         })
-                elif event.type == "subagent.preparing":
-                    name = str(data.get("name") or "子智能体")
-                    steps.append({
-                        "kind": "tool", "name": "call_subagent", "status": "running",
-                        "operation": "subagent_prepare",
-                        "label": f"正在打开「{name}」并准备委派",
-                        "planKey": active_plan_key,
-                    })
-                elif event.type == "subagent.started":
-                    planned = next(
-                        (p for p in plan_items if p.get("name") == "call_subagent" and p.get("status") == "pending"),
-                        None,
-                    )
-                    if planned:
-                        planned["status"] = "running"
-                    subagent_id = str(data.get("subagent_id") or "")
-                    name = str(data.get("name") or "子智能体")
-                    preparing_step = next(
-                        (step for step in reversed(steps)
-                         if step.get("kind") == "tool" and step.get("name") == "call_subagent"
-                         and step.get("operation") == "subagent_prepare"
-                         and step.get("status") == "running"),
-                        None,
-                    )
-                    if preparing_step:
-                        preparing_step["status"] = "completed"
-                        preparing_step["label"] = f"已打开「{name}」，任务已交给它处理"
-                    run_key = f"{subagent_id or 'sub'}-{len(subagent_runs)}"
-                    subagent_runs.append({
-                        "id": subagent_id,
-                        "runKey": run_key,
-                        "name": name,
-                        **({"icon": str(data.get("icon"))} if data.get("icon") else {}),
-                        "task": str(data.get("task") or "") or None,
-                        "status": "running",
-                        "nodes": [],
-                        "reasoning": "",
-                        "output": "",
-                        # 执行团队一期：岗位名/子任务清单/验收标准随档回放（字段缺省不占位）
-                        **({"roleName": str(data.get("role_name"))} if data.get("role_name") else {}),
-                        **({"managerRole": str(data.get("manager_role"))} if data.get("manager_role") else {}),
-                        **({"subtasks": list(data.get("subtasks") or [])} if data.get("subtasks") else {}),
-                        **({"acceptanceCriteria": list(data.get("acceptance_criteria") or [])}
-                           if data.get("acceptance_criteria") else {}),
-                    })
-                    steps.append({
-                        "kind": "subagent", "name": name,
-                        "status": "running", "label": name,
-                        "task": str(data.get("task") or "") or None,
-                        "runKey": run_key,
-                        "planKey": active_plan_key,
-                    })
-                elif event.type == "subagent.node":
-                    subagent_id = str(data.get("subagent_id") or "")
-                    subagent_run = _last_running_subagent(subagent_id=subagent_id)
-                    if subagent_run and data.get("label"):
-                        node_label = str(data.get("label") or "")
-                        raw_status = str(data.get("status") or "")
-                        node_status = (
-                            "failed" if raw_status == "failed"
-                            else "completed" if raw_status.lower() in {"success", "succeeded", "completed", "done"}
-                            else "running"
-                        )
-                        subagent_run["nodes"].append({
-                            "label": node_label,
-                            "status": raw_status,
-                        })
-                        node_step = next(
-                            (step for step in reversed(steps)
-                             if step.get("kind") == "tool" and step.get("name") == "call_subagent"
-                             and step.get("operation") == "subagent_node"
-                             and step.get("runKey") == subagent_run.get("runKey")),
-                            None,
-                        )
-                        display_label = (
-                            f"「{subagent_run.get('name') or '子智能体'}」执行“{node_label}”失败"
-                            if node_status == "failed"
-                            else f"「{subagent_run.get('name') or '子智能体'}」已完成{node_label}"
-                            if node_status == "completed"
-                            else f"「{subagent_run.get('name') or '子智能体'}」正在{node_label}"
-                        )
-                        if node_step:
-                            node_step["label"] = display_label
-                            node_step["status"] = node_status
-                        else:
-                            steps.append({
-                                "kind": "tool", "name": "call_subagent",
-                                "operation": "subagent_node",
-                                "runKey": subagent_run.get("runKey"),
-                                "label": display_label, "status": node_status,
-                                "planKey": active_plan_key,
-                            })
-                elif event.type in ("subagent.completed", "subagent.failed"):
-                    planned = next(
-                        (p for p in plan_items if p.get("name") == "call_subagent" and p.get("status") == "running"),
-                        None,
-                    )
-                    if planned:
-                        planned["status"] = "failed" if event.type == "subagent.failed" else "completed"
-                    subagent_id = str(data.get("subagent_id") or "")
-                    name = str(data.get("name") or "子智能体")
-                    status = "failed" if event.type == "subagent.failed" else "completed"
-                    step = _last_running("subagent", name)
-                    if step:
-                        step["status"] = status
-                        if status == "failed":
-                            step["preview"] = str(data.get("result_preview") or data.get("error") or "") or None
-                    subagent_run = _last_running_subagent(
-                        subagent_id=subagent_id,
-                        name="" if subagent_id else name,
-                    )
-                    if subagent_run:
-                        subagent_run["status"] = status
-                        subagent_run["preview"] = str(data.get("result_preview") or "") or None
-                        # 子智能体窗口的流式输出全文（P1 三批）：completed 的 result_preview
-                        # 即最终报告（6000 上限），历史打开窗口不再空白
-                        subagent_run["output"] = str(data.get("result_preview") or "")
-                        subagent_run["error"] = str(data.get("error") or "") or None
-                        # 持久化文件回执随 subagent.completed 入档，供刷新后的
-                        # 子智能体工作窗口继续显示；无 id 的文本文件名不是产物。
-                        files = []
-                        for item in (data.get("files") or [])[:20]:
-                            if not isinstance(item, dict):
-                                continue
-                            file_id = str(item.get("id") or item.get("file_id") or "").strip()
-                            filename = str(item.get("filename") or item.get("name") or "").strip()
-                            if file_id and filename:
-                                files.append({**item, "id": file_id, "filename": filename})
-                        if files:
-                            subagent_run["files"] = files
-                        if isinstance(data.get("acceptance"), dict):
-                            subagent_run["acceptance"] = dict(data["acceptance"])
-                        if data.get("role_name"):
-                            subagent_run["roleName"] = str(data["role_name"])
-                        node_step = next(
-                            (item for item in reversed(steps)
-                             if item.get("kind") == "tool" and item.get("name") == "call_subagent"
-                             and item.get("operation") == "subagent_node"
-                             and item.get("runKey") == subagent_run.get("runKey")),
-                            None,
-                        )
-                        if node_step and node_step.get("status") == "running":
-                            node_step["status"] = status
-                            node_step["label"] = (
-                                str(node_step.get("label") or "").replace("正在", "执行") + "失败"
-                                if status == "failed"
-                                else str(node_step.get("label") or "").replace("正在", "已完成")
-                            )
-                elif event.type == "subagent.review":
-                    # 执行团队一期：验收单逐条裁定进档（页面只显示计数，明细供 @ 窗/总结）
-                    subagent_run = _last_running_subagent(subagent_id=str(data.get("subagent_id") or ""))
-                    if subagent_run:
-                        subagent_run["review"] = {
-                            "verdicts": list(data.get("verdicts") or []),
-                            "passedCount": int(data.get("passed_count") or 0),
-                            "total": int(data.get("total") or 0),
-                        }
                 elif event.type == "attachments.status":
                     attachments_status = [
                         item for item in (data.get("items") or []) if isinstance(item, dict)
@@ -2079,35 +1837,6 @@ async def get_execution_traces_by_thread(
                             "status": "completed",
                             "planKey": active_plan_key,
                         })
-                elif event.type == "route.selected":
-                    # 「已为你转交「X」」：AUTO_ROUTE_ENABLED 默认关，但一旦开过，这条是
-                    # 「这轮不是主对话答的」的唯一痕迹，不能只活在当次连接里。
-                    routed_agent = {
-                        "id": str(data.get("subagent_id") or ""),
-                        "name": str(data.get("name") or ""),
-                    }
-                elif event.type == "recommendation":
-                    # 外部应用推荐卡（「前往使用」）：过滤掉非 dict 的脏行，其余原样带出——
-                    # 字段口径由前端与 sse_protocol.recommendation 共同约定，这里不做二次裁剪。
-                    recommendations = [
-                        item for item in (data.get("items") or []) if isinstance(item, dict)
-                    ]
-                elif event.type == "recommend_agents":
-                    # 平台智能体推荐卡只回放 id：卡面要用「智能体广场」列表里的实时名称/图标，
-                    # 而非 @ 可委派列表；外部智能体同样可以回放为跳转卡。
-                    # 把当时的快照存进轨迹会在智能体改名/下架后渲染出一张对不上的卡。
-                    recommended_agent_ids = [
-                        str(i) for i in (data.get("ids") or []) if str(i or "").strip()
-                    ]
-                    recommendation_meta = {
-                        "intent": str(data.get("intent") or ""),
-                        "confidence": str(data.get("confidence") or ""),
-                        "reasons": (
-                            {str(k): str(v) for k, v in data.get("reasons", {}).items()}
-                            if isinstance(data.get("reasons"), dict)
-                            else {}
-                        ),
-                    }
                 elif event.type == "input.received":
                     input_message_id = data.get("message_id")
                     if input_message_id is not None:
@@ -2205,7 +1934,7 @@ async def get_execution_traces_by_thread(
                     if str(data.get("kind") or "") == "initial_progress":
                         continue
                     acted = any(
-                        s.get("kind") in ("tool", "subagent")
+                        s.get("kind") == "tool"
                         for s in steps[segment_step_start:]
                     )
                     if text and not preamble and not acted:
@@ -2278,16 +2007,11 @@ async def get_execution_traces_by_thread(
                     ),
                     "plan_version": task_plan_version,
                     "diverged": task_plan_diverged or None,
-                    "subagents": subagent_runs,
                     "files": files,
                     "attachments_status": attachments_status or None,
                     # 消息级贴条/卡片（2026-07-29）：一律「有就给、空就 None」，前端按可选字段
                     # 读。新增字段对老前端是纯增量（多余的键被忽略），不需要版本协商。
                     "compacted_note": compacted_note or None,
-                    "routed_agent": routed_agent or None,
-                    "recommendations": recommendations or None,
-                    "recommended_agent_ids": recommended_agent_ids or None,
-                    "recommendation_meta": recommendation_meta or None,
                     "accepted_route": accepted_route or None,
                     "run_phase": effective_phase or None,
                     "loaded_capabilities": loaded_capabilities or None,

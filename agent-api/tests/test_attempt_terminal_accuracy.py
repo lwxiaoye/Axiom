@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from app.services.agent_harness import model_usage_audit
-from app.services.agents import acceptance, agent_executor, router_service
+from app.services.agents import agent_executor
 from app.services.chat import turn_finalizer
 from app.services.chat.tools import image_fetch
 from app.services.chat.tools.base import CURRENT_TOOL_CONTEXT, ToolExecutionContext
@@ -210,39 +210,6 @@ async def test_workflow_agent_http_partial_stream_is_not_terminal(monkeypatch, a
     assert facts["provider_event_seen"] is True
     assert facts["partial_text_seen"] is True
     assert facts["terminal_seen"] is False
-
-
-@pytest.mark.asyncio
-async def test_router_network_error_has_no_provider_event(monkeypatch, audit):
-    monkeypatch.setattr(router_service.httpx, "AsyncClient", _RaisingClient)
-    decision = await router_service.route(
-        message="hello",
-        candidates=[{"id": "agent-1", "name": "A", "description": "d"}],
-        model="m",
-        api_key="k",
-        run_id="run-1",
-        thread_id="thread-1",
-    )
-
-    assert decision["reason_code"] == "ROUTER_EXCEPTION"
-    _assert_unseen_failure(audit)
-
-
-@pytest.mark.asyncio
-async def test_acceptance_network_error_has_no_provider_event(monkeypatch, audit):
-    monkeypatch.setattr(acceptance.httpx, "AsyncClient", _RaisingClient)
-    result = await acceptance.review(
-        task="task",
-        criteria=["done"],
-        result_text="result",
-        model="m",
-        api_key="k",
-        run_id="run-1",
-        thread_id="thread-1",
-    )
-
-    assert result is None
-    _assert_unseen_failure(audit)
 
 
 @pytest.mark.asyncio

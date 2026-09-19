@@ -73,11 +73,9 @@ def test_presentation_module_keeps_execution_contract() -> None:
     assert "search_web" in PRESENTATION_PINNED_TOOL_NAMES
     assert "search_web" not in PRESENTATION_FORBIDDEN_TOOL_NAMES
     assert PRESENTATION_PINNED_TOOL_NAMES.isdisjoint({
-        "use_skill", "recommend_agent", "call_subagent", "delegate_task",
-        "search_capabilities",
+        "use_skill", "search_capabilities",
     })
     dropped = presentation_allowed_tools([
-        Tool("bash"), Tool("recommend_agent"), Tool("call_subagent"),
-        Tool("search_capabilities"),
+        Tool("bash"), Tool("use_skill"), Tool("search_capabilities"),
     ])
     assert [tool.name for tool in dropped] == ["bash"]

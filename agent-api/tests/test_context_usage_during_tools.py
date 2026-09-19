@@ -51,7 +51,7 @@ async def test_usage_event_becomes_actual_context_usage_frame():
                 {"type": "usage", "usage_prompt_tokens": 4321},
                 {"type": "final", "answer": "好了", "trace": [], "usage_prompt_tokens": 4321},
             ]),
-            {}, out, None, ctx_window=32000,
+            out, None, ctx_window=32000,
         )
     ]
     usage = [f for f in _frames(payloads) if f.get("type") == "context.usage"]
@@ -70,7 +70,7 @@ async def test_no_usage_frame_without_context_window():
             _channel(),
             _events([{"type": "usage", "usage_prompt_tokens": 4321},
                      {"type": "final", "answer": "x", "trace": []}]),
-            {}, out, None, ctx_window=0,
+            out, None, ctx_window=0,
         )
     ]
     assert not [f for f in _frames(payloads) if f.get("type") == "context.usage"]

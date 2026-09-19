@@ -6,7 +6,6 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.auth import UserContext
-from app.services.agents import recommendation_index
 from app.services.chat import builtin_app_access as access
 
 
@@ -194,19 +193,3 @@ def test_catalog_contract_has_standalone_routes_and_external_type() -> None:
     assert by_preset["interview"].route == "/center/chat/interview"
     assert access.CATALOG_APP_TYPE == "external"
     assert access.CATALOG_APP_TYPES == frozenset({"external", "custom"})
-
-
-def test_route_managed_apps_ignore_tenant_for_recommendation_visibility() -> None:
-    user = UserContext(user_id="u1", username="u1", tenant_id="tenant-b")
-    common = {
-        "user": user,
-        "tenant_id": "tenant-a",
-        "owner_user_id": "creator",
-        "role_ids": [],
-        "dept_ids": [],
-        "user_roles": set(),
-        "user_depts": set(),
-        "internal_workflow": False,
-    }
-    assert recommendation_index._visibility_allows(**common, global_catalog=False) is False
-    assert recommendation_index._visibility_allows(**common, global_catalog=True) is True
