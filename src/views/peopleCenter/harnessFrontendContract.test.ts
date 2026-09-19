@@ -151,8 +151,9 @@ describe('主对话 Harness 前端契约', () => {
     expect(timelineSource).toContain("kind: 'compaction'");
     expect(messageListSource).toContain('<CompactionStep');
     expect(messageListSource).toContain(':active="row.step.status === \'running\'"');
-    expect(compactionStepSource).toContain("const LABEL = 'Compacting context'");
-    expect(compactionStepSource).toContain("props.failed ? 'Context compaction failed' : 'Context compacted'");
+    // 文案改成用户能看懂的中文（内部术语「Compacting context」不再露出）；过程与时长逻辑不变。
+    expect(compactionStepSource).toContain("const LABEL = '正在整理较早的对话'");
+    expect(compactionStepSource).toContain("props.failed ? '较早的对话整理失败' : '已整理较早的对话'");
     expect(compactionStepSource).toContain('const SWEEP_MS = 2000');
     expect(compactionStepSource).toContain('shimmer.rs');
 

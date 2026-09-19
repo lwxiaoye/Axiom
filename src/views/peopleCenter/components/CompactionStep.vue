@@ -24,9 +24,13 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
  *   status row: shimmer "•" + shimmer header + dim "(Ns)"
  *   transcript after ItemCompleted: dim "Context compacted"
  * Sweep math is copied from codex-rs/tui/src/shimmer.rs (2s cosine band).
+ *
+ * 文案（2026-09-19）：「Compacting context」是内部术语，面试助手等待期间用户看到它只会困惑；
+ * 改成说明「在做什么」的中文。压缩仍是平台动作，不属于任何助手的阶段——助手自己的阶段
+ * （「正在评估你第 N 题的回答」）由后端 message.commentary 给出，显示在开场白位。
  */
 const PROCESS_START = Date.now();
-const LABEL = 'Compacting context';
+const LABEL = '正在整理较早的对话';
 const SWEEP_MS = 2000;
 const PADDING = 10;
 const BAND_HALF = 5;
@@ -50,7 +54,7 @@ let raf = 0;
 let elapsedTimer = 0;
 
 const doneLabel = computed(() => (
-  props.failed ? 'Context compaction failed' : 'Context compacted'
+  props.failed ? '较早的对话整理失败' : '已整理较早的对话'
 ));
 const liveSeconds = computed(() => {
   if (typeof props.seconds === 'number' && props.seconds >= 0 && !props.active) {
@@ -61,7 +65,7 @@ const liveSeconds = computed(() => {
 });
 const elapsedLabel = computed(() => formatElapsed(liveSeconds.value));
 const ariaLabel = computed(() => (
-  props.active ? `Compacting context ${elapsedLabel.value}` : doneLabel.value
+  props.active ? `${LABEL} ${elapsedLabel.value}` : doneLabel.value
 ));
 const bulletColor = computed(() => charColor(-PADDING));
 
