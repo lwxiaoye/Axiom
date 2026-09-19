@@ -48,9 +48,28 @@ export type SkillItem = {
   enabled?: boolean;
   version?: string;
   author?: string;
+  /** 'system' = 平台技能（内置 + 管理员分发），'personal' = 自己上传的 */
   source?: string;
   installStatus?: string;
+  // ── 2026-09-19 个人技能上传 / 管理员分发契约新增 ──
+  // 后端旧版本不返回这些字段时一律按 false / 0 兜底：卡片就只剩「查看」「使用」，与改前一致。
+  ownerUserId?: string;
+  /** 管理员分发到全平台的技能记录是谁分发的；内置与个人技能为 null */
+  distributedByUserId?: string | null;
+  /** 随代码发布的内置技能（不可撤回分发、不可删） */
+  builtin?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  /** 仅 admin 对自己的个人技能为 true */
+  canDistribute?: boolean;
+  /** 仅 admin 对自己分发出去的平台技能为 true */
+  canRevoke?: boolean;
+  /** 技能包文件数：>1 说明是 zip 导入的包（含 skill.json / scripts），编辑时不能改 SKILL.md 正文 */
+  fileCount?: number;
+  updatedAt?: string;
 };
+
+export type SkillScope = 'personal' | 'system' | 'all';
 
 export type KnowledgeSelection = {
   id: string;
@@ -1677,11 +1696,62 @@ export async function getAgents(params?: { recommend?: boolean; search?: string 
 // 当前用户自己的技能，字段含 skillId/recordId/enabled/version；readme 走 /agent-api/skill/content。
 // /agent-api 不在 /api 前缀之下且返回裸 JSON，故用 apiUrl:'' + isTransformResponse:false
 // （与 knowledge.api.ts 的 KB_OPTS 同一组选项）。
+//
+// 2026-09-19 起用户可以自己上传技能（zip 或直接写 SKILL.md），每个人的「我的技能」彼此隔离，
+// 只有 admin 能把自己的技能「分发到全平台」变成 source=system。列表项上的
+// canEdit/canDelete/canDistribute/canRevoke 由后端按身份算好，前端只按位显示按钮，不自己判管理员。
 const SKILL_API = '/agent-api/skill';
 const SKILL_OPTS = { apiUrl: '', isTransformResponse: false, errorMessageMode: 'none' } as const;
 
-export async function getSkills(): Promise<SkillItem[]> {
-  const data: any = await defHttp.get({ url: `${SKILL_API}/list` }, SKILL_OPTS);
+function asBool(value: unknown): boolean {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+/**
+ * 把后端一条技能记录整成前端 SkillItem。列表、上传、编辑、分发接口返回的都是同一形状，
+ * 走同一个归一化，避免「上传成功后卡片缺按钮」这类字段分叉。
+ */
+export function normalizeSkillItem(item: any): SkillItem | null {
+  const skillId = String(item?.skillId || item?.id || '').trim();
+  if (!skillId) return null;
+  const fileCount = Number(item?.fileCount);
+  return {
+    id: skillId,
+    recordId: String(item?.recordId || item?.id || skillId).trim(),
+    skillId,
+    name: String(item?.name || skillId || '未命名 Skill'),
+    description: String(item?.description || ''),
+    icon: String(item?.icon || ''),
+    enabled: asBool(item?.enabled),
+    version: String(item?.version || item?.versionName || ''),
+    author: String(item?.author || ''),
+    source: String(item?.source || ''),
+    installStatus: String(item?.installStatus || ''),
+    ownerUserId: item?.ownerUserId ? String(item.ownerUserId) : undefined,
+    distributedByUserId: item?.distributedByUserId ? String(item.distributedByUserId) : null,
+    builtin: asBool(item?.builtin),
+    canEdit: asBool(item?.canEdit),
+    canDelete: asBool(item?.canDelete),
+    canDistribute: asBool(item?.canDistribute),
+    canRevoke: asBool(item?.canRevoke),
+    fileCount: Number.isFinite(fileCount) ? fileCount : 0,
+    updatedAt: String(item?.updatedAt || item?.updateTime || ''),
+  };
+}
+
+/** zip 导入的技能包（skill.json + SKILL.md + scripts/…）：编辑只能改名称/描述，正文要重传 zip */
+export function isPackageSkill(skill: Pick<SkillItem, 'fileCount'>): boolean {
+  return (skill.fileCount ?? 0) > 1;
+}
+
+/**
+ * 技能列表。默认 scope=all 且只保留 enabled 的——@Skill 选择器与 Skill 广场共用这一份数据，
+ * 选择器里出现一条选了也不生效的技能是坑。广场要把自己上传但暂不可用的也列出来（好删掉），
+ * 传 includeDisabled。
+ */
+export async function getSkills(options?: { scope?: SkillScope; includeDisabled?: boolean }): Promise<SkillItem[]> {
+  const scope: SkillScope = options?.scope || 'all';
+  const data: any = await defHttp.get({ url: `${SKILL_API}/list`, params: { scope } }, SKILL_OPTS);
   const list = Array.isArray(data)
     ? data
     : Array.isArray(data?.records)
@@ -1691,24 +1761,8 @@ export async function getSkills(): Promise<SkillItem[]> {
         : [];
 
   return list
-    .filter((item: any) => item?.enabled === 1 || item?.enabled === true || item?.enabled === '1')
-    .map((item: any) => {
-      const skillId = String(item?.skillId || item?.id || '').trim();
-      return {
-        id: skillId,
-        recordId: String(item?.recordId || item?.id || '').trim(),
-        skillId,
-        name: String(item?.name || skillId || '未命名 Skill'),
-        description: String(item?.description || ''),
-        icon: String(item?.icon || ''),
-        enabled: true,
-        version: String(item?.version || item?.versionName || ''),
-        author: String(item?.author || ''),
-        source: String(item?.source || ''),
-        installStatus: String(item?.installStatus || ''),
-      };
-    })
-    .filter((item: SkillItem) => item.id);
+    .map(normalizeSkillItem)
+    .filter((item: SkillItem | null): item is SkillItem => !!item && (options?.includeDisabled || item.enabled === true));
 }
 
 /** 取某个 Skill 的 SKILL.md 正文（供广场详情弹窗展示）。recordId = agent_skill.id（与 skillId 同值）。 */
@@ -1720,6 +1774,93 @@ export async function getSkillReadme(recordId: string): Promise<string> {
   );
   if (typeof r === 'string') return r;
   return String(r?.content ?? r?.readme ?? r?.result ?? '');
+}
+
+/**
+ * 上传 zip 技能包（skill.json + SKILL.md，可含 scripts/），压缩后 ≤ 5MB。
+ * 与 uploadChatFile 同一套：裸 fetch + FormData，不手动设 Content-Type 让浏览器带 multipart 边界；
+ * 失败时把后端 {detail} 原样抛给弹窗展示（重名 / 超限 / 包结构不对都是 400 + 中文原因）。
+ */
+export const SKILL_ZIP_MAX_BYTES = 5 * 1024 * 1024;
+
+export async function importSkillZip(file: File): Promise<SkillItem> {
+  if (file.size > SKILL_ZIP_MAX_BYTES) {
+    throw new Error('技能包压缩后不能超过 5MB');
+  }
+  const config = getAgentApiConfig();
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const form = new FormData();
+  form.append('file', file);
+  const headers = getHeaders(config);
+  delete headers['Content-Type'];
+  const response = await fetch(`${baseUrl}/skill/import`, { method: 'POST', headers, body: form });
+  if (!response.ok) {
+    let message = `上传失败：${response.status}`;
+    try {
+      message = apiErrorMessage(await response.json(), message);
+    } catch {
+      // 非 JSON 响应保留状态码文案
+    }
+    throw Object.assign(new Error(message), { status: response.status });
+  }
+  const item = normalizeSkillItem(await response.json());
+  if (!item) throw new Error('上传成功但返回的技能记录不完整');
+  return item;
+}
+
+/** 直接编写的内容型技能：name + description + SKILL.md 正文 */
+export async function createSkill(payload: { name: string; description: string; content: string }): Promise<SkillItem> {
+  const data = await requestAgentApi<any>('/skill/add', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: payload.name.trim(),
+      description: payload.description.trim(),
+      content: payload.content,
+    }),
+  });
+  const item = normalizeSkillItem(data);
+  if (!item) throw new Error('创建成功但返回的技能记录不完整');
+  return item;
+}
+
+/**
+ * 编辑技能。zip 型只允许改名称/描述——调用方不传 content 时这里不带该键，
+ * 后端据此不动包内正文；内容型把整份 SKILL.md 传回去。
+ */
+export async function updateSkill(payload: {
+  skillId: string;
+  name: string;
+  description: string;
+  content?: string;
+}): Promise<SkillItem> {
+  const body: Record<string, string> = {
+    skillId: payload.skillId,
+    name: payload.name.trim(),
+    description: payload.description.trim(),
+  };
+  if (payload.content !== undefined) body.content = payload.content;
+  const data = await requestAgentApi<any>('/skill/edit', { method: 'PUT', body: JSON.stringify(body) });
+  const item = normalizeSkillItem(data);
+  if (!item) throw new Error('保存成功但返回的技能记录不完整');
+  return item;
+}
+
+export async function deleteSkill(skillId: string): Promise<void> {
+  await requestAgentApi(`/skill/delete?skillId=${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+}
+
+/** 仅 admin：把自己的个人技能分发到全平台（其它人 403，后端 detail 会说明） */
+export async function distributeSkill(skillId: string): Promise<SkillItem | null> {
+  const data = await requestAgentApi<any>(`/skill/${encodeURIComponent(skillId)}/distribute`, { method: 'POST' });
+  return normalizeSkillItem(data);
+}
+
+/** 仅 admin：撤回一条自己分发出去的平台技能 */
+export async function revokeSkillDistribution(skillId: string): Promise<SkillItem | null> {
+  const data = await requestAgentApi<any>(`/skill/${encodeURIComponent(skillId)}/revoke-distribution`, {
+    method: 'POST',
+  });
+  return normalizeSkillItem(data);
 }
 
 // Threads API
