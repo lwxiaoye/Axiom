@@ -27,6 +27,8 @@ x-server-agent-env: &server-agent-env
   # 对话模型走的是自建 grok 代理渠道，按渠道实际能吃下的上限而非模型原生 256K 设窗口；
   # 这个值同时决定自动压缩触发线（窗口 − 16K 预留）。
   MODEL_WINDOW_OVERRIDES: '${AXIOM_MODEL_WINDOW_OVERRIDES:-{"grok": 131072}}'
+  # 1 核小机器：模型用量审计的数据库写入预算从 0.75s 放宽，负载一高就整行丢的问题少很多
+  MODEL_AUDIT_TIMEOUT_SECONDS: ${AXIOM_MODEL_AUDIT_TIMEOUT_SECONDS:-2.5}
   DEFAULT_EMBEDDING_MODEL: ${AXIOM_EMBEDDING_MODEL:-text-embedding-v4}
   DEFAULT_EMBEDDING_DIMENSION: ${AXIOM_EMBEDDING_DIMENSION:-1024}
   # ---- web search: SearXNG on this host; scraper only when firecrawl profile is on ----

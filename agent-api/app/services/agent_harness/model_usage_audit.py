@@ -15,6 +15,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -35,7 +37,10 @@ from app.runtime_models import (
 
 logger = logging.getLogger(__name__)
 
-AUDIT_TIMEOUT_SECONDS = 0.75
+# 每个审计阶段给数据库写入的预算：超时就放弃这一行、不拖慢模型调用。缺省 0.75s 是按
+# 多核机器定的；1 核小机器上负载一高 MySQL 写常常超过它，用量审计整行丢失、日志里一片
+# audit_write_failed——所以允许用 MODEL_AUDIT_TIMEOUT_SECONDS 按部署环境调大。
+AUDIT_TIMEOUT_SECONDS = float(os.environ.get("MODEL_AUDIT_TIMEOUT_SECONDS") or 0.75)
 MODEL_CALL_PURPOSES = frozenset(
     {
         "main_loop",
@@ -712,6 +717,11 @@ def _audit_write_failed(stage: str, **identifiers: Any) -> None:
         f"{key}={str(value or '')[:128]}"
         for key, value in sorted(identifiers.items())
     )
+    # 超时是「库慢了」这一种已知情况，一行说清就够；别的异常才带堆栈。
+    exc = sys.exc_info()[1]
+    if isinstance(exc, asyncio.TimeoutError):
+        logger.warning("audit_write_failed stage=%s reason=timeout(%.2fs) %s", stage, AUDIT_TIMEOUT_SECONDS, safe)
+        return
     logger.warning("audit_write_failed stage=%s %s", stage, safe, exc_info=True)
 
 
