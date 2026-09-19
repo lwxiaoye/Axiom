@@ -618,6 +618,13 @@ class HarnessOrchestrator:
         resolved_model = await self._resolve_model(model, user_key=user_key)
         if not resolved_model:
             raise HTTPException(status_code=400, detail="当前账号没有可用的对话模型")
+        # _resolve_model 已把当前请求的连接切到用户选中的那条名册记录；密钥必须跟着切——
+        # 否则拿着默认模型（grok）的密钥去请求另一条记录的地址（如 api.deepseek.com），
+        # 管理页测速明明成功、对话却 401（2026-09-19 正式站冒烟抓到）。
+        from app.core.model_endpoint import get_model_connection
+        bound = get_model_connection()
+        if bound and bound.get("api_key"):
+            user_key = str(bound["api_key"])
         return user_key, resolved_model
 
     async def prepare_resume_chat(self, user_id: str, run_id: str) -> tuple[str, str]:

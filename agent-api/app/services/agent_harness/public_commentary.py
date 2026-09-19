@@ -12,7 +12,7 @@ import httpx
 from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.services.agent_harness import model_usage_audit
-from app.services.agent_harness.responses_protocol import response_output_text
+from app.services.agent_harness.responses_protocol import endpoint_is_chat_only, response_output_text
 from app.services.chat import turn_finalizer
 
 
@@ -73,6 +73,10 @@ async def generate_public_commentary(
 ) -> str:
     """Return one bounded model-authored commentary item, or an empty fallback."""
     if not model or not api_key or not str(developer_prompt or "").strip():
+        return ""
+    if endpoint_is_chat_only(get_model_base_url()):
+        # 这条公开进度句只走 Responses 协议；只有 Chat Completions 的端点（如 DeepSeek 官方）
+        # 对 /responses 恒回 401/404，白吃一次请求还刷日志——直接省掉，主循环不受影响。
         return ""
     body: dict[str, Any] = {
         "model": model,
