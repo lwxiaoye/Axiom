@@ -1,7 +1,7 @@
 import { pickPinnedRecommendedAgents, PINNED_RECOMMENDED_AGENT_NAMES } from './pinnedRecommendedAgents';
 
 describe('pickPinnedRecommendedAgents', () => {
-  it('按固定名单顺序挑四个，不按 isRecommend 或列表顺序', () => {
+  it('按固定名单顺序挑三个内置助手，不按 isRecommend 或列表顺序', () => {
     const market = [
       { id: 'w', appName: '天气助手', isRecommend: 'Y', pcUrl: '/w' },
       { id: 'campus-1000', appName: '校园百事通', pcUrl: '/center/chat/campus', builtinPreset: 'campus_services' },
@@ -15,7 +15,6 @@ describe('pickPinnedRecommendedAgents', () => {
       '校园百事通',
       '演示文稿助手',
       '面试助手',
-      '智能填表助手',
     ]);
     expect(picked.map((item) => item.name)).toEqual([
       '校园百事通',
@@ -47,9 +46,7 @@ describe('pickPinnedRecommendedAgents', () => {
     expect(picked.map((item) => item.name)).toEqual(['我的校园助手', '我的演示助手', '我的面试练习']);
   });
 
-  it('广场固定推荐位只认广场记录，不再回退到用户自建的工作流应用', () => {
-    const picked = pickPinnedRecommendedAgents([{ id: 'form-m', appName: '智能填表助手', pcUrl: '/form' }]);
-    expect(picked).toEqual([expect.objectContaining({ id: 'form-m' })]);
-    expect(picked[0]).not.toHaveProperty('open');
+  it('非内置的广场记录不进推荐位', () => {
+    expect(pickPinnedRecommendedAgents([{ id: 'form-m', appName: '智能填表助手', pcUrl: '/form' }])).toEqual([]);
   });
 });

@@ -103,7 +103,7 @@ const presets: Array<{ key: Exclude<KnowledgeAnalyticsPreset, 'custom'>; label: 
 const hasTrend = computed(() => Boolean(overview.value?.trend?.length));
 // 区间内有没有任何一次检索：决定顶部是否提示「还没有检索记录」
 const hasRetrievals = computed(() => Number(overview.value?.metrics?.retrievalCount || 0) > 0);
-const emptyHint = '所选区间内还没有人在对话、智能体或工作流里检索到这个知识库。检索一旦发生就会在这里累计；页面上的「召回测试」不计入。';
+const emptyHint = '所选区间内还没有人在对话或智能体里检索到这个知识库。检索一旦发生就会在这里累计；页面上的「召回测试」不计入。';
 const documentColumns = [
   { title: '文件', dataIndex: 'name' },
   { title: '文件召回', dataIndex: 'fileRetrievalCount', width: 120 },

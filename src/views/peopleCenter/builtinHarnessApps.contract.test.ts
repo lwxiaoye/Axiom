@@ -16,8 +16,8 @@ describe('系统内置 Harness 应用契约', () => {
     expect(routes).toContain("path: '/center/chat/campus'");
     expect(routes).toContain("props: { preset: 'campus_services' }");
     expect(routes).not.toMatch(/center\/chat\/(?:ppt|campus)[\s\S]{0,220}ignoreAuth/);
-    expect(market).toContain('openAgentRunWindow(targetUrl)');
-    expect(source('composables/useCenterChat.ts')).toContain('openAgentRunWindow(assistant.route)');
+    expect(market).toContain('openBuiltinAssistantPage(String(item.pcUrl))');
+    expect(source('composables/useCenterChat.ts')).toContain('openBuiltinAssistantPage(assistant.route)');
     expect(runPage).toContain('<RunSessionList');
     expect(runPage).toContain('<ChatPage v-else-if="appMeta" />');
     expect(runPage).toContain('<RunCompactHeader');
@@ -40,15 +40,15 @@ describe('系统内置 Harness 应用契约', () => {
     expect(drafts).toContain('const prefix = `new:${scope}:`');
     expect(runPage).toContain('fixedAssistantPreset: props.preset');
     expect(runPage).toContain('threadScope: props.preset');
-    expect(source('pages/MyFilesPage.vue')).toContain('openAgentRunWindow(');
+    expect(source('pages/MyFilesPage.vue')).toContain('openBuiltinAssistantPage(');
     expect(source('pages/MyFilesPage.vue')).toContain('thread=${encodeURIComponent(threadId)}');
   });
 
-  it('智能体广场把内置智能体与用户自建应用目录合并展示', () => {
+  it('智能体广场只展示 agent-api 上架的内置智能体，不再合并用户自建目录', () => {
     const market = source('composables/useAgentMarket.ts');
 
-    expect(market).toContain("url: '/app/appInfo/my/all/list'");
-    expect(market).toContain("myAppList({ column: 'createTime', order: 'desc' })");
+    expect(market).not.toContain('/app/appInfo/my/all/list');
+    expect(market).toContain('listBuiltinApps()');
     expect(market).toContain('decorateBuiltinCatalogApp(item)');
     expect(market).toContain('sortBuiltinCatalogApps(');
     expect(market).not.toContain('getBuiltinApps');

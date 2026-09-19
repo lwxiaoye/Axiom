@@ -13,7 +13,7 @@ import nProgress from 'nprogress';
 import projectSetting from '/@/settings/projectSetting';
 import { createParamMenuGuard } from './paramMenuGuard';
 import { setupBackTracking } from '/@/hooks/web/usePageBack';
-import { setRuntimeNavigator } from '/@/views/workflow/shared/runtimeRoute';
+import { setAssistantNavigator } from '/@/views/peopleCenter/utils/assistantRoute';
 
 // Don't change the order of creation
 export function setupRouterGuard(router: Router) {
@@ -27,8 +27,8 @@ export function setupRouterGuard(router: Router) {
   createParamMenuGuard(router); // must after createPermissionGuard (menu has been built.)
   createStateGuard(router);
   setupBackTracking(router);
-  // 同源的智能体运行页走站内跳转（详见 runtimeRoute.setRuntimeNavigator）
-  setRuntimeNavigator((path) => void router.push(path));
+  // 同源的内置助手页走站内跳转（详见 assistantRoute.setAssistantNavigator）
+  setAssistantNavigator((path) => void router.push(path));
 }
 
 /**

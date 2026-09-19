@@ -26,7 +26,6 @@ import {
   distributeSkill,
   revokeSkillDistribution,
 } from '../agentApi';
-import { getSkillMarketList } from '../../workflow/api/skill.api';
 
 const square = readFileSync(resolve(__dirname, 'SkillSquare.vue'), 'utf8');
 const selector = readFileSync(resolve(__dirname, 'SkillSelector.vue'), 'utf8');
@@ -126,12 +125,6 @@ describe('列表：GET /agent-api/skill/list?scope=', () => {
     expect(isPackageSkill({})).toBe(false);
   });
 
-  it('工作流编辑器的「系统技能」源不再打已下线的 /ai/skill/list，改走 agent-api scope=system', async () => {
-    defHttpGet.mockResolvedValueOnce([{ ...RECORD, source: 'system', builtin: true }]);
-    const list = await getSkillMarketList();
-    expect(defHttpGet.mock.calls[0][0]).toEqual({ url: '/agent-api/skill/list', params: { scope: 'system' } });
-    expect(list).toEqual([{ id: 'sk-1', recordId: 'sk-1', skillId: 'sk-1', name: '周报整理', description: '把零散记录整理成周报' }]);
-  });
 });
 
 describe('上传：POST /agent-api/skill/import（multipart file）与 POST /agent-api/skill/add（JSON）', () => {

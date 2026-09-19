@@ -14,7 +14,7 @@ jest.mock('../agentApi', () => ({
   createAgentChatCompletion: jest.fn().mockResolvedValue(''),
   cancelChatRun: jest.fn(),
 }));
-jest.mock('@/views/workflow/shared/runtimeRoute', () => ({ openAgentRunWindow: jest.fn() }), { virtual: true });
+jest.mock('../utils/assistantRoute', () => ({ openBuiltinAssistantPage: jest.fn() }));
 jest.mock('./chatDrafts', () => ({
   currentDraftUserId: jest.fn().mockResolvedValue('u'),
   listDraftRecords: jest.fn().mockResolvedValue([]),

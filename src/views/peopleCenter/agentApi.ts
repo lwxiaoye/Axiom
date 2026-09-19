@@ -17,7 +17,7 @@ export type AgentModelItem = {
   is_default?: boolean;
 };
 
-export type WorkflowModelOption = {
+export type MarketplaceModelOption = {
   label: string;
   value: string;
   available?: boolean;
@@ -1471,7 +1471,7 @@ export async function getAgentModels(): Promise<AgentModelItem[]> {
 }
 
 /** 智能体广场预检用模型列表：包含用户可用聊天模型和平台可用向量模型。 */
-export async function getMarketplaceModelOptions(): Promise<WorkflowModelOption[]> {
+export async function getMarketplaceModelOptions(): Promise<MarketplaceModelOption[]> {
   const data: any = await defHttp.get(
     { url: '/agent-api/marketplace/model/options' },
     { isTransformResponse: false, apiUrl: '', errorMessageMode: 'none' },
@@ -1481,7 +1481,7 @@ export async function getMarketplaceModelOptions(): Promise<WorkflowModelOption[
     label: String(item?.label || item?.value || '').trim(),
     value: String(item?.value || '').trim(),
     available: item?.available !== false,
-  })).filter((item: WorkflowModelOption) => item.value);
+  })).filter((item: MarketplaceModelOption) => item.value);
 }
 
 // ── Skills API ──────────────────────────────────────────────────────────────

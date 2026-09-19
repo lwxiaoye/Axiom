@@ -119,7 +119,7 @@ import { getBuiltinAssistantByPreset, type AssistantPreset } from '../builtinAss
 import { InterviewSessionKey, useInterviewSession } from '../builtinAssistants/interview/useInterviewSession';
 import { useCenterChat } from '../composables/useCenterChat';
 import type { CenterSectionKey } from '../composables/useAgentMarket';
-import { openAgentRunWindow } from '@/views/workflow/shared/runtimeRoute';
+import { openBuiltinAssistantPage } from '../utils/assistantRoute';
 import { usePageBack } from '/@/hooks/web/usePageBack';
 
 defineOptions({ name: 'BuiltinHarnessRunPage' });
@@ -229,7 +229,7 @@ function openCatalogApp(app: any) {
     showError('该应用未配置访问地址');
     return;
   }
-  const opened = openAgentRunWindow(target);
+  const opened = openBuiltinAssistantPage(target);
   if (!opened) showError('无法打开运行页，请允许浏览器弹出窗口');
 }
 

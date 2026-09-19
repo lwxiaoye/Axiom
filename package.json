@@ -20,7 +20,6 @@
     "reinstall": "rimraf pnpm-lock.yaml && rimraf yarn.lock && rimraf package.lock.json && rimraf node_modules && npm run install",
     "clean:lib": "rimraf node_modules",
     "gen:icon": "esno ./build/generate/icon/index.ts",
-    "test:workflow": "jest --config jest.config.workflow.cjs",
     "test:chat": "jest --config jest.config.chat.cjs",
     "test:skills": "jest --config jest.config.skills.cjs",
     "batch:prettier": "prettier --write  \"src/**/*.{js,json,tsx,css,less,scss,vue,html,md}\"",

@@ -117,7 +117,6 @@
 
 // 主题色 #111827 过深：Ant Design 生成的 primaryBg 是 #606366，选中态仍是深底深字。
 // 树节点已强制白字；标签 / 下拉 / 级联 / 时间面板 / 穿梭框同样处理。
-// 工作流节点里的 .wf-node-select-popup 已有浅底蓝字，不要覆盖。
 .ant-tag-processing,
 .ant-tag-checkable-checked {
   color: #fff !important;
@@ -125,7 +124,7 @@
   border-color: #111827 !important;
 }
 
-.ant-select-dropdown:not(.wf-node-select-popup):not(.run-scene-select-popup) {
+.ant-select-dropdown {
   .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
     color: #fff !important;
     background: #111827 !important;
@@ -137,8 +136,8 @@
   }
 }
 
-.ant-cascader-dropdown:not(.wf-node-select-popup),
-.ant-cascader-menus:not(.wf-node-select-popup) {
+.ant-cascader-dropdown,
+.ant-cascader-menus {
   .ant-cascader-menu-item-active:not(.ant-cascader-menu-item-disabled),
   .ant-cascader-menu-item-active:not(.ant-cascader-menu-item-disabled):hover {
     color: #fff !important;

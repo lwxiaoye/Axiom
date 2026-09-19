@@ -7,7 +7,7 @@ import MyFilesTab from '../tabs/MyFilesTab.vue';
 import { useCenterContext } from '../centerContext';
 import { getThreadSettings } from '../agentApi';
 import { getBuiltinAssistantByPreset } from '../builtinAssistants';
-import { openAgentRunWindow } from '@/views/workflow/shared/runtimeRoute';
+import { openBuiltinAssistantPage } from '../utils/assistantRoute';
 
 defineOptions({ name: 'CenterMyFilesPage' });
 
@@ -21,7 +21,7 @@ async function openThread(threadId: string) {
     const assistant = getBuiltinAssistantByPreset(settings.assistant_preset);
     if (assistant) {
       const separator = assistant.route.includes('?') ? '&' : '?';
-      const opened = openAgentRunWindow(
+      const opened = openBuiltinAssistantPage(
         `${assistant.route}${separator}thread=${encodeURIComponent(threadId)}`,
       );
       if (!opened) ctx.showError('无法打开对话页，请允许浏览器弹出窗口');

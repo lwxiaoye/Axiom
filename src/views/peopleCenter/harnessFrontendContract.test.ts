@@ -257,23 +257,20 @@ describe('主对话 Harness 前端契约', () => {
     expect(collaborationSource).toMatch(/\.task-collaboration-trigger\.task-active[\s\S]*?color: #4d525c;/);
   });
 
-  it('智能体广场创建人头像直接使用应用接口返回字段', () => {
-    expect(agentMarketSource).toContain("myAppList({ column: 'createTime', order: 'desc' })");
+  it('智能体广场只从 agent-api 取三个内置助手，创建人头像直接使用应用接口返回字段', () => {
+    expect(agentMarketSource).toContain('listBuiltinApps()');
+    expect(agentMarketSource).not.toContain('myAppList');
+    expect(agentMarketSource).not.toContain('queryMarketplaceWorkflowApps');
     expect(agentMarketSource).not.toContain('queryMarketplaceCreators');
     expect(agentMarketTabSource).toContain('item.createByAvatar');
   });
 
-  it('智能体目录 404 不向主对话弹出 axios 原文，也不在发送时反复重试', () => {
-    const myAppListStart = agentMarketSource.indexOf('const myAppList = ');
-    const myAppListSource = agentMarketSource.slice(myAppListStart, agentMarketSource.indexOf(';', myAppListStart));
-    expect(myAppListStart).toBeGreaterThan(-1);
-    expect(myAppListSource).toContain('errorMessageMode: \'none\'');
-    expect(myAppListSource).toContain('successMessageMode: \'none\'');
-    expect(agentMarketSource).toContain('catalogUnavailable');
+  it('智能体目录加载失败只在广场页提示，主对话里不弹错也不在发送时反复重试', () => {
     expect(agentMarketSource).toContain('catalogLoaded');
     expect(agentMarketSource).toContain("options.activeSection.value !== 'agent'");
     expect(agentMarketSource).toContain('智能体广场暂时无法加载，请稍后重试');
-    expect(agentMarketSource).not.toContain('if (appResult.status === \'rejected\') throw appResult.reason');
+    expect(agentMarketSource).toContain("console.warn('load builtin assistants failed', builtinResult.reason)");
+    expect(agentMarketSource).not.toContain('throw builtinResult.reason');
   });
 
   it('任务计划与委派进入终态后撤掉顶栏动效', () => {

@@ -23,7 +23,7 @@ import { autoUseQiankunMicro } from "/@/qiankun/micro/qiankunMicro";
 import { useAppStoreWithOut } from "@/store/modules/app";
 
 import antd from 'ant-design-vue';
-// SLIM-BUILD: 以下四个库仅被表单设计器 / 移动端设计器使用（views/workflow 等），
+// SLIM-BUILD: 以下四个库仅被表单设计器 / 移动端设计器使用，
 // agent 使用界面完全不依赖。它们是急加载的完整 UI 库，占构建体积的大头。
 // 需要恢复表单设计器时，取消下面四行注释，并恢复 bootstrap() 中对应的 app.use。
 // import FcDesigner from '@form-create/antd-designer';

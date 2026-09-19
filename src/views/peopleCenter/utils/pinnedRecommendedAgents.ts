@@ -1,20 +1,11 @@
 import type { AgentItem } from '../agentApi';
 import { getBuiltinAssistantFromMarketplace, listBuiltinAssistants } from '../builtinAssistants';
 
-const MARKET_PINNED_NAMES = ['智能填表助手'] as const;
-
 /** 主对话欢迎页按此顺序挑选；系统应用仅在服务端授权后才可入选。 */
-export const PINNED_RECOMMENDED_AGENT_NAMES = [
-  ...listBuiltinAssistants().map((assistant) => assistant.name),
-  ...MARKET_PINNED_NAMES,
-] as const;
+export const PINNED_RECOMMENDED_AGENT_NAMES = listBuiltinAssistants().map((assistant) => assistant.name);
 
 function displayName(item: any): string {
   return String(item?.appName || item?.name || '').trim();
-}
-
-function findByName(list: any[], name: string) {
-  return list.find((item) => displayName(item) === name);
 }
 
 function toMarketAgent(item: any): AgentItem {
@@ -29,7 +20,7 @@ function toMarketAgent(item: any): AgentItem {
   };
 }
 
-/** 主对话欢迎页的固定推荐位：只从管理员过滤后的广场列表里挑，不再回退到用户自建的工作流应用。 */
+/** 主对话欢迎页的固定推荐位：只从管理员过滤后的广场列表里挑内置助手，前端不补卡。 */
 export function pickPinnedRecommendedAgents(marketApps: any[] = []): AgentItem[] {
   const picked: AgentItem[] = [];
   // The administrator-filtered marketplace list is the only visibility source for these pages.
@@ -40,12 +31,6 @@ export function pickPinnedRecommendedAgents(marketApps: any[] = []): AgentItem[]
       (item) => getBuiltinAssistantFromMarketplace(item)?.preset === assistant.preset,
     );
     if (market?.pcUrl) picked.push(toMarketAgent(market));
-  }
-  for (const name of MARKET_PINNED_NAMES) {
-    const market = findByName(marketApps, name);
-    if (!market) continue;
-    const agent = toMarketAgent(market);
-    if (agent.id) picked.push(agent);
   }
   return picked;
 }

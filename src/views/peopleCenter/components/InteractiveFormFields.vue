@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-// 交互节点 formInput 的共享表单渲染：字段类型全集与工作流编辑器的「表单输入」节点对齐。
+// 交互节点 formInput 的共享表单渲染：字段类型全集与后端 input.required 的 formInput 协议对齐。
 // 「我的智能体」运行窗与主对话 HITL 卡共用本组件——两边渲染同一份 inputForm，杜绝
 // 字段类型支持漂移（主对话曾是纯文本框阉割版，下拉/文件字段一冒泡到主对话就退化）。
 import { computed, reactive, ref, watch } from 'vue';

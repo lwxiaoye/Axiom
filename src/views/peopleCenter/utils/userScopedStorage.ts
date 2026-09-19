@@ -3,7 +3,7 @@
  *
  * 为什么：校园场景（机房/图书馆公用机）同一浏览器先后登录不同账号。服务端隔离已验证
  * 没问题（读别人会话 → 404），但业务代码自己写在 localStorage / sessionStorage 里的
- * 「新对话默认模型」「面试提交冲突提示」「子智能体运行变量」「工作流本地备份」等 key
+ * 「新对话默认模型」「面试提交冲突提示」以及已下线功能遗留的「子智能体运行变量」「工作流本地备份」等 key
  * 原先不带用户 id、退出登录也不清——B 登录后会原样读到 A 的。
  *
  * 规则：
@@ -51,6 +51,8 @@ export function userScopedStorageKey(base: string, userId: string = currentStora
 /**
  * 历史上业务代码直接写在根命名空间的 key（不含用户 id）。
  * 不做迁移：这些值本来就分不清属于谁，读到就删，一次性清理。
+ * agent-run:variables: / wf-draft-backup: 是已下线的子智能体运行页与工作流编排留下的，
+ * 只作清理目标保留。
  */
 export const LEGACY_UNSCOPED_KEYS: readonly string[] = ['agent-active-model'];
 export const LEGACY_UNSCOPED_KEY_PREFIXES: readonly string[] = [

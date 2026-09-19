@@ -299,7 +299,7 @@ export const useUserStore = defineStore({
 
       // 客户端会话隔离（2026-09-19）：在 userInfo 被置空之前取 id，把这个账号写在
       // localStorage / sessionStorage / IndexedDB 里的业务数据（默认模型、面试冲突提示、
-      // 子智能体运行变量、工作流本地备份、输入草稿）一并清掉。token 失效走的也是这里。
+      // 输入草稿，以及已下线功能遗留的子智能体运行变量、工作流本地备份）一并清掉。token 失效走的也是这里。
       clearUserScopedStorage(resolveStorageUserId(this.getUserInfo));
 
       this.setToken('');

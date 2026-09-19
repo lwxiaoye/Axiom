@@ -24,7 +24,7 @@ describe('演示文稿助手前端契约', () => {
     const enterBlock = chatSource.match(
       /function enterBuiltinAssistant\([\s\S]*?\n  \}/,
     )?.[0] || '';
-    expect(enterBlock).toContain('openAgentRunWindow(assistant.route)');
+    expect(enterBlock).toContain('openBuiltinAssistantPage(assistant.route)');
     expect(enterBlock).not.toContain('resetChat()');
     expect(enterBlock).not.toContain('assistantPreset.value = preset');
     expect(enterBlock).not.toContain('createAgentChatCompletion');
@@ -38,9 +38,9 @@ describe('演示文稿助手前端契约', () => {
   it('广场直接渲染管理端授权的应用记录，点击统一走新页跳转', () => {
     expect(marketPageSource).toContain('@open-agent="openAgent"');
     expect(marketPageSource).not.toContain('enterPresentationAssistant');
-    expect(marketComposableSource).toContain("myAppList({ column: 'createTime', order: 'desc' })");
-    expect(marketComposableSource).not.toContain('getBuiltinApps');
-    expect(marketComposableSource).toContain('openAgentRunWindow(targetUrl)');
+    expect(marketComposableSource).toContain('listBuiltinApps()');
+    expect(marketComposableSource).not.toContain('myAppList');
+    expect(marketComposableSource).toContain('openBuiltinAssistantPage(String(item.pcUrl))');
     expect(apiSource).toContain('assistant_preset: params.assistant_preset || undefined');
     expect(apiSource).toContain('isAssistantPreset(');
     expect(marketTabSource).toContain('{{ getMarketplaceCreatorName(item) }}');

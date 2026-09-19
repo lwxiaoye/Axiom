@@ -36,7 +36,7 @@ describe('校园百事通前端契约', () => {
   it('点击入口在新页打开独立运行页，不替换主对话', () => {
     expect(chatSource).toContain('function enterCampusAssistant()');
     expect(chatSource).toContain('return enterBuiltinAssistant(CAMPUS_ASSISTANT_PRESET)');
-    expect(chatSource).toContain('openAgentRunWindow(assistant.route)');
+    expect(chatSource).toContain('openBuiltinAssistantPage(assistant.route)');
     expect(campusModuleSource).toContain("route: '/center/chat/campus'");
     expect(routeSource).toContain("path: '/center/chat/campus'");
     expect(marketPageSource).toContain('@open-agent="openAgent"');

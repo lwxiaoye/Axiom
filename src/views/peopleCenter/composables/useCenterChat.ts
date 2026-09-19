@@ -1,6 +1,6 @@
 ﻿import { computed, getCurrentScope, onScopeDispose, ref, watch } from 'vue';
 import { addChatQueueItem, cancelChatRun, confirmChatQueue, createAgentChatCompletion, decideGatewayApproval, deleteChatQueueItem, deleteThread, getChatQueue, getRunByClientRequest, getRunState, getSkills, getThreadActiveRun, getThreadMessages, getThreadSettings, getThreads, submitChatRunInput, pinThread, popChatQueue, renameThread, reorderChatQueue, resumeChatTurn, subscribeChatRun, submitMessageFeedback, updateChatQueueItem, updateThreadModel, uploadChatFile, uploadWorkspaceFile, type ActiveRun, type AssistantPreset, type ChatQueueAttachment, type ChatQueueItem, type KnowledgeSelection, type SkillItem, type TaskPlanEvent, type ThreadItem, type ThreadReference, type ThreadScope, type ToolStepEvent, type UploadedFile } from '../agentApi';
-import { openAgentRunWindow } from '@/views/workflow/shared/runtimeRoute';
+import { openBuiltinAssistantPage } from '../utils/assistantRoute';
 import type { ChatMessage } from '../components/MessageList.vue';
 import type { CenterSectionKey } from './useAgentMarket';
 import type { UserFileSelection, WorkFolderSelection } from '../myfiles.api';
@@ -5635,7 +5635,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
   function enterBuiltinAssistant(preset: AssistantPreset) {
     const assistant = getBuiltinAssistantByPreset(preset);
     if (!assistant || typeof window === 'undefined') return false;
-    const opened = openAgentRunWindow(assistant.route);
+    const opened = openBuiltinAssistantPage(assistant.route);
     return Boolean(opened);
   }
 
