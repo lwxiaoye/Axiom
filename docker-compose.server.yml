@@ -33,8 +33,9 @@ x-server-agent-env: &server-agent-env
   WEB_SEARCH_ENABLED: "true"
   WEB_SEARCH_SEARXNG_URL: http://searxng:8080
   # 缺省引擎：这台 VPS 上 bing 的页面解析在当前 SearXNG 镜像里已失效（parsing error），
-  # google/baidu 对该 IP 出验证码；duckduckgo 与 brave 实测可用。管理页可改，改后以页面为准。
-  WEB_SEARCH_SEARXNG_ENGINES: ${AXIOM_SEARXNG_ENGINES:-duckduckgo,brave}
+  # duckduckgo/qwant/baidu 对该 IP 出验证码；2026-09-19 逐个实测 brave（19 条）、google（10 条）、
+  # 360search（3–7 条）稳定有结果。只是缺省值，管理页保存过的以页面为准。
+  WEB_SEARCH_SEARXNG_ENGINES: ${AXIOM_SEARXNG_ENGINES:-brave,google,360search}
   # 图片引擎不能从上面推导：duckduckgo images 对本机 IP 拒绝访问，brave 的图片引擎叫 brave.images
   # 且被限流；bing images 实测可用（做 PPT 配图全靠它）。同样可在管理页改。
   WEB_SEARCH_SEARXNG_IMAGE_ENGINES: ${AXIOM_SEARXNG_IMAGE_ENGINES:-bing images}
