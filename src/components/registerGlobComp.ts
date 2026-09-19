@@ -1,8 +1,8 @@
 import type { App } from 'vue';
 import { Icon } from './Icon';
 import AIcon from '/@/components/jeecg/AIcon.vue';
-// SLIM-BUILD: Tinymce 原为急加载（注释称仪表盘依赖），实测 views/dashboard
-// 并未引用。改回异步注册，需要时按需拉取。
+// SLIM-BUILD: Tinymce 原为急加载（注释称仪表盘依赖），实测当时的 views/dashboard
+// 并未引用（该目录现已随 Java 下线删除）。改回异步注册，需要时按需拉取。
 import { createAsyncComponent } from '/@/utils/factory/createAsyncComponent';
 
 import { Button, JUploadButton } from './Button';
