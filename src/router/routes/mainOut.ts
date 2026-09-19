@@ -94,22 +94,6 @@ export const mainOutRoutes: AppRouteModule[] = [
       title: 'AI聚合服务',
     },
   },
-  {
-    path: '/workflow/editor',
-    name: 'WorkflowEditor',
-    component: () => import('/@/views/workflow/editor/index.vue'),
-    meta: {
-      title: '工作流编排',
-    },
-  },
-  {
-    path: '/workflow/agent',
-    name: 'WorkflowAgentConfig',
-    component: () => import('/@/views/workflow/agent/index.vue'),
-    meta: {
-      title: '对话Agent配置',
-    },
-  },
 ];
 
 export const mainOutRouteNames = mainOutRoutes.map((item) => item.name);

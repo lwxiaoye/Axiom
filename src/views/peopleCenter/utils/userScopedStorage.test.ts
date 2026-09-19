@@ -215,7 +215,6 @@ describe('wiring contract', () => {
       'views/peopleCenter/composables/useCenterChat.ts',
       'views/peopleCenter/components/ModelSelector.vue',
       'views/peopleCenter/builtinAssistants/interview/useInterviewSession.ts',
-      'views/workflow/editor/index.vue',
     ]) {
       const code = read(rel);
       expect(code).toMatch(/from '[./@a-zA-Z]*utils\/userScopedStorage'/);
@@ -226,7 +225,6 @@ describe('wiring contract', () => {
     for (const rel of [
       'views/peopleCenter/components/ModelSelector.vue',
       'views/peopleCenter/builtinAssistants/interview/useInterviewSession.ts',
-      'views/workflow/editor/index.vue',
     ]) {
       expect(read(rel)).not.toMatch(/localStorage\.(get|set|remove)Item\(/);
     }
