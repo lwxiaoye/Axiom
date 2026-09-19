@@ -710,7 +710,18 @@ async def _cancel_background_tasks(timeout: float = 5.0) -> None:
     退不出——热重载表现为「Finished server process」之后再无下文，docker stop 则等到
     SIGKILL。这里先自己取消一遍，超时的任务连协程名和挂起位置一起点名进日志。"""
     me = asyncio.current_task()
-    pending = [t for t in asyncio.all_tasks() if t is not me and not t.done()]
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+
+    def _ours(task: "asyncio.Task") -> bool:
+        # 只动本项目自己起的任务（协程定义在 app/ 下）；uvicorn 的 serve / lifespan
+        # 主任务正等着我们返回，取消它们等于把关停流程自己掐断。
+        coro = task.get_coro()
+        code = getattr(coro, "cr_code", None) or getattr(coro, "gi_code", None)
+        filename = getattr(code, "co_filename", "") or ""
+        return filename.startswith(app_dir)
+
+    pending = [t for t in asyncio.all_tasks()
+               if t is not me and not t.done() and _ours(t)]
     if not pending:
         return
     for task in pending:
