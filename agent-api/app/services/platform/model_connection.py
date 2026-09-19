@@ -349,6 +349,15 @@ async def migrate_legacy_to_platform() -> bool:
     global _migration_checked
     rows = await _list_raw_by_prefix(PLATFORM_KEY)
     if PLATFORM_KEY in rows:
+        current = rows[PLATFORM_KEY] if isinstance(rows[PLATFORM_KEY], dict) else {}
+        # 平台行本身还是名册之前的单连接形状（{base_url, model, api_key_cipher, enabled}）：
+        # _get_raw 只保留 ROSTER_DEFAULTS 里的键，直接读会把它读成空名册——上线当天
+        # 全站「平台尚未配置对话模型」就是这么来的。这里原地收成名册再写回。
+        if "entries" not in current and _usable(current):
+            await _save_raw(PLATFORM_KEY, coerce_roster(current))
+            _migration_checked = True
+            logger.info("对话模型平台配置已从单连接形状原地收成名册")
+            return True
         _migration_checked = True
         return False
     legacy = pick_legacy_row(rows)
