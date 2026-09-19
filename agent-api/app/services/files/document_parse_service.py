@@ -4,7 +4,11 @@
 走自建 OCR 端点、没填端点则走视觉模型，见 _ocr_pdf_scanned）、docx（python-docx）、pptx（python-pptx）、
 图片（走 OCR 策略）。Word/PDF/PPT 中夹带的照片、截图和图表会额外走视觉识别。
 OCR 策略读 `agent_platform_config.ocr`：custom_endpoint（自建端点）或 multimodal_model
-（经 New API 调用多模态模型）。
+（默认；视觉模型自动取平台对话模型连接，见 _resolve_vision_runtime）。
+
+主对话里的图片附件**不走这里**：对话模型是多模态的，像素以 image 内容块直接进模型
+（2026-09-19 用户拍板「OCR 不需要，我们用的是多模态模型」）。这里只服务知识库/文档解析/
+纯文本模型这些确实需要把图变成文字的路径。
 """
 import asyncio
 import base64
@@ -190,6 +194,47 @@ DEFAULT_VISION_PROMPT = (
     "力求准确详尽，使他人仅凭你的描述即可回答关于此图的问题；只输出描述本身，不要寒暄。"
 )
 
+
+async def _resolve_vision_runtime(conf: dict, newapi_key: str) -> Optional[dict]:
+    """multimodal_model 策略下视觉调用用哪份 (base_url, api_key, model)。
+
+    2026-09-19 用户拍板「OCR 不需要，我们用的是多模态模型」：扫描件 PDF / 文档内嵌图这些
+    进知识库、文档解析的路径仍要把图变成文字，但**视觉模型就是平台对话模型**，不该再让
+    管理员在「图片识别」里另填一套地址、密钥、模型名（该管理页 tab 已去掉）。
+
+    优先级：
+    1. ocr 里显式填齐的独立视觉端点（visionBaseUrl + visionApiKey + model 三者齐全）——
+       管理员经 API 明确配置的仍优先；
+    2. 平台对话模型连接（model_connection 平台级 runtime：管理员在「对话模型」里配的那份）；
+    3. 旧路径兜底：当前请求绑定的网关 + 调用方带来的 key + ocr 里的模型名（三者都要有）。
+    都拿不到返回 None，调用方给出明确的失败原因。
+    """
+    model = str(conf.get("model") or "").strip()
+    vision_base = str(conf.get("visionBaseUrl") or "").strip().rstrip("/")
+    vision_key = str(conf.get("visionApiKey") or "").strip()
+    if model and vision_base and vision_key:
+        return {"base_url": vision_base, "api_key": vision_key, "model": model, "source": "ocr_config"}
+    try:
+        from app.services.platform import model_connection
+        platform = await model_connection.runtime_platform()
+    except Exception:  # noqa: BLE001
+        logger.info("读取平台对话模型连接失败，视觉识别退回旧网关路径", exc_info=True)
+        platform = None
+    if platform and platform.get("base_url") and platform.get("api_key") and platform.get("model"):
+        return {
+            "base_url": str(platform["base_url"]).rstrip("/"),
+            "api_key": str(platform["api_key"]),
+            "model": str(platform["model"]),
+            "source": "platform_model",
+        }
+    if model and newapi_key:
+        return {
+            "base_url": get_model_base_url().rstrip("/"), "api_key": newapi_key,
+            "model": model, "source": "gateway",
+        }
+    return None
+
+
 _TEXT_EXTS = {
     "txt", "md", "markdown", "csv", "tsv", "json", "log", "yaml", "yml", "xml", "html", "htm",
     "py", "js", "ts", "tsx", "jsx", "java", "go", "rs", "c", "cpp", "h", "sh", "sql", "ini", "conf",
@@ -284,11 +329,11 @@ async def _ocr_pdf_scanned(
     """
     conf = await cfg.get_ocr_config()
     url = str(conf.get("endpointUrl") or "").strip()
+    # 视觉模型名不再是必填：ocr 里没填时由 _resolve_vision_runtime 回落到平台对话模型。
     use_vision = (
         not url
         and bool(conf.get("enabled"))
         and conf.get("strategy") == "multimodal_model"
-        and bool(str(conf.get("model") or "").strip())
     )
     if not url and not use_vision:
         return "（扫描版 PDF 无文字层，且未配置 OCR 端点，无法提取文字）", "failed", "扫描版 PDF 未配置 OCR 端点"
@@ -465,17 +510,13 @@ async def _ocr_image(
             return f"（OCR 识别失败：{str(e)[:120]}）", "failed", "OCR 识别失败"
 
     if strategy == "multimodal_model":
-        model = str(conf.get("model") or "").strip()
-        if not model:
-            return "（多模态 OCR 未配置视觉模型名）", "failed", "未配置视觉模型"
-        # 端点选择：填了独立 visionBaseUrl → 直连该视觉模型端点；否则回退平台 New API 网关。
-        vision_base = str(conf.get("visionBaseUrl") or "").strip().rstrip("/")
-        if vision_base:
-            base_url, api_key = vision_base, str(conf.get("visionApiKey") or "").strip()
-        else:
-            base_url, api_key = get_model_base_url().rstrip("/"), newapi_key
-        if not api_key:
-            return "（多模态 OCR 缺少调用凭证：请填视觉模型 API Key，或确保平台网关可用）", "failed", "缺少视觉模型调用凭证"
+        runtime = await _resolve_vision_runtime(conf, newapi_key)
+        if runtime is None:
+            return (
+                "（视觉识别不可用：平台未配置对话模型，也没有独立的视觉模型端点）",
+                "failed", "平台未配置对话模型",
+            )
+        base_url, api_key, model = runtime["base_url"], runtime["api_key"], runtime["model"]
 
         prompt = str(conf.get("visionPrompt") or "").strip() or DEFAULT_VISION_PROMPT
         mime = _IMAGE_MIME.get(ext, "image/png")
@@ -560,16 +601,10 @@ async def _describe_image(
             logger.warning("内嵌图片自建 OCR 失败: %s", e)
             return ""
     if strategy == "multimodal_model":
-        model = str(conf.get("model") or "").strip()
-        if not model:
+        runtime = await _resolve_vision_runtime(conf, newapi_key)
+        if runtime is None:
             return ""
-        vision_base = str(conf.get("visionBaseUrl") or "").strip().rstrip("/")
-        if vision_base:
-            base_url, api_key = vision_base, str(conf.get("visionApiKey") or "").strip()
-        else:
-            base_url, api_key = get_model_base_url().rstrip("/"), newapi_key
-        if not api_key:
-            return ""
+        base_url, api_key, model = runtime["base_url"], runtime["api_key"], runtime["model"]
         prompt = str(conf.get("visionPrompt") or "").strip() or DEFAULT_VISION_PROMPT
         mime = _IMAGE_MIME.get(ext, "image/png")
         data_url = f"data:{mime};base64,{base64.b64encode(content).decode()}"

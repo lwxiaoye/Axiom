@@ -1611,11 +1611,53 @@ def _attachment_as_dict(att: object) -> dict:
     }
 
 
+# 原生多模态直传的单张图片上限（2026-09-19）：超过先按长边 1600 缩放再直传。
+# 手机原图动辄 8~12MB，base64 后再膨胀 1/3，整段塞进一条 user message 会把一次请求撑到
+# 几十 MB——网关超时、上下文预算全被一张图吃掉。缩放后仍超限的按「图片不可读取」处理，
+# 让用户压缩后重传，而不是静默丢图后让模型对着空消息作答。
+_NATIVE_VISION_MAX_BYTES = 4 * 1024 * 1024
+_NATIVE_VISION_MAX_EDGE = 1600
+
+
+def _native_vision_payload(data: bytes, mime: str) -> tuple[bytes, str]:
+    """把要直传给多模态模型的图片压到上限以内；未超限原样返回（不重编码、不丢分辨率）。"""
+    if len(data) <= _NATIVE_VISION_MAX_BYTES:
+        return data, mime
+    from io import BytesIO
+    from PIL import Image  # type: ignore
+
+    img = Image.open(BytesIO(data))
+    img.load()
+    width, height = img.size
+    edge = max(width, height) or 1
+    if edge > _NATIVE_VISION_MAX_EDGE:
+        scale = _NATIVE_VISION_MAX_EDGE / edge
+        img = img.resize((max(1, int(width * scale)), max(1, int(height * scale))))
+    has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    if has_alpha:
+        # 透明图先试 PNG（保留透明），仍超限再退 JPEG（白底）。
+        buf = BytesIO()
+        img.convert("RGBA").save(buf, format="PNG", optimize=True)
+        if len(buf.getvalue()) <= _NATIVE_VISION_MAX_BYTES:
+            return buf.getvalue(), "image/png"
+        background = Image.new("RGB", img.size, (255, 255, 255))
+        background.paste(img.convert("RGBA"), mask=img.convert("RGBA").split()[-1])
+        img = background
+    buf = BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=85, optimize=True)
+    payload = buf.getvalue()
+    if len(payload) > _NATIVE_VISION_MAX_BYTES:
+        raise UserFileError("图片过大（缩放后仍超过 4MB），请压缩后重新上传", status_code=413)
+    return payload, "image/jpeg"
+
+
 async def restore_vision_image_attachments(user_id: str, attachments: list | None) -> list:
     """Rehydrate durable image references only at the native-vision boundary.
 
-    Keep the original bytes and resolution.  Pure-text models use the existing OCR path instead,
-    so this storage read never adds a second vision call or moves it before the public preamble.
+    Keep the original bytes and resolution unless the image exceeds ``_NATIVE_VISION_MAX_BYTES``
+    (then it is downscaled by ``_native_vision_payload``).  Pure-text models use the existing OCR
+    path instead, so this storage read never adds a second vision call or moves it before the
+    public preamble.
     """
     restored: list = []
     for att in attachments or []:
@@ -1635,7 +1677,8 @@ async def restore_vision_image_attachments(user_id: str, attachments: list | Non
             expected_sha256 = str(row.get("sha256") or "").strip().lower()
             if expected_sha256 and hashlib.sha256(data).hexdigest() != expected_sha256:
                 raise UserFileError("图片内容已变更，请重新上传", status_code=409)
-            row["image_url"] = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+            payload, mime = _native_vision_payload(data, mime)
+            row["image_url"] = f"data:{mime};base64,{base64.b64encode(payload).decode('ascii')}"
         except Exception:  # noqa: BLE001
             logger.info("native-vision image restore failed file=%s", file_id, exc_info=True)
             row.update({
@@ -1710,8 +1753,13 @@ async def build_chat_attachments(
     *,
     newapi_key: str = "",
     audit_context: Optional[dict] = None,
+    ocr_visual: bool = True,
 ) -> list[dict]:
     """把 composer 选中的「我的文件」解析为**可操作**的对话上下文块（附件形态：filename/kind/text/image_url/file_id）。
+
+    ocr_visual：图片是否先经视觉模型描述成文字。当轮对话模型本身是多模态时（worker 按
+    model_supports_vision 传 False），像素会以 image 内容块直传，这里不再多付一次视觉调用——
+    2026-09-19 用户拍板「OCR 不需要，我们用的是多模态模型」。
 
     关键：每个块都明确告诉模型「用户选中了这个文件、沙箱路径是什么、怎么操作」——
     - 纯文本：给内容预览 + 路径版 read_file / edit_file / write_file；
@@ -1804,19 +1852,20 @@ async def build_chat_attachments(
         elif is_image:
             ocr = ""
             image_status, image_note = "ok", None
-            try:
-                parsed = await _parse_chat_attachment(
-                    name,
-                    data,
-                    newapi_key=newapi_key,
-                    audit_context=audit_context,
-                )
-                ocr = str(parsed.get("text") or "").strip()
-                image_status = str(parsed.get("status") or "ok")
-                image_note = parsed.get("note")
-            except Exception:  # noqa: BLE001
-                ocr = ""
-                image_status, image_note = "failed", "图片识别失败"
+            if ocr_visual:
+                try:
+                    parsed = await _parse_chat_attachment(
+                        name,
+                        data,
+                        newapi_key=newapi_key,
+                        audit_context=audit_context,
+                    )
+                    ocr = str(parsed.get("text") or "").strip()
+                    image_status = str(parsed.get("status") or "ok")
+                    image_note = parsed.get("note")
+                except Exception:  # noqa: BLE001
+                    ocr = ""
+                    image_status, image_note = "failed", "图片识别失败"
             # Harness: perception must match execution. Empty image_url forces OCR-only.
             image_url = _build_vision_data_url(name, data, row.mime or "")
             vision_hint = (

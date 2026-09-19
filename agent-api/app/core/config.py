@@ -124,8 +124,14 @@ class Settings(BaseSettings):
     VISION_MODEL_KEYWORDS: str = (
         "vl,vision,gpt-4o,gpt-4.1,o4-mini,claude-3,claude-4,claude-opus,claude-sonnet,"
         "claude-haiku,gemini,internvl,llava,minicpm-v,glm-4v,glm-4.1v,glm-4.6v,step-1v,step-3,"
-        "yi-vision,pixtral,llama-3.2-vision,molmo,qvq,doubao-vision,ernie-4.5-vl,kimi-vl"
+        "yi-vision,pixtral,llama-3.2-vision,molmo,qvq,doubao-vision,ernie-4.5-vl,kimi-vl,grok"
     )
+    # 2026-09-19 用户拍板「OCR 不需要，我们用的是多模态模型」：管理员在「管理配置 → 对话模型」
+    # 里配的那份连接（以及用户个人覆盖）所指的模型一律视为多模态——图片以 image 内容块直接进
+    # 模型，不再经「视觉模型描述成文字 → 再喂文本模型」中转。关键字表跟不上模型命名
+    # （grok / gpt-5 / qwen3 都不在表里），只靠它会让平台模型静默退回 OCR 中转链路。
+    # 若将来平台模型换成纯文本模型，把这个开关置 False 即可恢复关键字判定。
+    MODEL_CONNECTION_MULTIMODAL: bool = True
 
     # 上传附件解析后正文的字符上限：超出即截断并在附件卡标「部分读取·内容超长已截断」。
     # 20000 对一份学习/需求长文太小（正文尾部读不到）；现代模型上下文 128K+，放宽到 60000

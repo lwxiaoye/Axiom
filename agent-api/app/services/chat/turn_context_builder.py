@@ -1241,10 +1241,26 @@ async def _resolve_kb_tenant(session, kb_ids: List[str]) -> Optional[str]:
 
 
 def model_supports_vision(model: Optional[str]) -> bool:
-    """模型是否支持图文多模态：命中 settings.VISION_MODEL_KEYWORDS 任一关键字即视为支持（可配关键字近似）。"""
-    m = (model or "").lower()
+    """模型是否支持图文多模态。两条判据任一命中即视为支持：
+
+    1. 模型 id 命中 settings.VISION_MODEL_KEYWORDS 任一关键字（可配关键字近似）；
+    2. 它就是当前请求绑定的那份「对话模型连接」（平台默认或用户个人覆盖，见
+       key_service.resolve_chat_credential → bind_model_connection）所指的模型，且
+       settings.MODEL_CONNECTION_MULTIMODAL 为真。2026-09-19 用户拍板「OCR 不需要，我们用的是
+       多模态模型」：平台对话模型本身就能看图，图片应直接进模型；此前 grok-4.6 不在关键字表里，
+       带图提问被静默送进 OCR 中转 + 工作区/工具链路，300 秒没有一个字的回答。
+    """
+    m = (model or "").strip().lower()
+    if not m:
+        return False
     keywords = [kw.strip().lower() for kw in (settings.VISION_MODEL_KEYWORDS or "").split(",") if kw.strip()]
-    return any(kw in m for kw in keywords)
+    if any(kw in m for kw in keywords):
+        return True
+    if not settings.MODEL_CONNECTION_MULTIMODAL:
+        return False
+    from app.core.model_endpoint import get_model_connection
+    connection = get_model_connection() or {}
+    return str(connection.get("model") or "").strip().lower() == m
 
 
 def _att_field(att: Any, key: str) -> str:

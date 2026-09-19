@@ -143,14 +143,18 @@ def _normalize_provider_pool(data: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 OCR_DEFAULTS: Dict[str, Any] = {
-    "enabled": False,
-    "strategy": "none",            # none | custom_endpoint | multimodal_model
+    # 2026-09-19 用户拍板「OCR 不需要，我们用的是多模态模型」：缺省即启用 multimodal_model，
+    # 视觉模型自动取平台对话模型连接（document_parse_service._resolve_vision_runtime），
+    # 管理页的「图片识别」tab 已去掉；从未保存过 ocr 行的部署不需要任何配置就能解析扫描件。
+    # 显式关闭（enabled=False / strategy=none）与自建端点（custom_endpoint）仍可经 API 配。
+    "enabled": True,
+    "strategy": "multimodal_model",  # none | custom_endpoint | multimodal_model
     # ---- custom_endpoint 策略 ----
     "endpointUrl": "",
     "apiKey": "",
     # ---- multimodal_model 策略（视觉模型看图→回传内容给主对话模型）----
+    # 三者都填才直连该独立端点；有任一缺省则整体回落到平台对话模型（不做半套拼接）。
     "model": "",                   # 视觉模型名，如 qwen-vl-max / glm-4v / gpt-4o
-    # 独立 OpenAI 兼容端点：三者都填则直连该端点；visionBaseUrl 留空则回退平台 New API 网关。
     "visionBaseUrl": "",           # 如 https://dashscope.aliyuncs.com/compatible-mode/v1
     "visionApiKey": "",
     # 可选：自定义视觉提示词。留空用默认（完整描述图片内容+转录文字，便于主模型据此作答）。

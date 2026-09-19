@@ -10,7 +10,7 @@ import pytest
 from app.services.agent_harness import artifact_checkpoint, orchestrator, run_store, workspace_service
 from app.services.agent_harness import goal_contract
 from app.services.chat import turn_context_builder
-from app.services.files import document_parse_service, user_file_service
+from app.services.files import document_parse_service, user_file_service, work_folders
 from app.services.skills import ppt_style_reference
 
 
@@ -49,6 +49,9 @@ async def _prepare_through_real_entry(
     monkeypatch.setattr(ppt_style_reference, "analyze_ppt_style_reference", AsyncMock(return_value=""))
     monkeypatch.setattr(workspace_service, "ingest_user_files_into_workspace", AsyncMock())
     monkeypatch.setattr(artifact_checkpoint, "hydrate_ppt_staging", AsyncMock(return_value=(None, None)))
+    # 工作文件夹解析要查库：不打桩的话这条夹具依赖真实数据库，且多条 asyncio 用例共用连接池会
+    # 报「attached to a different loop」——夹具的目的只是把图片送到模型输入边界。
+    monkeypatch.setattr(work_folders, "folder_for_thread", AsyncMock(return_value=None))
 
     read_bytes = AsyncMock(return_value=(SimpleNamespace(id="owned-image", filename="uploaded.png", mime="image/png"), raw))
     if not file_available:

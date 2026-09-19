@@ -163,7 +163,9 @@ async def test_ocr(
             return {"status": "failed", "message": "未填写视觉模型名称"}
         vision_base = str(body.get("visionBaseUrl") or "").strip().rstrip("/")
         if not vision_base:
-            return {"status": "info", "message": "未填请求地址：运行时经平台网关用当前用户的 Key 调用该模型。填上地址和 API Key 才能在这里实测。"}
+            # 地址/密钥/模型没填齐时，运行时整体回落到平台对话模型连接
+            #（document_parse_service._resolve_vision_runtime），这里没法替管理员实测。
+            return {"status": "info", "message": "未填请求地址：运行时自动使用「对话模型」里配置的平台模型识别图片。填上地址、API Key 和模型名才会直连独立视觉端点，并可在这里实测。"}
         # 填了独立端点：真发一张测试图，验证 baseUrl + Key + 模型可用
         api_key = await cfg.resolve_secret(cfg.OCR_KEY, "visionApiKey", body.get("visionApiKey", ""))
         if not api_key:
