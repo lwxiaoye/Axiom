@@ -2526,7 +2526,7 @@ class HarnessOrchestrator:
             # 硬上限须先扣掉本轮 system_prompt 预估（P0-2）：否则历史合法占满硬上限之上还要
             # 再叠加技能全文/目录/记忆等开销，总量很容易顶穿模型真实窗口
             _sys_prompt_tokens = _system_prompt_budget_tokens(
-                agents, trusted_skills, selected_knowledge, knowledge_ids, memory_block,
+                None, trusted_skills, selected_knowledge, knowledge_ids, memory_block,
                 skill_catalog_block, summary,
             )
             prompt_rows, summary_block, _ctx_dropped = context_service.apply_context_budget(
@@ -2540,7 +2540,7 @@ class HarnessOrchestrator:
             # 模型回传 usage 后于收尾用真实 prompt_tokens 校准
             raw_est_tokens = _estimate_prompt_tokens(
                 prompt_rows=prompt_rows, summary_block=summary_block, file_context=file_context,
-                memory_block=memory_block, trusted_skills=trusted_skills, agents=agents,
+                memory_block=memory_block, trusted_skills=trusted_skills, agents=None,
                 image_count=len(image_urls),
             )
             # 真值校准（§13）：过往轮回传的 usage 已回灌为 per-model 因子，修估算的系统性偏差
