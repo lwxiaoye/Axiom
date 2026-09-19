@@ -699,6 +699,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logging.getLogger(__name__).info("关停清理：销毁 %d 个沙箱会话", closed)
     except Exception as e:  # noqa: BLE001
         logging.getLogger(__name__).warning("关停清理沙箱会话失败: %s", e)
+    await _cancel_background_tasks()
+
+
+async def _cancel_background_tasks(timeout: float = 5.0) -> None:
+    """关停时主动取消所有后台任务并限时等待。
+
+    uvicorn 收到 SIGTERM 后由 asyncio.run 的收尾去取消残余任务并**无限期**等它们退出；
+    只要有一个任务吞掉 CancelledError 或在 finally 里等一个永远不回的 I/O，进程就永远
+    退不出——热重载表现为「Finished server process」之后再无下文，docker stop 则等到
+    SIGKILL。这里先自己取消一遍，超时的任务连协程名和挂起位置一起点名进日志。"""
+    me = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks() if t is not me and not t.done()]
+    if not pending:
+        return
+    for task in pending:
+        task.cancel()
+    _, alive = await asyncio.wait(pending, timeout=timeout)
+    if not alive:
+        return
+    log = logging.getLogger(__name__)
+    for task in alive:
+        frames = task.get_stack(limit=3)
+        where = " <- ".join(f"{f.f_code.co_name}@{os.path.basename(f.f_code.co_filename)}:{f.f_lineno}"
+                            for f in frames) or "?"
+        log.warning("关停：后台任务 %.1fs 内未响应取消，进程可能退不出: %r 挂在 %s",
+                    timeout, task.get_coro(), where)
 
 
 app = FastAPI(
