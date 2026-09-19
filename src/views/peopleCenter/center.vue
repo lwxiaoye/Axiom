@@ -449,7 +449,6 @@ import {
   PushpinFilled,
   PushpinOutlined,
   ReadOutlined,
-  RobotOutlined,
   SearchOutlined,
   SettingOutlined,
   ToolOutlined,
@@ -621,10 +620,11 @@ function handleUserAvatarError() {
 
 onClickOutside(userMenuRef, () => { userMenuOpen.value = false; }, { ignore: [userInfoRef] });
 
+// 产品定位（2026-09-19 拍板）：智能体全部由我们定制并预置在广场里，用户不自建。
+// 「我的智能体」（自建 / 发布 / 审核）因此不再进导航；路由与代码保留待后续清理。
 const navItems = [
   { key: 'chat' as const, label: '主对话', icon: MessageOutlined },
   { key: 'agent' as const, label: '智能体广场', icon: AppstoreOutlined },
-  { key: 'myAgent' as const, label: '我的智能体', icon: RobotOutlined },
   { key: 'knowledge' as const, label: '我的知识库', icon: ReadOutlined },
   { key: 'skill' as const, label: 'Skill广场', icon: ToolOutlined },
   { key: 'files' as const, label: '我的文件', icon: FolderOutlined },
