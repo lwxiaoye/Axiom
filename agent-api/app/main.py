@@ -379,6 +379,33 @@ async def _encrypt_embedding_keys():
         log.warning("ai_embedding_model.api_key 密文迁移失败，跳过（下次启动重试）", exc_info=True)
 
 
+async def _encrypt_platform_config_secrets():
+    """把 agent_platform_config 里 web_search / ocr 两行的存量明文密钥字段原地加密（幂等）。
+
+    对话模型（model_connection*）、重排模型（rerank_model）那些行本来就存 api_key_cipher，
+    联网搜索与 OCR 的密钥（Serper/Tavily/Firecrawl/Jina/Cohere/视觉模型 key）却是明文躺在
+    config_json 里。与 _encrypt_embedding_keys 同一套路：不改结构、只改密钥字段值，新写入走
+    platform_config_service._encrypt_secrets，读取走 _decrypt_secrets（明文/密文都认），这里
+    只负责把历史行转成密文。核心在 platform_config_service.migrate_plaintext_secrets。
+
+    - DML 不是 DDL，放在 MIGRATE_ON_STARTUP 分支之外无条件执行。
+    - 解不开的伪密文（换过 CONNECTOR_SECRET_KEY）只告警不覆盖，管理员在页面重填即覆盖。
+    - 任何异常只记日志不阻塞启动：迁移前 _decrypt_secrets 对明文原样放行，服务不会因此不可用。
+    """
+    from app.services.platform import platform_config_service
+
+    log = logging.getLogger(__name__)
+    try:
+        stats = await platform_config_service.migrate_plaintext_secrets()
+        log.info(
+            "agent_platform_config 密钥字段密文迁移：迁移 %d 个字段，已是密文 %d 个，跳过 %d 个，"
+            "空 %d 个（扫描 %d 行）",
+            stats["migrated"], stats["already"], stats["skipped"], stats["empty"], stats["rows"],
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("agent_platform_config 密钥字段密文迁移失败，跳过（下次启动重试）", exc_info=True)
+
+
 async def _ensure_qdrant_collection():
     """启动时确保平台激活 Embedding 配置对应的 Qdrant 集合存在。"""
     from app.services.knowledge.embedding_service import get_active_embedding_config
@@ -501,6 +528,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "schema 以 Alembic 迁移为准（mysql revision=%s）", _rev)
     # 无论开关都要跑（DML）：存量明文 embedding key 原地加密，见 _encrypt_embedding_keys
     await _encrypt_embedding_keys()
+    # 同上：联网搜索 / OCR 配置里的明文密钥字段原地加密，见 _encrypt_platform_config_secrets
+    await _encrypt_platform_config_secrets()
     # 无论开关都要跑（DML）：管理员配的对话模型从旧的「按用户哈希」记录迁成平台默认，
     # 让所有登录用户都能用；幂等，见 model_connection.migrate_legacy_to_platform。
     # 这里只是提前到启动期把日志打出来，首次读取时也会自动做，失败不挡启动。

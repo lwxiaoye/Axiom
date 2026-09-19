@@ -30,6 +30,10 @@ _fernet: Optional[Fernet] = None
 _key_id: str = ""
 _warned = False
 
+# Fernet token 的版本字节固定为 0x80，urlsafe base64 后恒以 "gAAAA" 开头；各类 API 明文 key
+# （sk-、fc-、tvly- 等）不会以它开头。供「库里这个值是密文还是明文」的判据用，见 is_cipher_text。
+CIPHER_PREFIX = "gAAAA"
+
 
 class ConnectorCryptoError(Exception):
     """密钥不可用或密文无法解开（换过密钥/数据被篡改）。"""
@@ -118,6 +122,26 @@ def decrypt_secret(cipher: str) -> str:
     except (InvalidToken, ValueError) as exc:
         # 换过密钥或密文损坏——不能当成「令牌错误」让用户去 GitHub 查，要说清是本地的事
         raise ConnectorCryptoError("凭据无法解密（加密密钥可能已更换），请重新连接该应用") from exc
+
+
+def is_cipher_text(value: Optional[str]) -> bool:
+    """库里的值是否为**当前密钥可解的** Fernet 密文。
+
+    判据是「gAAAA 前缀 **且** 真正解一次能解开」，而不是只看前缀：换过 CONNECTOR_SECRET_KEY
+    后的旧密文前缀相同却解不开——只看前缀会把它当有效密文送出去当 Bearer（得到一个让人误
+    以为 key 错了的 401），或在启动迁移里再加密一层彻底毁掉。前缀对但解不开的值，调用方
+    可用 `value.startswith(CIPHER_PREFIX)` 单独归为「解不开」。
+    embedding（knowledge/embedding_service）与平台功能配置（platform/platform_config_service）
+    的密钥字段共用这一判据，抽到这里避免二者互相 import。
+    """
+    text = str(value or "")
+    if not text.startswith(CIPHER_PREFIX):
+        return False
+    try:
+        decrypt_secret(text)
+    except ConnectorCryptoError:
+        return False
+    return True
 
 
 def reset_cache_for_test() -> None:
