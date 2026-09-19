@@ -11,11 +11,6 @@ export type AgentAuthConfig = {
   token?: string;
 };
 
-export type AgentChatMessage = {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-};
-
 export type AgentModelItem = {
   id: string;
   name: string;
@@ -1642,20 +1637,6 @@ export async function getAgentModels(): Promise<AgentModelItem[]> {
   })).filter((item: AgentModelItem) => item.id);
 }
 
-/** 当前用户可运行工作流的模型列表。 */
-export async function getWorkflowModelOptions(): Promise<WorkflowModelOption[]> {
-  const data: any = await defHttp.get(
-    { url: '/agent-api/workflow/model/options' },
-    { isTransformResponse: false, apiUrl: '', errorMessageMode: 'none' },
-  );
-  const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
-  return list.map((item: any) => ({
-    label: String(item?.label || item?.value || '').trim(),
-    value: String(item?.value || '').trim(),
-    available: item?.available !== false,
-  })).filter((item: WorkflowModelOption) => item.value);
-}
-
 /** 智能体广场预检用模型列表：包含用户可用聊天模型和平台可用向量模型。 */
 export async function getMarketplaceModelOptions(): Promise<WorkflowModelOption[]> {
   const data: any = await defHttp.get(
@@ -1668,25 +1649,6 @@ export async function getMarketplaceModelOptions(): Promise<WorkflowModelOption[
     value: String(item?.value || '').trim(),
     available: item?.available !== false,
   })).filter((item: WorkflowModelOption) => item.value);
-}
-
-// Agents API
-export async function getAgents(params?: { recommend?: boolean; search?: string }): Promise<AgentItem[]> {
-  const queryParams = new URLSearchParams();
-  if (params?.recommend) queryParams.append('recommend', 'true');
-  if (params?.search) queryParams.append('search', params.search);
-  const query = queryParams.toString();
-  const path = `/agents${query ? `?${query}` : ''}`;
-  const data: any = await requestAgentApi(path, { method: 'GET' });
-  const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
-  return list.map((item: any) => ({
-    id: String(item?.id || '').trim(),
-    name: String(item?.name || item?.appName || ''),
-    description: String(item?.description || item?.appRemark || ''),
-    icon: String(item?.icon || item?.appIcon || ''),
-    is_recommend: Boolean(item?.is_recommend || item?.isRecommend),
-    status: Number(item?.status || 0),
-  }));
 }
 
 // ── Skills API ──────────────────────────────────────────────────────────────
@@ -1925,14 +1887,6 @@ export async function renameThread(threadId: string, title: string, scope?: Thre
   return String(data?.title || title);
 }
 
-export async function getThreadModel(threadId: string, scope?: ThreadScope): Promise<string> {
-  const data: any = await requestAgentApi(
-    threadPath(`/chat/threads/${encodeURIComponent(threadId)}/model`, scope),
-    { method: 'GET' },
-  );
-  return String(data?.model || '');
-}
-
 export async function getThreadSettings(
   threadId: string,
   scope?: ThreadScope,
@@ -2023,17 +1977,6 @@ export async function deleteAllMemories(): Promise<number> {
   return Number(data?.deleted || 0);
 }
 
-/** 按内容搜索本人记忆（服务端 LIKE）。 */
-export async function searchMemories(q: string): Promise<UserMemoryItem[]> {
-  const data: any = await requestAgentApi(`/memories?q=${encodeURIComponent(q)}`, { method: 'GET' });
-  return (Array.isArray(data?.items) ? data.items : []).map((it: any) => ({
-    id: String(it?.id || ''),
-    type: String(it?.type || ''),
-    content: String(it?.content || ''),
-    updated_at: it?.updated_at,
-  }));
-}
-
 // ---- 个性化设置（复刻 ChatGPT Personalization）----
 export interface PersonalizationConfig {
   autoManage: boolean;
@@ -2062,67 +2005,6 @@ export async function savePersonalization(
   patch: Partial<PersonalizationConfig>,
 ): Promise<void> {
   await requestAgentApi('/personalization', { method: 'PUT', body: JSON.stringify(patch) });
-}
-
-/** 生成/刷新记忆摘要（模型分区总结全部记忆）。 */
-export async function summarizeMemories(): Promise<{ summary: string; updatedAt: string }> {
-  const data: any = await requestAgentApi('/memories/summarize', { method: 'POST' });
-  return { summary: String(data?.summary || ''), updatedAt: String(data?.updatedAt || '') };
-}
-
-/** 自然语言「添加或更新」记忆。返回入库内容列表。 */
-export async function nlUpdateMemories(text: string): Promise<string[]> {
-  const data: any = await requestAgentApi('/memories/nl-update', {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-  });
-  return Array.isArray(data?.stored) ? data.stored.map((s: any) => String(s)) : [];
-}
-
-/** 手动压缩会话上下文（composer「+」菜单）：较早对话压进滚动摘要，释放窗口。
- *  对话不够长无可压段时 compacted=false；before/usage 为压缩前后占用。 */
-export async function compactThreadContext(
-  threadId: string,
-  model?: string,
-  scope?: ThreadScope,
-): Promise<{ compacted: boolean; before: ContextUsage; usage: ContextUsage }> {
-  const data: any = await requestAgentApi(
-    threadPath(`/chat/threads/${encodeURIComponent(threadId)}/compact`, scope),
-    { method: 'POST', body: JSON.stringify({ model: model || null }) },
-  );
-  const norm = (u: any): ContextUsage => ({
-    tokens: Number(u?.tokens || 0),
-    window: Number(u?.window || 0),
-    ratio: Number(u?.ratio || 0),
-  });
-  return { compacted: Boolean(data?.compacted), before: norm(data?.before), usage: norm(data?.usage) };
-}
-
-/** 打开旧会话时估算上下文占用，恢复占用环（口径同流式 context.usage）。失败返回 null。
- *  model=该会话下一次发送将使用的模型：占用环分母须用它的真实窗口，缺省则后端退回 32K 兜底。 */
-export async function getThreadContextUsage(
-  threadId: string,
-  model?: string,
-  scope?: ThreadScope,
-): Promise<ContextUsage | null> {
-  try {
-    const params = new URLSearchParams();
-    if (model) params.set('model', model);
-    if (scope) params.set('scope', scope);
-    const query = params.toString() ? `?${params.toString()}` : '';
-    const data: any = await requestAgentApi(
-      `/chat/threads/${encodeURIComponent(threadId)}/context-usage${query}`,
-      { method: 'GET' },
-    );
-    if (!data || typeof data.ratio !== 'number') return null;
-    return {
-      tokens: Number(data.tokens || 0),
-      window: Number(data.window || 0),
-      ratio: Number(data.ratio || 0),
-    };
-  } catch {
-    return null;
-  }
 }
 
 export type UploadedFile = {
@@ -2673,33 +2555,6 @@ export async function decideGatewayApproval(
   });
 }
 
-// Master Config API
-export interface MasterConfig {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  systemPrompt: string;
-  welcomeMessage: string;
-}
-
-export async function getMasterConfig(): Promise<MasterConfig> {
-  const data: any = await requestAgentApi('/master-config', { method: 'GET' });
-  return {
-    baseUrl: data?.baseUrl || data?.base_url || '',
-    apiKey: data?.apiKey || data?.api_key || '',
-    model: data?.model || '',
-    systemPrompt: data?.systemPrompt || data?.system_prompt || '',
-    welcomeMessage: data?.welcomeMessage || data?.welcome_message || '',
-  };
-}
-
-export async function saveMasterConfig(config: MasterConfig): Promise<void> {
-  await requestAgentApi('/master-config', {
-    method: 'POST',
-    body: JSON.stringify(config),
-  });
-}
-
 export type WorkspaceFileItem = {
   id: string;
   name: string;
@@ -2784,29 +2639,11 @@ export async function uploadWorkspaceFile(threadId: string, file: File): Promise
   }
 }
 
-export async function createWorkspaceFile(threadId: string, name: string): Promise<void> {
-  await requestAgentApi(`/workspace/${encodeURIComponent(threadId)}/files/new`, {
-    method: 'POST',
-    body: JSON.stringify({ name }),
-  });
-}
-
 export async function deleteWorkspaceFile(threadId: string, fileId: string): Promise<void> {
   await requestAgentApi(
     `/workspace/${encodeURIComponent(threadId)}/file?file_id=${encodeURIComponent(fileId)}`,
     { method: 'DELETE' },
   );
-}
-
-export async function clearWorkspace(threadId: string): Promise<void> {
-  await requestAgentApi(
-    `/workspace/${encodeURIComponent(threadId)}?confirm=true`,
-    { method: 'DELETE' },
-  );
-}
-
-export function workspaceDownloadUrl(threadId: string, fileId: string): string {
-  return `/agent-api/workspace/${encodeURIComponent(threadId)}/download?file_id=${encodeURIComponent(fileId)}`;
 }
 
 export async function downloadWorkspaceFile(
