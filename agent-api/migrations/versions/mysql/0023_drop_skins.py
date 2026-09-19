@@ -24,6 +24,7 @@ DROPPED_TABLES = (
     "agent_main_chat_skin_asset",
     "agent_main_chat_skin",
     "agent_presentation_assignment",
+    "agent_presentation_preset_grant",
     "agent_presentation_preset_asset",
     "agent_presentation_preset",
 )
