@@ -46,7 +46,7 @@ flowchart TD
 | 模块 | 代码入口 | 判断 | 接下来做什么 |
 |---|---|---|---|
 | 校园问答身份与页面 | `src/views/peopleCenter/builtinAssistants/campusServices/` | 直接复用 | 调整校园名称、说明、入口和角色展示 |
-| 校园后台配置 | `src/views/newapi/campusAssistant/`、`agent-api/app/routers/campus_assistant.py` | 直接复用 | 配模型、知识库绑定、学校官方域名并发布 |
+| 校园后台配置 | `src/views/peopleCenter/pages/AdminConsolePage.vue`（/admin 校园百事通 tab）、`agent-api/app/routers/campus_assistant.py` | 直接复用 | 配模型、知识库绑定、学校官方域名并发布 |
 | 配置发布与回滚 | `agent-api/app/services/chat/builtin_assistants/campus_services/config_service.py` | 直接复用 | 配置真实租户和权限；保留版本与发布记录 |
 | 每次运行的配置快照 | 同目录 `runtime_service.py` | 直接复用 | 保持发布版本可追溯，不能临时绕过未发布检查 |
 | 官方域名限制 | 同目录 `domain_policy.py` | 直接复用 | 填本校域名；精确匹配主机及获准子域 |
@@ -55,7 +55,6 @@ flowchart TD
 | 运行、计划、恢复与工具调度 | `agent-api/app/services/agent_harness/` | 复用框架 | 在新的校园协作产品策略中接入能力；不要复制第二套内核 |
 | 智能体目录与子智能体调用 | `agent-api/app/services/agents/`、`chat/subagent_turn.py` | 复用框架 | 配置十个角色、检索发现、权限和输入输出协议 |
 | 工作流编辑与执行 | `src/views/workflow/`、`agent-api/app/services/workflows/` | 按场景复用 | 表单、分支、用户选择、流程状态可用于办事指引 |
-| 校园主题/皮肤包 | `mainChatSkin/`、`agent-api/skin_packages/` | 直接复用 | 新品牌导入导出标识已统一；历史旧格式包须迁移 |
 | 用户文件、文档解析 | `agent-api/app/services/files/` | 接服务后复用 | 配存储、上传权限及清理周期；不导入原用户文件 |
 | 知识检索 | `campus_services/java_knowledge.py`、`services/knowledge/` | 接服务后复用 | Java 接口、知识库 ACL、向量模型与 Qdrant 必须一致 |
 | PPT、面试、邮件连接器等 | 各自模块 | 可选保留 | 不作为校园入学项目的首期必做范围 |
