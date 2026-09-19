@@ -11,7 +11,6 @@ import json
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
@@ -40,9 +39,9 @@ def _user(uid="u1", roles=None, depts=None, tenant="0"):
 async def sf(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
+        # sys_user_role / sys_user_depart 已是 ORM 模型（SysUserRole/SysUserDepart），
+        # create_all 一并建表，不再手写 CREATE TABLE。
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("CREATE TABLE sys_user_role (user_id TEXT, role_id TEXT)"))
-        await conn.execute(text("CREATE TABLE sys_user_depart (user_id TEXT, dep_id TEXT)"))
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(subagent_service, "async_session", factory)
     monkeypatch.setattr(capability_registry, "async_session", factory)
@@ -715,12 +714,14 @@ async def test_publish_without_route_metadata_inherits_live_snapshot(sf, monkeyp
     monkeypatch.setattr(wf.settings, "PUBLISH_APPROVAL_REQUIRED", True)
 
     async def _perm(_s, app_id, _u, **_k):
-        return SimpleNamespace(id=app_id), "OWNER"
+        # _submit_or_publish 会先用 app.status 做「线上版本未变更则 409」的判断，桩要带上
+        return SimpleNamespace(id=app_id, status="published"), "OWNER"
     monkeypatch.setattr(wf, "_require_permission", _perm)
 
     captured = {}
 
-    async def _submit(_s, app, workflow_json, note, user, roles, depts, routing_json=None):
+    async def _submit(_s, app, workflow_json, note, user, roles, depts, routing_json=None, **_k):
+        # 现役签名还带 publish_channels / embed_origins；本用例只关心 routing_json
         captured["routing_json"] = routing_json
         return SimpleNamespace(id="v-new")
     monkeypatch.setattr(wf, "_do_submit_review", _submit)

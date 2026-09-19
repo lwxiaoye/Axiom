@@ -9,6 +9,13 @@
 注释还留着，但已无人读。
 
 计划最典型的失败不是格式不对，是编的。
+
+2026-09 补注：`_turn_investigated` / `_turn_mutated` 这两个信号仍是正典（CompletionVerifier、
+交付自查都在用），但「一个文件都没读就交计划 → 循环内推回一轮」这道闸已随 Harness 规范
+退役：一条不带 tool call 的 assistant 消息就结束本回合，验证缺口由 CompletionVerifier /
+计划评审在循环外裁决，不再往同一个采样循环里塞内部提示（同 test_harness_tool_convergence
+钉住的 net_plan_first_nudge / net_plan_early_nudge 不得回流）。下面的驱动用例改为钉住
+「不推回」。
 """
 from app.services.agent_harness.model_driver import (
     LoopState,
@@ -137,18 +144,19 @@ def _pushbacks(requests: list) -> list:
 
 
 class PlanGroundingNetTests(unittest.IsolatedAsyncioTestCase):
-    async def test_plan_without_investigation_is_pushed_back_once(self):
-        """一个文件都没读就交计划 → 必须被推回去勘查，且只推一次。"""
+    async def test_plan_without_investigation_is_not_pushed_back_in_loop(self):
+        """一个文件都没读就交计划：循环内**不**推回（Codex 回合语义），计划原样作为本轮终答；
+        空壳与否交给循环外的验证/评审。若这里出现第二次采样，就是推回闸回流了。"""
         events, reqs = await _drive_plan([
             [sse({"content": "## 计划\n直接开干就行。"}), DONE],   # 空壳计划
-            [sse({"content": "## 计划（已核实）\n读过文件后的计划。"}), DONE],
+            [sse({"content": "## 计划（已核实）\n读过文件后的计划。"}), DONE],  # 不应被消费
         ], plan_mode=True)
 
-        pushes = _pushbacks(reqs)
-        self.assertEqual(len(pushes), 1, f"应当恰好推回一次，实际 {len(pushes)} 次")
-        self.assertIn("一个文件都没读", pushes[0])
+        self.assertEqual(_pushbacks(reqs), [], "循环内推回闸已退役，不得再往 messages 塞内部提示")
+        self.assertEqual(len(reqs), 1, "没有工具调用的计划轮只采样一次")
         final = [e for e in events if e.get("type") == "final"]
-        self.assertTrue(final and "已核实" in final[0]["answer"])
+        self.assertTrue(final and "直接开干" in final[0]["answer"])
+        self.assertNotIn("已核实", final[0]["answer"])
 
     async def test_plan_with_investigation_is_not_pushed_back(self):
         """真读过文件就不该被打扰——误伤会让每个计划轮凭空多一轮。"""

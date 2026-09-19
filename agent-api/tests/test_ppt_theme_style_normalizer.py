@@ -1,8 +1,22 @@
+"""normalize-theme-styles.mjs 的行为契约。
+
+这段 JS 在**沙箱镜像**里随 PPTD 本地导出执行（沙箱有 node），agent-api 镜像本身不装 node；
+本文件直接用 node 跑脚本做黑盒断言，所以在没有 node 的环境（agent-api 测试容器）整体跳过，
+在开发机 / 沙箱镜像里照常执行。
+"""
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("node") is None,
+    reason="需要 node（脚本在沙箱镜像里执行；agent-api 镜像不带 node）",
+)
 
 
 NORMALIZER = (
