@@ -12,22 +12,15 @@ const centerStyles = readFileSync(
 );
 
 describe('knowledge document batch actions', () => {
-  it('exposes raw-file download and batch-delete APIs on both permission boundaries', () => {
-    expect(api).toContain("documentDownload: '/ai/knowledge/document/download'");
-    expect(api).toContain("documentDownloadZip: '/ai/knowledge/document/download-zip'");
+  it('exposes raw-file download and batch-delete APIs through agent-api', () => {
     expect(api).toContain('export const deleteDocuments = (ids: string[])');
     expect(api).toContain('export const downloadKnowledgeDocument = (id: string, fileName: string)');
     expect(api).toContain('export const downloadKnowledgeDocumentArchive = (ids: string[])');
-    expect(api).toContain('export const deleteManagedDocuments = (ids: string[])');
-    expect(api).toContain('export const downloadManagedKnowledgeDocument = (id: string, fileName: string)');
-    expect(api).toContain('export const downloadManagedKnowledgeDocumentArchive = (ids: string[])');
-    // 用户侧走 agent-api（原 Java 接口已下线），管理侧仍在旧路径上。
+    // 用户侧走 agent-api（原 Java 接口已下线）
     expect(api).toContain('`${KB}/documents/${id}/download`');
     expect(api).toContain("saveBlob(blob, fileName)");
     expect(api).toContain('`${KB}/documents/download-zip`');
     expect(api).toContain("saveBlob(blob, '知识库原始文档.zip')");
-    expect(api).toContain('downloadBlobFile(managementUrl(Api.documentDownload), fileName, { id })');
-    expect(api).toContain("downloadBlobFile(managementUrl(Api.documentDownloadZip), '知识库原始文档.zip', { ids: ids.join(',') })");
     expect(api).not.toContain('sourceUri');
   });
 
