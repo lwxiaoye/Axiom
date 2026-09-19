@@ -313,9 +313,11 @@ describe('主对话 Harness 前端契约', () => {
   });
 
   it('智能体目录 404 不向主对话弹出 axios 原文，也不在发送时反复重试', () => {
-    const appInfoApi = readFileSync(resolve(root, '../flow/app/AppInfo.api.ts'), 'utf8');
-    expect(appInfoApi).toContain('errorMessageMode: \'none\'');
-    expect(appInfoApi).toContain('successMessageMode: \'none\'');
+    const myAppListStart = agentMarketSource.indexOf('const myAppList = ');
+    const myAppListSource = agentMarketSource.slice(myAppListStart, agentMarketSource.indexOf(';', myAppListStart));
+    expect(myAppListStart).toBeGreaterThan(-1);
+    expect(myAppListSource).toContain('errorMessageMode: \'none\'');
+    expect(myAppListSource).toContain('successMessageMode: \'none\'');
     expect(agentMarketSource).toContain('catalogUnavailable');
     expect(agentMarketSource).toContain('catalogLoaded');
     expect(agentMarketSource).toContain("options.activeSection.value !== 'agent'");

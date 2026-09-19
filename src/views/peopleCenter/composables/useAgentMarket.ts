@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue';
-import { myAppList } from '../../flow/app/AppInfo.api';
+import { defHttp } from '/@/utils/http/axios';
 import { getMarketplaceModelOptions, listBuiltinApps, type AgentItem } from '../agentApi';
 import { resolveAppJumpUrl } from '/@/utils/jump';
 import { openAgentRunWindow } from '../../workflow/shared/runtimeRoute';
@@ -20,6 +20,13 @@ type UseAgentMarketOptions = {
   modelPanelCollapsed: { value: boolean };
   showError: (error: unknown) => void;
 };
+
+/** auth-api 的「我的应用」目录（用户自建应用）；目录 404 不弹 axios 原文，由调用方按 catalogUnavailable 处理。 */
+const myAppList = (params: Record<string, unknown>) =>
+  defHttp.get(
+    { url: '/app/appInfo/my/all/list', params },
+    { errorMessageMode: 'none', successMessageMode: 'none' },
+  );
 
 function catalogHttpStatus(error: unknown): number {
   if (!error || typeof error !== 'object') return 0;
