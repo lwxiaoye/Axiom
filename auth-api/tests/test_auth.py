@@ -118,7 +118,9 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 404)
             self.assertFalse(response.json()["success"])
 
-    async def test_knowledge_unavailable_is_not_an_empty_success(self):
+    async def test_legacy_knowledge_paths_are_unimplemented_not_empty_success(self):
+        """知识库已由 agent-api 自持（/agent-api/knowledge/*），前端不再请求这些 Java 路径；
+        专门的 503 桩已删，落到通用 404 fallback，但绝不能变成空的成功响应。"""
         headers = await self.headers()
         for method, path in [("GET", "/ai/knowledge/base/queryById"),
                              ("GET", "/ai/knowledge/base/list"),
@@ -127,7 +129,7 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
                              ("POST", "/ai/knowledge/retrieval/test"),
                              ("POST", "/ai/knowledge/retrieval/internal")]:
             response = await self.client.request(method, path, headers=headers)
-            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.status_code, 404, path)
             self.assertFalse(response.json()["success"])
 
     async def test_local_catalog_lists_are_empty_not_404(self):

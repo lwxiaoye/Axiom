@@ -228,7 +228,7 @@ def menus() -> list[dict[str, Any]]:
     """侧栏菜单。只下发工作台真正有的页面：
     /system/user、/system/role 是 Jeecg 的用户/角色管理页，Java 后端下线后表格空、
     异步组件超时；/newapi/campus-assistant 的功能已并入 /admin 的「校园百事通」tab。
-    用户/角色管理页的静态路由已随前端瘦身移到 routes/modules-disabled，这里不能再指过去。"""
+    用户/角色管理页已随前端瘦身移出动态路由 glob（routeHelper 只吸入五个目录），这里不能再指过去。"""
     return [
         {
             "path": "/center",
@@ -699,20 +699,6 @@ def skill_catalog_moved(
     if error:
         return error
     return fail("Skill 目录已迁至 agent-api：/agent-api/skill/list", code=404, status=404)
-
-
-@app.get("/ai/knowledge/base/queryById")
-@app.get("/ai/knowledge/base/list")
-@app.get("/ai/knowledge/document/list")
-@app.get("/ai/knowledge/acl/list")
-@app.post("/ai/knowledge/retrieval/test")
-@app.post("/ai/knowledge/retrieval/internal")
-def knowledge_unavailable(x_access_token: Optional[str] = Header(None, alias="X-Access-Token"),
-                          authorization: Optional[str] = Header(None)):
-    _, error = require_user(x_access_token, authorization)
-    if error:
-        return error
-    return fail("知识库业务服务尚未接入，暂不支持知识库管理和检索", code=503, status=503)
 
 
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
