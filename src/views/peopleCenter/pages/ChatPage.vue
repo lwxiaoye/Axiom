@@ -71,28 +71,17 @@ import SubagentChatPanel from '../components/SubagentChatPanel.vue';
 import { useCenterContext } from '../centerContext';
 import type { AgentItem } from '../agentApi';
 import type { SubagentRun } from '../composables/executionTimeline';
-import {
-  pickPinnedRecommendedAgents,
-  type PinnedRecommendedAgent,
-} from '../utils/pinnedRecommendedAgents';
+import { pickPinnedRecommendedAgents } from '../utils/pinnedRecommendedAgents';
 
 defineOptions({ name: 'CenterChatPage' });
 
 const ctx = useCenterContext();
 const { startChatWithAgent, openAgentFromChat } = ctx;
 const { appList, appLoading } = ctx.agentMarket;
-const { myAgentList, myAgentLoading, openAiAppRunner } = ctx.myAgents;
-const recommendedAgents = computed(() => pickPinnedRecommendedAgents(appList.value, myAgentList.value));
-const recommendLoading = computed(() =>
-  (appLoading.value || myAgentLoading.value) && recommendedAgents.value.length === 0,
-);
+const recommendedAgents = computed(() => pickPinnedRecommendedAgents(appList.value));
+const recommendLoading = computed(() => appLoading.value && recommendedAgents.value.length === 0);
 
 function onStartRecommendedAgent(agent: AgentItem) {
-  const pinned = agent as PinnedRecommendedAgent;
-  if (pinned.open === 'run' && pinned.raw) {
-    openAiAppRunner(pinned.raw);
-    return;
-  }
   startChatWithAgent(agent);
 }
 const {

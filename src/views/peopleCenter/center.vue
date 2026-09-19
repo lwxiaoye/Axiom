@@ -472,7 +472,6 @@ import ExecTeamPanel from './components/ExecTeamPanel.vue';
 import type { SubagentRun } from './components/MessageList.vue';
 import { deriveRunPanel } from './composables/executionTimeline';
 import { threadConversationActivity } from './composables/threadConversationActivity';
-import { useMyAgents } from './composables/useMyAgents';
 import { CenterContextKey } from './centerContext';
 import { centerRouteNameToSection, centerSectionPath } from './centerRoute';
 import { MAIN_CHAT_FEATURE_VISIBILITY } from './mainChatFeatureVisibility';
@@ -689,14 +688,10 @@ const compactHeaderTitle = computed(() => (
   navItems.find((item) => item.key === activeSection.value)?.label || '主对话'
 ));
 
-const myAgents = useMyAgents(showError);
-const liveWorkflowReady = computed(() => myAgents.myAgentLoaded.value && !myAgents.myAgentLoadFailed.value);
 const agentMarket = useAgentMarket({
   activeSection,
   modelPanelCollapsed,
   showError,
-  liveWorkflowApps: myAgents.myAgentList,
-  liveWorkflowReady,
 });
 const chatPageEpoch = ref(0);
 const centerChat = useCenterChat({
@@ -978,8 +973,6 @@ const threadGroups = computed(() => {
   return groups;
 });
 
-const { myAgentList, myAgentLoading, loadMyAgents } = myAgents;
-
 function conversationActivity(item: {
   id: string;
   active_run?: { id?: string; status?: string; interactive_type?: string } | null;
@@ -1043,7 +1036,6 @@ watch(
   () => activeSection.value,
   (section) => {
     if (section === 'agent' && !appList.value.length && !appLoading.value) reloadApps();
-    if (section === 'myAgent' && !myAgentList.value.length && !myAgentLoading.value) loadMyAgents();
   },
   { immediate: false },
 );
@@ -1051,7 +1043,6 @@ watch(
 provide(CenterContextKey, {
   agentMarket,
   centerChat,
-  myAgents,
   activeSection,
   showError,
   showNotice,
@@ -1069,8 +1060,6 @@ onMounted(() => {
   window.addEventListener('resize', onCenterViewportResize);
   applyNavWidth();
   reloadApps();
-  // 工作流应用列表只服务“我的智能体”页面；主对话首屏不再预取。
-  if (activeSection.value === 'myAgent') loadMyAgents();
   // 只预加载对话历史。不要自动打开上次会话，否则从子智能体/其他板块回到 /center 会被拽进最近一轮。
   void centerChat.restoreCurrentThread();
 });

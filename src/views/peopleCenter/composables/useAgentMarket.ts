@@ -1,4 +1,4 @@
-import { computed, ref, watch, type Ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { myAppList } from '../../flow/app/AppInfo.api';
 import { getMarketplaceModelOptions, listBuiltinApps, type AgentItem } from '../agentApi';
 import { resolveAppJumpUrl } from '/@/utils/jump';
@@ -6,23 +6,19 @@ import { openAgentRunWindow } from '../../workflow/shared/runtimeRoute';
 import { queryMarketplaceWorkflowApps } from '../../workflow/api/workflow.api';
 import { decorateAppsWithModelAvailability } from './agentModelRequirements';
 import { pickPinnedRecommendedAgents } from '../utils/pinnedRecommendedAgents';
-import { excludeOwnedDeletedRuntimeApps } from '../utils/marketplaceCatalog';
 import { decorateBuiltinCatalogApp, sortBuiltinCatalogApps } from '../builtinAssistants';
-import { useUserStore } from '/@/store/modules/user';
 import {
   buildAgentCapabilityFilters,
   matchesMarketplaceApp,
   type MarketplaceApp,
 } from '../agentMarketCapabilities';
 
-export type CenterSectionKey = 'chat' | 'agent' | 'myAgent' | 'knowledge' | 'skill' | 'files' | 'models';
+export type CenterSectionKey = 'chat' | 'agent' | 'knowledge' | 'skill' | 'files' | 'models';
 
 type UseAgentMarketOptions = {
   activeSection: { value: CenterSectionKey };
   modelPanelCollapsed: { value: boolean };
   showError: (error: unknown) => void;
-  liveWorkflowApps?: Ref<any[]>;
-  liveWorkflowReady?: Ref<boolean>;
 };
 
 function catalogHttpStatus(error: unknown): number {
@@ -33,18 +29,10 @@ function catalogHttpStatus(error: unknown): number {
 }
 
 export function useAgentMarket(options: UseAgentMarketOptions) {
-  const userStore = useUserStore();
   const rawAppList = ref<MarketplaceApp[]>([]);
   let catalogUnavailable = false;
   let catalogLoaded = false;
-  const appList = computed<MarketplaceApp[]>(() => {
-    return excludeOwnedDeletedRuntimeApps(
-      rawAppList.value,
-      options.liveWorkflowApps?.value || [],
-      userStore.getUserInfo,
-      Boolean(options.liveWorkflowReady?.value),
-    ) as MarketplaceApp[];
-  });
+  const appList = computed<MarketplaceApp[]>(() => rawAppList.value);
   const appLoading = ref(false);
   const appVisibleCount = ref(12);
   const searchKeyword = ref('');
@@ -60,7 +48,7 @@ export function useAgentMarket(options: UseAgentMarketOptions) {
   const visibleAppList = computed(() => filteredAppList.value.slice(0, appVisibleCount.value));
   const appHasMore = computed(() => appVisibleCount.value < filteredAppList.value.length);
 
-  const recommendedAgents = computed<AgentItem[]>(() => pickPinnedRecommendedAgents(appList.value, []));
+  const recommendedAgents = computed<AgentItem[]>(() => pickPinnedRecommendedAgents(appList.value));
 
   function currentNavWidth() {
     if (typeof window === 'undefined') return options.modelPanelCollapsed.value ? 78 : 280;

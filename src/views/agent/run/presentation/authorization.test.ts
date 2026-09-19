@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 
 const pickerSource = readFileSync(resolve(__dirname, 'RunPresentationPicker.vue'), 'utf8');
 const apiSource = readFileSync(resolve(__dirname, '../../../workflow/api/presentation.api.ts'), 'utf8');
-const manageIndexSource = readFileSync(resolve(__dirname, '../../../workflow/manage/index.vue'), 'utf8');
 const studioSource = readFileSync(resolve(__dirname, '../../../workflow/manage/PresentationStudioPanel.vue'), 'utf8');
 const skinPageSource = readFileSync(resolve(__dirname, '../../../workflow/skins/index.vue'), 'utf8');
 const staticRoutesSource = readFileSync(resolve(__dirname, '../../../../router/routes/staticRouter.ts'), 'utf8');
@@ -34,8 +33,6 @@ describe('global sub-agent skin catalog', () => {
     expect(skinPageSource).toContain('<PresentationStudioPanel />');
     expect(skinPageSource).not.toContain('全局皮肤库');
     expect(skinPageSource).not.toContain('不按租户拆分·不需单独授权');
-    expect(manageIndexSource).not.toContain('PresentationStudioPanel');
-    expect(manageIndexSource).not.toContain('PresentationGrantPanel');
     expect(studioSource).toContain('导入皮肤包');
     expect(studioSource).toContain('@click="openDetail"');
     expect(studioSource).toContain('搜索名称或标识');

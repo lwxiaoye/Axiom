@@ -10,11 +10,7 @@ describe('pickPinnedRecommendedAgents', () => {
       { id: 'mian', appName: '面试助手', appRemark: '模拟面试', appIcon: 'horse.png', pcUrl: '/center/chat/interview' },
       { id: 'xue', appName: '学伴', appRemark: '', pcUrl: '/xue' },
     ];
-    const workflow = [
-      { id: 'doc', name: '智能文档识别助手', description: '识别 PDF' },
-      { id: 'form', name: '智能填表助手', description: '上传材料填表' },
-    ];
-    const picked = pickPinnedRecommendedAgents(market, workflow);
+    const picked = pickPinnedRecommendedAgents(market);
     expect(PINNED_RECOMMENDED_AGENT_NAMES).toEqual([
       '校园百事通',
       '演示文稿助手',
@@ -25,9 +21,7 @@ describe('pickPinnedRecommendedAgents', () => {
       '校园百事通',
       '演示文稿助手',
       '面试助手',
-      '智能填表助手',
     ]);
-    expect(picked.map((item) => item.open)).toEqual(['market', 'market', 'market', 'run']);
     expect(picked[0]).toEqual(expect.objectContaining({
       id: 'campus-1000',
     }));
@@ -39,10 +33,7 @@ describe('pickPinnedRecommendedAgents', () => {
   });
 
   it('无权或已停用的系统应用不在推荐区被前端补回', () => {
-    const picked = pickPinnedRecommendedAgents(
-      [{ id: 'mian', appName: '面试助手', pcUrl: '/mian' }],
-      [],
-    );
+    const picked = pickPinnedRecommendedAgents([{ id: 'mian', appName: '面试助手', pcUrl: '/mian' }]);
     expect(picked).toEqual([]);
   });
 
@@ -56,13 +47,9 @@ describe('pickPinnedRecommendedAgents', () => {
     expect(picked.map((item) => item.name)).toEqual(['我的校园助手', '我的演示助手', '我的面试练习']);
   });
 
-  it('广场有访问地址时走 market，否则走我的智能体运行页', () => {
-    const picked = pickPinnedRecommendedAgents(
-      [{ id: 'form-m', appName: '智能填表助手', pcUrl: '/form' }],
-      [{ id: 'form-w', name: '智能填表助手' }],
-    );
-    expect(picked).toEqual([
-      expect.objectContaining({ id: 'form-m', open: 'market' }),
-    ]);
+  it('广场固定推荐位只认广场记录，不再回退到用户自建的工作流应用', () => {
+    const picked = pickPinnedRecommendedAgents([{ id: 'form-m', appName: '智能填表助手', pcUrl: '/form' }]);
+    expect(picked).toEqual([expect.objectContaining({ id: 'form-m' })]);
+    expect(picked[0]).not.toHaveProperty('open');
   });
 });

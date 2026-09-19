@@ -4,7 +4,6 @@ import type { CenterSectionKey } from './composables/useAgentMarket';
 export const centerSectionRouteName: Record<CenterSectionKey, string> = {
   chat: 'CenterChat',
   agent: 'CenterAgent',
-  myAgent: 'CenterMyAgent',
   knowledge: 'CenterKnowledge',
   skill: 'CenterSkill',
   files: 'CenterFiles',
@@ -23,7 +22,6 @@ export const centerRouteNameToSection: Record<string, CenterSectionKey> = Object
 export const centerSectionPath: Record<CenterSectionKey, string> = {
   chat: '/center/chat',
   agent: '/center/agent',
-  myAgent: '/center/my-agent',
   knowledge: '/center/knowledge',
   skill: '/center/skill',
   files: '/center/files',

@@ -155,8 +155,6 @@ const activeSection = computed({
 });
 const marketplaceApps = computed(() => appMeta.value ? [appMeta.value] : []);
 const marketplaceLoading = computed(() => accessLoading.value);
-const myAgentList = ref<any[]>([]);
-const myAgentLoading = ref(false);
 
 function errorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
@@ -214,17 +212,10 @@ const agentMarket = {
   appLoading: marketplaceLoading,
 } as unknown as CenterContext['agentMarket'];
 
-const myAgents = {
-  myAgentList,
-  myAgentLoading,
-  openAiAppRunner: () => showError('请从智能体广场打开其他应用'),
-} as unknown as CenterContext['myAgents'];
-
 function switchSection(section: CenterSectionKey) {
   const paths: Record<CenterSectionKey, string> = {
     chat: '/center/chat',
     agent: '/center/agent',
-    myAgent: '/center/my-agent',
     knowledge: '/center/knowledge',
     skill: '/center/skill',
     files: '/center/files',
@@ -245,7 +236,6 @@ function openCatalogApp(app: any) {
 provide(CenterContextKey, {
   agentMarket,
   centerChat,
-  myAgents,
   activeSection,
   showError,
   showNotice,

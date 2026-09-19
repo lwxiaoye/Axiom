@@ -65,18 +65,6 @@ export const mainOutRoutes: AppRouteModule[] = [
         meta: { title: '智能体广场' },
       },
       {
-        path: 'my-agent/:appId/metrics',
-        name: 'CenterAgentMetrics',
-        component: () => import('/@/views/peopleCenter/pages/AgentMetricsPage.vue'),
-        meta: { title: '智能体监测' },
-      },
-      {
-        path: 'my-agent',
-        name: 'CenterMyAgent',
-        component: () => import('/@/views/peopleCenter/pages/MyAgentsPage.vue'),
-        meta: { title: '我的智能体' },
-      },
-      {
         path: 'knowledge',
         name: 'CenterKnowledge',
         component: () => import('/@/views/peopleCenter/pages/MyKnowledgePage.vue'),

@@ -9,11 +9,6 @@ export const PINNED_RECOMMENDED_AGENT_NAMES = [
   ...MARKET_PINNED_NAMES,
 ] as const;
 
-export type PinnedRecommendedAgent = AgentItem & {
-  open: 'market' | 'run';
-  raw?: unknown;
-};
-
 function displayName(item: any): string {
   return String(item?.appName || item?.name || '').trim();
 }
@@ -22,7 +17,7 @@ function findByName(list: any[], name: string) {
   return list.find((item) => displayName(item) === name);
 }
 
-function toMarketAgent(item: any): PinnedRecommendedAgent {
+function toMarketAgent(item: any): AgentItem {
   return {
     id: String(item?.id || ''),
     name: displayName(item) || '未命名智能体',
@@ -31,29 +26,12 @@ function toMarketAgent(item: any): PinnedRecommendedAgent {
     category: String(item?.appCategory || ''),
     is_recommend: true,
     status: Number(item?.status || 0),
-    open: 'market',
-    raw: item,
   };
 }
 
-function toRunAgent(item: any): PinnedRecommendedAgent {
-  return {
-    id: String(item?.id || item?.workflowAppId || ''),
-    name: displayName(item) || '未命名智能体',
-    description: String(item?.description || item?.appRemark || ''),
-    icon: String(item?.appIcon || item?.icon || ''),
-    category: String(item?.appCategory || ''),
-    is_recommend: true,
-    open: 'run',
-    raw: item,
-  };
-}
-
-export function pickPinnedRecommendedAgents(
-  marketApps: any[] = [],
-  workflowApps: any[] = [],
-): PinnedRecommendedAgent[] {
-  const picked: PinnedRecommendedAgent[] = [];
+/** 主对话欢迎页的固定推荐位：只从管理员过滤后的广场列表里挑，不再回退到用户自建的工作流应用。 */
+export function pickPinnedRecommendedAgents(marketApps: any[] = []): AgentItem[] {
+  const picked: AgentItem[] = [];
   // The administrator-filtered marketplace list is the only visibility source for these pages.
   // Match its fixed route/preset rather than the editable display name, and never recreate a
   // missing static card client-side.
@@ -65,21 +43,9 @@ export function pickPinnedRecommendedAgents(
   }
   for (const name of MARKET_PINNED_NAMES) {
     const market = findByName(marketApps, name);
-    const workflow = findByName(workflowApps, name);
-    if (market?.pcUrl) {
-      const agent = toMarketAgent(market);
-      if (agent.id) picked.push(agent);
-      continue;
-    }
-    if (workflow) {
-      const agent = toRunAgent(workflow);
-      if (agent.id) picked.push(agent);
-      continue;
-    }
-    if (market) {
-      const agent = toMarketAgent(market);
-      if (agent.id) picked.push(agent);
-    }
+    if (!market) continue;
+    const agent = toMarketAgent(market);
+    if (agent.id) picked.push(agent);
   }
   return picked;
 }

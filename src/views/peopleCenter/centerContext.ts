@@ -2,7 +2,6 @@ import type { InjectionKey, WritableComputedRef } from 'vue';
 import { inject } from 'vue';
 import { useAgentMarket, type CenterSectionKey } from './composables/useAgentMarket';
 import { useCenterChat } from './composables/useCenterChat';
-import { useMyAgents } from './composables/useMyAgents';
 
 /**
  * WS1：路由多页共享上下文。
@@ -13,7 +12,6 @@ import { useMyAgents } from './composables/useMyAgents';
 export interface CenterContext {
   agentMarket: ReturnType<typeof useAgentMarket>;
   centerChat: ReturnType<typeof useCenterChat>;
-  myAgents: ReturnType<typeof useMyAgents>;
   activeSection: WritableComputedRef<CenterSectionKey>;
   showError: (error: unknown) => void;
   showNotice: (message: string) => void;
