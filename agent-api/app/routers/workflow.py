@@ -7,15 +7,14 @@
 import json
 import logging
 import re
-import time
 import uuid
 from typing import Any, Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import bindparam, delete as sa_delete
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import and_, func, or_, select, text
 
 from app.core.auth import UserContext, current_user, is_platform_admin, is_reviewer
@@ -24,7 +23,7 @@ from app.core.database import async_session
 from app.models import ChatMessage, ChatThread, EmbeddingModel, WorkflowAcl, WorkflowAdminAudit, WorkflowApp, WorkflowDefinition, WorkflowVersion
 from app.services.agent_time import format_agent_now
 from app.services.agents import app_capability_registry, capability_registry
-from app.services.gateway import tool_gateway, tool_invoker
+from app.services.gateway import tool_gateway
 from app.services.chat.turn_context_builder import _attachments_meta
 from app.services.agents.app_info_publish_service import (
     normalize_visible_ids,
@@ -42,19 +41,11 @@ from app.services.workflows.workflow_model_requirements import missing_required_
 from app.services.workflows import marketplace_catalog_service
 from app.services.workflows import presentation_service
 from app.services.workflows import sub_agent_skin_service
-from app.services.workflows.agent_metrics_service import collect_app_metrics
 from app.services.workflows.builtin_app_admin_service import (
     build_builtin_admin_detail,
     get_managed_builtin,
     is_managed_builtin_id,
     list_managed_builtins,
-    managed_builtin_origin,
-)
-from app.services.workflows.agent_conversation_log_service import (
-    build_conversation_log_xlsx,
-    normalize_conversation_log_filters,
-    query_conversation_log_detail,
-    query_conversation_logs,
 )
 from app.services.workflows.admin_governance_service import (
     build_admin_app_summary,
@@ -62,12 +53,6 @@ from app.services.workflows.admin_governance_service import (
     record_app_audit,
 )
 from app.services.campus_assistant.main_chat_skin_package import MAX_PACKAGE_BYTES
-from app.services.workflows.app_package_service import (
-    build_export_package,
-    make_copy_name,
-    make_import_name,
-    parse_import_package,
-)
 from app.services.workflows.workflow_engine import (
     RunContext,
     SUPPORTED_NODE_TYPES,
@@ -103,8 +88,6 @@ AI_APP_TYPES = {"simple", "chatAgent", "workflow", "workflowTool", "httpToolSet"
 TOOL_APP_TYPES = {"workflowTool", "httpToolSet", "mcpToolSet"}
 REVIEW_MENU_PATH = "/workflow/review"
 AGENT_MANAGE_MENU_PATH = "/workflow/manage"
-HTTP_TOOL_TEST_FILE_LIMIT = 20 * 1024 * 1024
-HTTP_TOOL_TEST_FILE_COUNT_LIMIT = 8
 
 
 # ---------- Schemas ----------
@@ -117,21 +100,6 @@ class AppUpsertRequest(BaseModel):
     appCategory: Optional[str] = None
     appIcon: Optional[str] = None
     configJson: Optional[str] = None
-
-
-class MarketplaceCreatorLookupRequest(BaseModel):
-    appIds: list[str] = Field(default_factory=list)
-
-
-class AclItem(BaseModel):
-    subjectType: str
-    subjectId: Any
-    permission: str = "VIEWER"
-
-
-class AclSaveRequest(BaseModel):
-    appId: str
-    items: list[AclItem] = []
 
 
 class SubAgentSkinMetadataUpdateRequest(BaseModel):
@@ -896,86 +864,11 @@ async def marketplace_apps(user: UserContext = Depends(current_user)):
     return await marketplace_catalog_service.list_published_marketplace_apps(user)
 
 
-@router.post("/app/marketplace-creators")
-async def marketplace_creators(
-    payload: MarketplaceCreatorLookupRequest,
-    user: UserContext = Depends(current_user),
-):
-    """Resolve the public creator identity shown on visible marketplace cards.
-
-    ``app_info.create_by`` is the durable ``sys_user.id`` owner reference written
-    at publish time. Only display name and avatar are returned; contact/account-
-    security fields never leave the user domain here.
-    """
-    app_ids = list(dict.fromkeys(str(item or "").strip() for item in payload.appIds if str(item or "").strip()))
-    if len(app_ids) > 100:
-        raise HTTPException(400, "单次最多查询 100 个智能体创建人")
-    if not app_ids:
-        return {"records": []}
-
-    statement = text(
-        """
-        SELECT a.id AS app_id,
-               a.create_by AS creator_ref,
-               u.username AS creator_username,
-               u.realname AS creator_name,
-               u.avatar AS creator_avatar
-        FROM app_info a
-        LEFT JOIN sys_user u
-          ON u.id = a.create_by
-         AND (u.del_flag = '0' OR u.del_flag IS NULL OR u.del_flag = '')
-        WHERE a.id IN :app_ids
-          AND (a.del_flag = '0' OR a.del_flag IS NULL OR a.del_flag = '')
-          AND (a.status = '1' OR a.status = 1)
-          AND (:tenant_isolation_enabled = 0 OR a.tenant_id = :tenant_id OR a.tenant_id = '0' OR a.tenant_id IS NULL OR a.tenant_id = '')
-        """
-    ).bindparams(bindparam("app_ids", expanding=True))
-
-    async with async_session() as session:
-        rows = (
-            await session.execute(statement, {
-                "app_ids": app_ids,
-                "tenant_id": str(user.tenant_id or "0"),
-                "tenant_isolation_enabled": int(settings.AGENT_WORKFLOW_TENANT_ISOLATION_ENABLED),
-            })
-        ).mappings().all()
-
-    records = []
-    for row in rows:
-        creator_ref = str(row.get("creator_ref") or "").strip()
-        creator_name = str(row.get("creator_name") or row.get("creator_username") or "").strip()
-        if not creator_name and not re.fullmatch(r"(?:\d{8,}|[0-9a-f-]{24,})", creator_ref, flags=re.IGNORECASE):
-            creator_name = creator_ref
-        records.append(
-            {
-                "appId": str(row.get("app_id") or ""),
-                "creatorName": creator_name,
-                "creatorAvatar": str(row.get("creator_avatar") or "").strip(),
-            }
-        )
-    return {"records": records}
-
-
 @router.get("/app/queryById")
 async def query_app_by_id(id: str, user: UserContext = Depends(current_user)):
     async with async_session() as session:
         app, permission = await _require_permission(session, id, user)
         return _app_dict(app, permission)
-
-
-@router.get("/app/{app_id}/metrics")
-async def app_metrics(
-    app_id: str,
-    range: str = "last_7_days",
-    user: UserContext = Depends(current_user),
-):
-    """Return real-time user-facing engagement metrics for an owned application."""
-    async with async_session() as session:
-        app, _ = await _require_permission(session, app_id, user, owner=True)
-        try:
-            return await collect_app_metrics(session, app, range)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/app/queryByAppInfoId")
@@ -1113,161 +1006,6 @@ async def cancel_publish_app(id: str, user: UserContext = Depends(current_user))
     await _mark_agent_api_access_invalidation_after_commit(id, "app_unpublished")
     await capability_registry.sync_from_app(id)  # 下架 → 从路由候选移除
     return result
-
-
-@router.get("/app/export")
-async def export_app(id: str, user: UserContext = Depends(current_user)):
-    async with async_session() as session:
-        app, _ = await _require_permission(session, id, user, owner=True)
-        definition = (
-            await session.execute(select(WorkflowDefinition).where(WorkflowDefinition.app_id == id))
-        ).scalar_one_or_none()
-        return build_export_package(app, definition)
-
-
-@router.post("/app/import")
-async def import_app(file: UploadFile = File(...), user: UserContext = Depends(current_user)):
-    filename = (file.filename or "").lower()
-    if not filename.endswith(".json"):
-        raise HTTPException(400, "仅支持导入 JSON 智能体配置包")
-    content = await file.read()
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(400, "导入文件不能超过 5MB")
-    parsed = parse_import_package(content)
-    app_payload = parsed["app"]
-    definition_payload = parsed["definition"]
-    imported_name = make_import_name(app_payload["name"], time.strftime("%Y%m%d%H%M%S"))
-    async with async_session() as session:
-        app = WorkflowApp(
-            id=uuid.uuid4().hex,
-            tenant_id=user.tenant_id,
-            ai_app_type=app_payload["aiAppType"],
-            name=imported_name,
-            description=app_payload["description"],
-            app_category=app_payload["appCategory"],
-            app_icon=app_payload["appIcon"],
-            config_json=app_payload["configJson"],
-            status="draft",
-            owner_user_id=user.user_id,
-            owner_username=user.username,
-        )
-        session.add(app)
-        if definition_payload.get("draftJson"):
-            session.add(
-                WorkflowDefinition(
-                    id=uuid.uuid4().hex,
-                    app_id=app.id,
-                    draft_json=definition_payload["draftJson"],
-                    published_json=None,
-                    published_version=0,
-                    status="draft",
-                )
-            )
-        record_app_audit(session, app=app, action="import", actor=user, after=_app_audit_snapshot(app))
-        await session.commit()
-        await session.refresh(app)
-        return _app_dict(app)
-
-
-@router.post("/app/copy")
-async def copy_app(id: str, user: UserContext = Depends(current_user)):
-    async with async_session() as session:
-        source, _ = await _require_permission(session, id, user, owner=True)
-        source_package = build_export_package(
-            source,
-            (
-                await session.execute(select(WorkflowDefinition).where(WorkflowDefinition.app_id == id))
-            ).scalar_one_or_none(),
-        )
-        definition_payload = source_package["definition"]
-        draft_json = definition_payload.get("draftJson") or definition_payload.get("publishedJson")
-        copied = WorkflowApp(
-            id=uuid.uuid4().hex,
-            tenant_id=user.tenant_id,
-            ai_app_type=source_package["app"]["aiAppType"],
-            name=make_copy_name(source_package["app"]["name"]),
-            description=source_package["app"]["description"],
-            app_category=source_package["app"]["appCategory"],
-            app_icon=source_package["app"]["appIcon"],
-            config_json=source_package["app"]["configJson"],
-            status="draft",
-            owner_user_id=user.user_id,
-            owner_username=user.username,
-        )
-        session.add(copied)
-        if draft_json:
-            session.add(
-                WorkflowDefinition(
-                    id=uuid.uuid4().hex,
-                    app_id=copied.id,
-                    draft_json=draft_json,
-                    published_json=None,
-                    published_version=0,
-                    status="draft",
-                )
-            )
-        record_app_audit(
-            session,
-            app=copied,
-            action="copy",
-            actor=user,
-            after={**_app_audit_snapshot(copied), "sourceAppId": source.id},
-        )
-        await session.commit()
-        await session.refresh(copied)
-        return _app_dict(copied)
-
-
-# ---------- 授权 ----------
-
-@router.get("/app/acl/list")
-async def list_acl(appId: str, user: UserContext = Depends(current_user)):
-    async with async_session() as session:
-        await _require_permission(session, appId, user)
-        rows = (await session.execute(select(WorkflowAcl).where(WorkflowAcl.app_id == appId))).scalars().all()
-        return [
-            {
-                "id": row.id,
-                "appId": row.app_id,
-                "subjectType": row.subject_type,
-                "subjectId": row.subject_id,
-                "permission": row.permission,
-            }
-            for row in rows
-        ]
-
-
-@router.put("/app/acl/save")
-async def save_acl(payload: AclSaveRequest, user: UserContext = Depends(current_user)):
-    async with async_session() as session:
-        app, _ = await _require_permission(session, payload.appId, user, owner=True)
-        await session.execute(sa_delete(WorkflowAcl).where(WorkflowAcl.app_id == payload.appId))
-        seen_subjects: set[tuple[str, str]] = set()
-        for item in payload.items:
-            for subject_id in normalize_visible_ids(item.subjectId):
-                subject = (item.subjectType, subject_id)
-                if subject in seen_subjects:
-                    continue
-                seen_subjects.add(subject)
-                session.add(
-                    WorkflowAcl(
-                        id=uuid.uuid4().hex,
-                        app_id=payload.appId,
-                        subject_type=item.subjectType,
-                        subject_id=subject_id,
-                        permission=item.permission if item.permission in ("VIEWER", "EDITOR") else "VIEWER",
-                    )
-                )
-        record_app_audit(
-            session,
-            app=app,
-            action="update_acl",
-            actor=user,
-            before={},
-            after={"entryCount": len(seen_subjects)},
-        )
-        await session.commit()
-        return {"success": True}
 
 
 # ---------- 运行页外观（全局皮肤目录 / 智能体分配） ----------
@@ -2661,131 +2399,6 @@ async def admin_app_detail(app_id: str, user: UserContext = Depends(current_user
         }
 
 
-@router.get("/admin/app/{app_id}/metrics")
-async def admin_app_metrics(
-    app_id: str,
-    range: str = "last_7_days",
-    user: UserContext = Depends(current_user),
-):
-    await _require_agent_manage_permission(user)
-    async with async_session() as session:
-        if is_managed_builtin_id(app_id):
-            record = await get_managed_builtin(session, app_id)
-            try:
-                return await collect_app_metrics(session, None, range, builtin_origin=managed_builtin_origin(record))
-            except ValueError as exc:
-                raise HTTPException(400, str(exc)) from exc
-        app = await _get_app(session, app_id)
-        try:
-            return await collect_app_metrics(session, app, range)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-
-
-def _conversation_log_filters(
-    startAt: Optional[str], endAt: Optional[str], range: str, status: Optional[str], keyword: Optional[str], pageNo: int, pageSize: int,
-):
-    try:
-        return normalize_conversation_log_filters(startAt, endAt, range, status, keyword, pageNo, pageSize)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-async def _conversation_log_export(session, app: WorkflowApp, filters) -> Response:
-    page = await query_conversation_logs(session, app.id, filters, include_all=True, include_transcript=True)
-    if page["total"] > 10_000:
-        raise HTTPException(400, "导出记录不能超过 10000 条，请缩小筛选范围")
-    if not page["records"]:
-        raise HTTPException(400, "当前筛选条件下没有可导出的对话日志")
-    try:
-        content = build_conversation_log_xlsx(app.name, page["records"])
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    return Response(
-        content=content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="agent-conversation-logs-{app.id}.xlsx"'},
-    )
-
-
-@router.get("/admin/app/{app_id}/conversation-logs")
-async def admin_app_conversation_logs(
-    app_id: str, startAt: Optional[str] = None, endAt: Optional[str] = None, range: str = "last_7_days", status: Optional[str] = None,
-    keyword: Optional[str] = None, pageNo: int = 1, pageSize: int = 20, user: UserContext = Depends(current_user),
-):
-    await _require_agent_manage_permission(user)
-    filters = _conversation_log_filters(startAt, endAt, range, status, keyword, pageNo, pageSize)
-    async with async_session() as session:
-        await _get_app(session, app_id)
-        return await query_conversation_logs(session, app_id, filters)
-
-
-@router.get("/admin/app/{app_id}/conversation-logs/export")
-async def export_admin_app_conversation_logs(
-    app_id: str, startAt: Optional[str] = None, endAt: Optional[str] = None, range: str = "last_7_days", status: Optional[str] = None,
-    keyword: Optional[str] = None, user: UserContext = Depends(current_user),
-):
-    await _require_agent_manage_permission(user)
-    filters = _conversation_log_filters(startAt, endAt, range, status, keyword, 1, 100)
-    async with async_session() as session:
-        app = await _get_app(session, app_id)
-        return await _conversation_log_export(session, app, filters)
-
-
-async def _require_conversation_log_owner(session, app_id: str, user: UserContext) -> WorkflowApp:
-    app = await _get_app(session, app_id)
-    if app.owner_user_id != user.user_id:
-        raise HTTPException(403, "仅创建者可以查看对话日志")
-    return app
-
-
-@router.get("/admin/app/{app_id}/conversation-logs/{thread_id}")
-async def admin_app_conversation_log_detail(
-    app_id: str, thread_id: str, user: UserContext = Depends(current_user),
-):
-    await _require_agent_manage_permission(user)
-    async with async_session() as session:
-        await _get_app(session, app_id)
-        detail = await query_conversation_log_detail(session, app_id, thread_id)
-        if detail is None:
-            raise HTTPException(404, "会话日志不存在")
-        return detail
-
-
-@router.get("/app/{app_id}/conversation-logs")
-async def owner_app_conversation_logs(
-    app_id: str, startAt: Optional[str] = None, endAt: Optional[str] = None, range: str = "last_7_days", status: Optional[str] = None,
-    keyword: Optional[str] = None, pageNo: int = 1, pageSize: int = 20, user: UserContext = Depends(current_user),
-):
-    filters = _conversation_log_filters(startAt, endAt, range, status, keyword, pageNo, pageSize)
-    async with async_session() as session:
-        await _require_conversation_log_owner(session, app_id, user)
-        return await query_conversation_logs(session, app_id, filters)
-
-
-@router.get("/app/{app_id}/conversation-logs/export")
-async def export_owner_app_conversation_logs(
-    app_id: str, startAt: Optional[str] = None, endAt: Optional[str] = None, range: str = "last_7_days", status: Optional[str] = None,
-    keyword: Optional[str] = None, user: UserContext = Depends(current_user),
-):
-    filters = _conversation_log_filters(startAt, endAt, range, status, keyword, 1, 100)
-    async with async_session() as session:
-        app = await _require_conversation_log_owner(session, app_id, user)
-        return await _conversation_log_export(session, app, filters)
-
-
-@router.get("/app/{app_id}/conversation-logs/{thread_id}")
-async def owner_app_conversation_log_detail(
-    app_id: str, thread_id: str, user: UserContext = Depends(current_user),
-):
-    async with async_session() as session:
-        await _require_conversation_log_owner(session, app_id, user)
-        detail = await query_conversation_log_detail(session, app_id, thread_id)
-        if detail is None:
-            raise HTTPException(404, "会话日志不存在")
-        return detail
-
-
 @router.get("/app/{app_id}/evaluation-runs")
 async def owner_app_evaluation_runs(
     app_id: str,
@@ -4076,86 +3689,6 @@ async def resume_definition(
     except CheckpointAccessError as exc:
         # H2：resumeId 不属于当前用户/应用 → 403，不泄露他人挂起态
         raise HTTPException(403, str(exc)) from exc
-
-
-# ---------- HTTP / MCP 工具 ----------
-
-@router.post("/tool/http/test")
-async def http_tool_test(
-    config: str = Form(...),
-    toolName: str = Form(...),
-    values: str = Form("{}"),
-    fileParams: str = Form("[]"),
-    files: list[UploadFile] = File(default=[]),
-    user: UserContext = Depends(current_user),
-):
-    """Execute an unsaved HTTP tool draft without exposing secrets or server paths."""
-    del user
-    try:
-        parsed_config = json.loads(config)
-        parsed_values = json.loads(values)
-        parsed_file_params = json.loads(fileParams)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(400, "测试请求配置不是有效 JSON") from exc
-    if not isinstance(parsed_config, dict) or not isinstance(parsed_values, dict) or not isinstance(parsed_file_params, list):
-        raise HTTPException(400, "测试请求配置格式不正确")
-    if len(files) > HTTP_TOOL_TEST_FILE_COUNT_LIMIT or len(files) != len(parsed_file_params):
-        raise HTTPException(400, f"测试请求最多上传 {HTTP_TOOL_TEST_FILE_COUNT_LIMIT} 个文件，且必须与文件参数一一对应")
-
-    uploads: dict[str, tool_invoker.HttpUpload] = {}
-    for param, upload in zip(parsed_file_params, files):
-        content = await upload.read(HTTP_TOOL_TEST_FILE_LIMIT + 1)
-        if len(content) > HTTP_TOOL_TEST_FILE_LIMIT:
-            raise HTTPException(413, "单个测试文件不能超过 20MB")
-        uploads[str(param)] = tool_invoker.HttpUpload(
-            filename=upload.filename or "file",
-            content_type=upload.content_type or "application/octet-stream",
-            content=content,
-        )
-
-    try:
-        result = await tool_invoker.execute_http_toolset_request(
-            parsed_config,
-            str(toolName),
-            parsed_values,
-            uploaded_files=uploads,
-        )
-    except tool_invoker.ToolInvokeError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    safe_headers = {
-        key: value
-        for key, value in result.headers.items()
-        if key.lower() not in {"set-cookie", "authorization", "proxy-authorization"}
-    }
-    return {
-        "ok": 200 <= result.status_code < 400,
-        "statusCode": result.status_code,
-        "durationMs": result.duration_ms,
-        "headers": safe_headers,
-        "body": result.body,
-        "truncated": result.truncated,
-    }
-
-
-# ---------- MCP 工具 ----------
-
-class McpDiscoverRequest(BaseModel):
-    url: str
-    headers: Optional[dict] = None
-
-
-@router.post("/tool/mcp/discover")
-async def mcp_discover(payload: McpDiscoverRequest, user: UserContext = Depends(current_user)):
-    """连接外部 MCP Server 并列出工具（服务端执行；浏览器不直连、不接收明文 Header 之外的信息）。"""
-    from app.services.gateway.mcp_client import McpClientError, list_mcp_tools
-
-    try:
-        tools = await list_mcp_tools(payload.url, payload.headers)
-    except McpClientError as exc:
-        raise HTTPException(400, str(exc))
-    if not tools:
-        raise HTTPException(400, "未从该 MCP Server 发现任何工具")
-    return {"tools": tools}
 
 
 # ---------- 四 Tab 节点模板目录与 preview node（gap-audit §7.3，蓝本两阶段协议） ----------
