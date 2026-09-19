@@ -445,6 +445,12 @@ class AgentSkill(Base):
     creation_error = Column(String(1024), nullable=True)
     current_version_id = Column(String(64), nullable=True)
     owner_user_id = Column(String(64), index=True, nullable=False)
+    # 分发（2026-09-19）：管理员把自己上传的技能「分发到全平台」= source 改 system 并记下是谁分发的；
+    # owner_user_id 保持不变——谁做的仍是谁的，撤回后回到他的个人广场。
+    distributed_by_user_id = Column(String(64), nullable=True)
+    # 内置 = 随代码发布 / 启动期播种（ppt-studio、sys-skill-*），不可撤回、不可删、不可改；
+    # 单靠 source=system 已分不清「内置」与「管理员分发」，所以单列一位。
+    builtin = Column(SmallInteger, nullable=False, default=0, server_default="0")
     create_time = Column(DateTime, server_default=func.now())
     update_time = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

@@ -5,12 +5,20 @@
 - 创建 = 按名称+描述异步生成说明书（creationStatus: creating -> ready/failed）；
 - 导入 = zip 包（skill.json 元数据 + SKILL.md 内容）；
 - 沙箱执行运行时未启用前，内容以能力说明书形态被 agent 节点注入（manifest D-11）。
+
+隔离与分发（2026-09-19，产品决定：「每个用户自己的 skill 广场是隔离开的，管理员可以统一分发」）：
+- 可见性只有一条规则：system 或自己 owner 的。**管理员没有旁路**——别人的个人技能对 admin 同样
+  不可见（隐私）。看不见的技能一律 404，不用 403 暴露「存在但不是你的」。
+- 分发 = 管理员把**自己上传的**个人技能 source 改成 system（全平台可见、可 @、可 use_skill），
+  并记 distributed_by_user_id；owner 不变，撤回后回到他自己的广场。
+- 内置技能（builtin=1）不可撤回/删除/编辑；权限判定统一在 skill_catalog.can_*，这里只调用。
 """
 import asyncio
 import base64
 import io
 import json
 import logging
+import re
 import time
 import uuid
 import zipfile
@@ -19,9 +27,9 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from app.core.auth import UserContext, current_user
+from app.core.auth import UserContext, current_user, is_admin
 from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.database import async_session
@@ -35,6 +43,10 @@ router = APIRouter(prefix="/skill", tags=["agent-skill"])
 
 VALID_CATEGORIES = {"search", "tool", "coding", "data", "analysis", "communication", "other"}
 CONTENT_LIMIT = 200_000
+# 技能名上限与列宽（AgentSkill.name String(128)）一致；超长明确报错而不是静默截断成另一个名字
+SKILL_NAME_MAX = 128
+# 技能名里的控制字符（含换行/制表/零宽外的 C0/C1 区）：会把列表渲染、@Skill 匹配与日志都搞乱
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 # 技能包解压体积闸（zip_guard）：上传只卡了压缩后 5MB，而 5MB 的 DEFLATE 能解出数 GB。
 # 导入与挂载共用同一组阈值——挂载走的是同一批入库字节，两边口径必须一致。
@@ -89,20 +101,60 @@ def _spawn_background(coro) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
+def _visible_clause(user_id: str):
+    """可见性谓词（列表、单条读取、内部加载共用）：system 或自己 owner 的。
+    没有 admin 分支——管理员看不到别人的个人技能是产品定的隐私边界，不是漏做。"""
+    return (AgentSkill.source == "system") | (AgentSkill.owner_user_id == user_id)
+
+
 async def _get_visible_skill(session, skill_id: str, user_id: str) -> AgentSkill:
-    """系统技能全员可见；个人技能仅属主可见（防跨用户读取说明书内容）。"""
-    skill = (await session.execute(select(AgentSkill).where(AgentSkill.id == skill_id))).scalar_one_or_none()
+    """取一条对当前用户可见的技能；不存在**或不可见**都回 404——别人的个人技能对你就是不存在，
+    403 会暴露「有这么个 id 但不是你的」。"""
+    skill = (
+        await session.execute(select(AgentSkill).where(AgentSkill.id == skill_id, _visible_clause(user_id)))
+    ).scalar_one_or_none()
     if skill is None:
         raise HTTPException(404, "技能不存在")
-    if skill.source != "system" and skill.owner_user_id != user_id:
-        raise HTTPException(403, "无权访问该技能")
     return skill
 
 
-def _skill_dict(skill: AgentSkill, version: Optional[AgentSkillVersion] = None) -> dict:
+def _skill_dict(
+    skill: AgentSkill, version: Optional[AgentSkillVersion] = None, user: Optional[UserContext] = None
+) -> dict:
     """序列化统一走 skill_catalog.serialize_skill：路由输出与主对话进程内目录是同一份字段
-    （skillId/recordId/enabled/version），Skill 广场与 @Skill 面板不用再适配第二种形状。"""
-    return skill_catalog.serialize_skill(skill, version)
+    （skillId/recordId/enabled/version），Skill 广场与 @Skill 面板不用再适配第二种形状。
+    带 user 时算出 canEdit/canDelete/canDistribute/canRevoke（按当前用户视角）。"""
+    return skill_catalog.serialize_skill(
+        skill,
+        version,
+        viewer_user_id=user.user_id if user is not None else None,
+        viewer_is_admin=is_admin(user) if user is not None else False,
+    )
+
+
+def _normalize_skill_name(raw: Optional[str], *, required: bool = True) -> str:
+    """技能名清洗：去控制字符、去首尾空白、限长。超长报可读错误而不是 [:128] 静默截断——
+    截断后的名字用户没见过，重名判定也会被绕开。"""
+    name = _CONTROL_CHARS_RE.sub("", str(raw or "")).strip()
+    if not name:
+        if required:
+            raise HTTPException(400, "技能名称不能为空")
+        return ""
+    if len(name) > SKILL_NAME_MAX:
+        raise HTTPException(400, f"技能名称不能超过 {SKILL_NAME_MAX} 个字符（当前 {len(name)} 个）")
+    return name
+
+
+async def _ensure_name_unique(session, user_id: str, name: str, *, exclude_id: Optional[str] = None) -> None:
+    """同一用户名下不允许重名（含他已分发出去的）：重名时报可读的 409，不静默覆盖也不默默多一条。
+    只在 owner 维度判——不同用户各自的广场是隔离的，允许各自有叫「文本总结」的技能。"""
+    query = select(AgentSkill.id).where(AgentSkill.owner_user_id == user_id, AgentSkill.name == name)
+    if exclude_id:
+        query = query.where(AgentSkill.id != exclude_id)
+    # first() 而不是 scalar_one_or_none()：存量数据可能已经有重名，这里只判「有没有」
+    duplicate = (await session.execute(query)).scalars().first()
+    if duplicate:
+        raise HTTPException(409, f"你已有一个名为「{name}」的技能，请换个名称或先删除旧技能")
 
 
 def _version_dict(version: AgentSkillVersion) -> dict:
@@ -150,11 +202,20 @@ async def _seed_system_skills() -> None:
                     creation_status="ready",
                     current_version_id=version_id,
                     owner_user_id="system",
+                    builtin=1,
                 )
             )
             session.add(
                 AgentSkillVersion(id=version_id, skill_id=seed["id"], version_name="v1", content=seed["content"])
             )
+        # 存量回填：builtin 列是 2026-09-19 加的，之前播下去的 owner_user_id="system" 行（sys-skill-* 与
+        # 内置包）全是平台自带的，补成 builtin=1，否则它们会在管理员列表里显示成「可撤回」。
+        # 幂等 UPDATE，命中 0 行也无妨；用户上传/分发的技能 owner 永远是真实用户 id，不会被误伤。
+        await session.execute(
+            update(AgentSkill)
+            .where(AgentSkill.owner_user_id == "system", AgentSkill.builtin == 0)
+            .values(builtin=1, source="system", distributed_by_user_id=None)
+        )
         await session.commit()
     await skill_catalog.ensure_builtin_skills_seeded()
 
@@ -218,20 +279,21 @@ async def _generate_skill_content(skill_id: str, name: str, description: str, us
 @router.get("/list")
 async def list_skills(
     keyword: Optional[str] = None,
+    scope: Optional[str] = None,
     source: Optional[str] = None,
     user: UserContext = Depends(current_user),
 ):
+    """当前用户的 Skill 广场：`scope=personal|system|all`（旧参数名 `source` 同义，前端存量调用还在用）。
+    管理员与普通用户同一套可见性——admin 的 personal 只有他自己的，别人的个人技能不出现。"""
     await _seed_system_skills()
-    source_filter = (source or "").strip().lower()
+    source_filter = (scope or source or "").strip().lower()
     async with async_session() as session:
         if source_filter == "personal":
             query = select(AgentSkill).where(AgentSkill.source == "personal", AgentSkill.owner_user_id == user.user_id)
         elif source_filter == "system":
             query = select(AgentSkill).where(AgentSkill.source == "system")
         else:
-            query = select(AgentSkill).where(
-                (AgentSkill.source == "system") | (AgentSkill.owner_user_id == user.user_id)
-            )
+            query = select(AgentSkill).where(_visible_clause(user.user_id))
         rows = (await session.execute(query)).scalars().all()
         # 带上当前版本号（Skill 广场卡片展示 v3.0.7 之类），一次 IN 查询而不是逐条取
         version_ids = [row.current_version_id for row in rows if row.current_version_id]
@@ -241,7 +303,7 @@ async def list_skills(
                 await session.execute(select(AgentSkillVersion).where(AgentSkillVersion.id.in_(version_ids)))
             ).scalars().all()
             versions = {v.id: v for v in version_rows}
-    items = [_skill_dict(row, versions.get(row.current_version_id or "")) for row in rows]
+    items = [_skill_dict(row, versions.get(row.current_version_id or ""), user) for row in rows]
     if keyword:
         key = keyword.strip().lower()
         items = [i for i in items if key in i["name"].lower() or key in (i["description"] or "").lower()]
@@ -252,23 +314,22 @@ async def list_skills(
 
 @router.post("/add")
 async def add_skill(payload: SkillUpsertRequest, user: UserContext = Depends(current_user)):
-    name = (payload.name or "").strip()
-    if not name:
-        raise HTTPException(400, "技能名称不能为空")
+    name = _normalize_skill_name(payload.name)
     skill = AgentSkill(
         id=uuid.uuid4().hex,
         source="personal",
-        name=name[:128],
+        name=name,
         description=(payload.description or "")[:1024],
         category_json=_clean_categories(payload.category),
         creation_status="creating",
         owner_user_id=user.user_id,
     )
     async with async_session() as session:
+        await _ensure_name_unique(session, user.user_id, name)
         session.add(skill)
         await session.commit()
         await session.refresh(skill)
-        result = _skill_dict(skill)
+        result = _skill_dict(skill, None, user)
     _spawn_background(_generate_skill_content(result["id"], result["name"], result["description"], user.user_id))
     return result
 
@@ -278,30 +339,36 @@ async def edit_skill(payload: SkillUpsertRequest, user: UserContext = Depends(cu
     if not payload.id:
         raise HTTPException(400, "缺少技能 ID")
     async with async_session() as session:
-        skill = (await session.execute(select(AgentSkill).where(AgentSkill.id == payload.id))).scalar_one_or_none()
-        if skill is None:
-            raise HTTPException(404, "技能不存在")
-        if skill.source == "system" or skill.owner_user_id != user.user_id:
-            raise HTTPException(403, "只能编辑自己创建的技能")
+        # 不可见（别人的个人技能）→ 404；可见但无权（系统/内置/别人分发的）→ 403
+        skill = await _get_visible_skill(session, payload.id, user.user_id)
+        if not skill_catalog.can_edit(skill, user.user_id):
+            raise HTTPException(403, "内置技能不可编辑" if skill_catalog.is_builtin(skill) else "只能编辑自己创建的技能")
         if payload.name is not None:
-            skill.name = payload.name.strip()[:128] or skill.name
+            new_name = _normalize_skill_name(payload.name, required=False)
+            if new_name and new_name != skill.name:
+                await _ensure_name_unique(session, user.user_id, new_name, exclude_id=skill.id)
+                skill.name = new_name
         if payload.description is not None:
             skill.description = payload.description[:1024]
         if payload.category is not None:
             skill.category_json = _clean_categories(payload.category)
         await session.commit()
         await session.refresh(skill)
-        return _skill_dict(skill)
+        version = None
+        if skill.current_version_id:
+            version = (
+                await session.execute(select(AgentSkillVersion).where(AgentSkillVersion.id == skill.current_version_id))
+            ).scalar_one_or_none()
+        return _skill_dict(skill, version, user)
 
 
 @router.delete("/delete")
 async def delete_skill(id: str, user: UserContext = Depends(current_user)):
     async with async_session() as session:
-        skill = (await session.execute(select(AgentSkill).where(AgentSkill.id == id))).scalar_one_or_none()
-        if skill is None:
-            return {"success": True}
-        if skill.source == "system" or skill.owner_user_id != user.user_id:
-            raise HTTPException(403, "只能删除自己创建的技能")
+        # 不存在与不可见同为 404（不再对不存在的 id 返回 success：那会让「删别人的」看起来像成功了）
+        skill = await _get_visible_skill(session, id, user.user_id)
+        if not skill_catalog.can_delete(skill, user.user_id):
+            raise HTTPException(403, "内置技能不可删除" if skill_catalog.is_builtin(skill) else "只能删除自己创建的技能")
         versions = (
             (await session.execute(select(AgentSkillVersion).where(AgentSkillVersion.skill_id == id))).scalars().all()
         )
@@ -310,6 +377,70 @@ async def delete_skill(id: str, user: UserContext = Depends(current_user)):
         await session.delete(skill)
         await session.commit()
     return {"success": True}
+
+
+# ---------------------------------------------------------------- 分发 / 撤回（仅管理员）
+def _require_admin(user: UserContext) -> None:
+    """分发是把技能推给全平台的动作，只有 admin 能做；普通用户一律 403（不查库，不暴露任何 id 的存在性）。"""
+    if not is_admin(user):
+        raise HTTPException(403, "仅管理员可以分发或撤回技能")
+
+
+async def _current_version_of(session, skill: AgentSkill) -> Optional[AgentSkillVersion]:
+    if not skill.current_version_id:
+        return None
+    return (
+        await session.execute(select(AgentSkillVersion).where(AgentSkillVersion.id == skill.current_version_id))
+    ).scalar_one_or_none()
+
+
+@router.post("/{skill_id}/distribute")
+async def distribute_skill(skill_id: str, user: UserContext = Depends(current_user)):
+    """管理员把**自己上传的**技能分发到全平台：source→system、记 distributed_by_user_id，owner 不变。
+
+    只允许分发自己的：管理员看不到别人的个人技能（隐私），自然也不能替别人公开——
+    对学生的技能 id 调这里得到 404，与「不可见即不存在」一致。已分发的重复调用幂等返回。"""
+    _require_admin(user)
+    async with async_session() as session:
+        skill = await _get_visible_skill(session, skill_id, user.user_id)
+        if skill_catalog.is_builtin(skill):
+            raise HTTPException(400, "内置技能已对全平台可见，无需分发")
+        if skill.source == "system":
+            # 已经是全平台可见（自己分发过的）：幂等
+            if skill.owner_user_id != user.user_id:
+                raise HTTPException(403, "只能分发自己上传的技能")
+            return _skill_dict(skill, await _current_version_of(session, skill), user)
+        if not skill_catalog.can_distribute(skill, user.user_id, is_admin=True):
+            raise HTTPException(403, "只能分发自己上传的技能")
+        if skill.creation_status != "ready" or not skill.current_version_id:
+            raise HTTPException(400, "技能说明书尚未生成完成，暂不能分发")
+        skill.source = "system"
+        skill.distributed_by_user_id = user.user_id
+        await session.commit()
+        await session.refresh(skill)
+        logger.info("技能 %s 由 %s 分发到全平台", skill.id, user.user_id)
+        return _skill_dict(skill, await _current_version_of(session, skill), user)
+
+
+@router.post("/{skill_id}/revoke-distribution")
+async def revoke_skill_distribution(skill_id: str, user: UserContext = Depends(current_user)):
+    """管理员撤回分发：source 回 personal、清 distributed_by_user_id；技能回到属主自己的广场。
+    内置技能（builtin=1）不可撤回；本来就没分发的个人技能报 400。"""
+    _require_admin(user)
+    async with async_session() as session:
+        skill = await _get_visible_skill(session, skill_id, user.user_id)
+        if skill_catalog.is_builtin(skill):
+            raise HTTPException(403, "内置技能不可撤回")
+        if skill.source != "system":
+            raise HTTPException(400, "该技能未分发到全平台，无需撤回")
+        if not skill_catalog.can_revoke(skill, user.user_id, is_admin=True):
+            raise HTTPException(403, "无权撤回该技能")
+        skill.source = "personal"
+        skill.distributed_by_user_id = None
+        await session.commit()
+        await session.refresh(skill)
+        logger.info("技能 %s 的全平台分发已由 %s 撤回", skill.id, user.user_id)
+        return _skill_dict(skill, await _current_version_of(session, skill), user)
 
 
 @router.post("/import")
@@ -361,10 +492,14 @@ async def import_skill(file: UploadFile = File(...), user: UserContext = Depends
         logger.warning("拒绝导入疑似解压炸弹技能包 %s: %s", file.filename, exc.reason)
         raise HTTPException(400, exc.message)
     content = (content or md_fallback)[:CONTENT_LIMIT]
+    file_count = sum(1 for entry in archive.namelist() if not entry.endswith("/"))
 
-    name = str(metadata.get("name") or "").strip() or (file.filename or "导入技能").rsplit(".", 1)[0]
     if not content and not metadata:
         raise HTTPException(400, "包内缺少 skill.json 或 SKILL.md，无法识别技能元数据")
+    # 名字来源：skill.json 的 name，否则文件名；两者都过同一道清洗（控制字符/长度）
+    name = _normalize_skill_name(
+        str(metadata.get("name") or "").strip() or (file.filename or "导入技能").rsplit(".", 1)[0]
+    )
 
     # 无条件保留整个技能包文件树（说明书之外的资源文件与脚本一并入库），供沙箱部署；base64 存库。
     # 执行形态（hasScripts）不在存储层区分，由 load_skill_packages 按包内容派生（ADR-043）。
@@ -373,7 +508,7 @@ async def import_skill(file: UploadFile = File(...), user: UserContext = Depends
     skill = AgentSkill(
         id=uuid.uuid4().hex,
         source="personal",
-        name=name[:128],
+        name=name,
         description=str(metadata.get("description") or "")[:1024],
         category_json=_clean_categories(metadata.get("category")),
         creation_status="ready",
@@ -390,17 +525,20 @@ async def import_skill(file: UploadFile = File(...), user: UserContext = Depends
                 "originalFilename": file.filename or "",
                 "importedAt": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "hasScripts": has_scripts,
+                # 列表字段 fileCount 的来源：入库时数好，列表页不用再解一次 base64
+                "fileCount": file_count,
             },
             ensure_ascii=False,
         ),
     )
     skill.current_version_id = version.id
     async with async_session() as session:
+        await _ensure_name_unique(session, user.user_id, name)
         session.add(skill)
         session.add(version)
         await session.commit()
         await session.refresh(skill)
-        result = _skill_dict(skill)
+        result = _skill_dict(skill, version, user)
     return result
 
 
@@ -463,7 +601,7 @@ async def load_skill_contents(
     async with async_session() as session:
         query = select(AgentSkill).where(AgentSkill.id.in_(skill_ids))
         if owner_user_id is not None:
-            query = query.where((AgentSkill.source == "system") | (AgentSkill.owner_user_id == owner_user_id))
+            query = query.where(_visible_clause(owner_user_id))
         skills = (await session.execute(query)).scalars().all()
         version_ids = [s.current_version_id for s in skills if s.current_version_id]
         versions = {}
@@ -510,7 +648,7 @@ async def load_skill_packages(skill_ids: list[str], owner_user_id: Optional[str]
     async with async_session() as session:
         query = select(AgentSkill).where(AgentSkill.id.in_(skill_ids))
         if owner_user_id is not None:
-            query = query.where((AgentSkill.source == "system") | (AgentSkill.owner_user_id == owner_user_id))
+            query = query.where(_visible_clause(owner_user_id))
         skills = (await session.execute(query)).scalars().all()
         version_ids = [s.current_version_id for s in skills if s.current_version_id]
         versions = {}

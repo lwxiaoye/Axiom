@@ -47,13 +47,19 @@ async def _migrate_embedding_model():
 
 
 async def _migrate_agent_skill():
-    """给 agent_skill_version 加技能包文件树列（幂等）。"""
+    """给 agent_skill_version 加技能包文件树列、agent_skill 加分发/内置标记列（幂等）。"""
     from sqlalchemy import text
     async with engine.begin() as conn:
-        try:
-            await conn.execute(text("ALTER TABLE agent_skill_version ADD COLUMN package_b64 MEDIUMTEXT NULL"))
-        except Exception:
-            pass  # 列已存在
+        for ddl in [
+            "ALTER TABLE agent_skill_version ADD COLUMN package_b64 MEDIUMTEXT NULL",
+            # 技能分发（管理员分发到全平台 / 撤回）与内置标记，见 models.AgentSkill 注释
+            "ALTER TABLE agent_skill ADD COLUMN distributed_by_user_id VARCHAR(64) NULL",
+            "ALTER TABLE agent_skill ADD COLUMN builtin TINYINT NOT NULL DEFAULT 0",
+        ]:
+            try:
+                await conn.execute(text(ddl))
+            except Exception:
+                pass  # 列已存在
 
 
 async def _migrate_chat_columns():

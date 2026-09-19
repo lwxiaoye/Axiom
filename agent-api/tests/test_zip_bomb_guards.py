@@ -273,6 +273,17 @@ class TestSkillPackageZipGuard:
             async def refresh(self, obj):
                 return None
 
+            async def execute(self, *_args, **_kwargs):
+                # 导入前的同名检查（_ensure_name_unique）会查一次库：替身回「没有重名」
+                class _Result:
+                    def scalars(self):
+                        return self
+
+                    def first(self):
+                        return None
+
+                return _Result()
+
         with patch.object(agent_skill, "async_session", _FakeSession):
             result = await agent_skill.import_skill(file=self._upload(raw), user=user)
 
@@ -280,6 +291,8 @@ class TestSkillPackageZipGuard:
         version = [o for o in captured["added"] if hasattr(o, "package_b64")][0]
         assert "# 测试技能" in (version.content or "")
         assert '"hasScripts": true' in version.import_source_json
+        assert '"fileCount": 3' in version.import_source_json
+        assert result["fileCount"] == 3
 
     # 挂载路径的版本替身：d634efb 起 _extract_skill_files 先用 import_source_json 判「是不是内置包」，
     # 替身要带上这个字段（None = 普通导入包），否则测的就不是真实 ORM 行的形状。
