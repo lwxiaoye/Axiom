@@ -19,10 +19,6 @@ from .domain_policy import (
     DomainPolicyError,
     normalize_official_domains,
 )
-from app.services.campus_assistant.main_chat_skin_service import (
-    MainChatSkinError,
-    validate_skin_selection,
-)
 from .policy import CAMPUS_POLICY_VERSION
 
 logger = logging.getLogger(__name__)
@@ -75,11 +71,9 @@ def compute_config_hash(
     official_domains: list[dict],
     knowledge_bindings: list[dict],
     policy_version: str,
-    main_chat_skin_id: Optional[str] = None,
 ) -> str:
     payload = {
         "model_id": str(model_id or "").strip(),
-        "main_chat_skin_id": str(main_chat_skin_id or "").strip(),
         "policy_version": str(policy_version or "").strip(),
         "official_domains": [
             {
@@ -154,7 +148,6 @@ def serialize_release(release: Optional[CampusAssistantRelease], bindings: Optio
         "base_release_id": release.base_release_id,
         "rollback_from_release_id": release.rollback_from_release_id,
         "model_id": release.model_id,
-        "main_chat_skin_id": release.main_chat_skin_id,
         "official_domains": _loads_list(release.official_domains_json),
         "policy_version": release.policy_version,
         "change_note": release.change_note or "",
@@ -180,7 +173,6 @@ async def _empty_draft(session: AsyncSession, config: CampusAssistantConfig, use
         status=STATUS_DRAFT,
         version_no=None,
         model_id="",
-        main_chat_skin_id=None,
         official_domains_json="[]",
         policy_version=CAMPUS_POLICY_VERSION,
         change_note="",
@@ -210,7 +202,6 @@ async def _clone_release(
         base_release_id=source.id,
         rollback_from_release_id=rollback_from,
         model_id=source.model_id,
-        main_chat_skin_id=source.main_chat_skin_id,
         official_domains_json=source.official_domains_json,
         policy_version=source.policy_version or CAMPUS_POLICY_VERSION,
         change_note="",
@@ -334,18 +325,6 @@ async def save_draft(user, body) -> dict:
             )).scalars().first()
             model_id = str(getattr(row, "model_id", "") or "")
         draft.model_id = model_id
-        if "main_chat_skin_id" in getattr(body, "model_fields_set", set()):
-            requested_skin_id = str(body.main_chat_skin_id or "").strip() or None
-            try:
-                await validate_skin_selection(
-                    session,
-                    tenant_id,
-                    requested_skin_id,
-                    for_update=True,
-                )
-            except MainChatSkinError as exc:
-                raise CampusConfigError(exc.status_code, exc.detail) from exc
-            draft.main_chat_skin_id = requested_skin_id
         draft.official_domains_json = _dumps(domains)
         draft.change_note = str(body.change_note or "")[:1024]
         draft.policy_version = CAMPUS_POLICY_VERSION
@@ -396,7 +375,6 @@ async def validate_payload(
     model_id: str,
     official_domains: list[dict],
     knowledge_bindings: list[dict],
-    main_chat_skin_id: Optional[str] = None,
     session: Optional[AsyncSession] = None,
 ) -> dict:
     errors: list[str] = []
@@ -431,15 +409,6 @@ async def validate_payload(
     try:
         if model_id and not await _model_available(session, model_id):
             errors.append("固定模型不存在或已停用")
-        try:
-            await validate_skin_selection(
-                session,
-                tenant_id,
-                main_chat_skin_id,
-                for_update=True,
-            )
-        except MainChatSkinError as exc:
-            errors.append(exc.detail)
         names: list[str] = []
         categories: list[str] = []
         for item in enabled_bindings:
@@ -498,13 +467,10 @@ async def validate_draft(user, body=None) -> dict:
             raise CampusConfigError(404, "草稿不存在")
         bindings = await _load_bindings(session, draft.id)
         model_id = draft.model_id
-        main_chat_skin_id = draft.main_chat_skin_id
         domains = _loads_list(draft.official_domains_json)
         if body is not None:
             if body.model_id is not None:
                 model_id = body.model_id
-            if "main_chat_skin_id" in getattr(body, "model_fields_set", set()):
-                main_chat_skin_id = str(body.main_chat_skin_id or "").strip() or None
             if body.official_domains is not None:
                 domains = [item.model_dump() for item in body.official_domains]
             if body.knowledge_bindings is not None:
@@ -514,7 +480,6 @@ async def validate_draft(user, body=None) -> dict:
             model_id=model_id,
             official_domains=domains,
             knowledge_bindings=bindings,
-            main_chat_skin_id=main_chat_skin_id,
             session=session,
         )
         result["revision"] = int(config.revision or 0)
@@ -544,7 +509,6 @@ async def publish_draft(user, body) -> dict:
             model_id=draft.model_id,
             official_domains=domains,
             knowledge_bindings=bindings,
-            main_chat_skin_id=draft.main_chat_skin_id,
             session=session,
         )
         if result["errors"]:
@@ -569,7 +533,6 @@ async def publish_draft(user, body) -> dict:
             official_domains=result["official_domains"],
             knowledge_bindings=bindings,
             policy_version=draft.policy_version or CAMPUS_POLICY_VERSION,
-            main_chat_skin_id=draft.main_chat_skin_id,
         )
         config.current_release_id = draft.id
         config.draft_release_id = None

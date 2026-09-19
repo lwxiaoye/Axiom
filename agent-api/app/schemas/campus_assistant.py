@@ -24,13 +24,11 @@ class KnowledgeBindingInput(BaseModel):
 
 
 class DraftUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # 皮肤系统已移除；旧前端 / 旧草稿请求体里可能仍带 main_chat_skin_id 之类的字段，静默忽略而不是 422。
+    model_config = ConfigDict(extra="ignore")
 
     expected_revision: int
     model_id: str
-    # None/empty means the standard main-chat appearance.  The field is deliberately separate from
-    # child-agent presentation assignments and is only interpreted by the campus release service.
-    main_chat_skin_id: Optional[str] = None
     official_domains: List[OfficialDomainRule] = Field(default_factory=list)
     knowledge_bindings: List[KnowledgeBindingInput] = Field(default_factory=list)
     change_note: str = ""
@@ -38,11 +36,10 @@ class DraftUpdateRequest(BaseModel):
 
 
 class DraftValidateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     expected_revision: Optional[int] = None
     model_id: Optional[str] = None
-    main_chat_skin_id: Optional[str] = None
     official_domains: Optional[List[OfficialDomainRule]] = None
     knowledge_bindings: Optional[List[KnowledgeBindingInput]] = None
 
@@ -61,11 +58,3 @@ class RollbackRequest(BaseModel):
     expected_revision: int
     change_note: str = ""
 
-
-class MainChatSkinMetadataUpdateRequest(BaseModel):
-    """Mutable installation metadata; portable package contents remain immutable."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=128)
-    description: str = Field(default="", max_length=512)
