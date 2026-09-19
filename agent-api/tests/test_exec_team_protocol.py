@@ -184,10 +184,22 @@ async def test_call_subagent_file_receipt_reaches_live_window_and_artifact_event
 
 @pytest.mark.asyncio
 async def test_delegation_progress_precedes_the_real_subagent_started_event():
-    """先说明和打开委派；服务真正 started 后才让成员进入工作态。"""
+    """先说明和打开委派；服务真正 started 后才让成员进入工作态。
+
+    主循环里「先说明」由**模型自己**给（call_subagent 工具描述要求首次委派前先说一句公开
+    说明），工具循环只负责按真实事件投影：模型 commentary → subagent.preparing（准入通过、
+    委派已提交）→ 服务真正 started 后才 subagent.started。主循环不会替模型合成一句
+    「接下来委派给 X」——那种只复述下一行工具名的一句话正是 is_low_value_action_commentary
+    要拦的东西；合成说明只存在于用户显式 @ 的直连路径（subagent_turn）。
+    """
     channel = SSEChannel(HARNESS, "t-1", "r-1")
 
     async def _events():
+        yield {
+            "type": "commentary",
+            "text": "知识库卡片高度属于界面细节，这部分交给「界面审查助手」核对；核对结果回来后我再汇总。",
+            "kind": "tool_round",
+        }
         yield {
             "type": "tool_started",
             "name": "call_subagent",
@@ -221,3 +233,28 @@ async def test_delegation_progress_precedes_the_real_subagent_started_event():
     assert "界面审查助手" in payloads[0]["data"]["text"]
     assert payloads[1]["data"]["name"] == "界面审查助手"
     assert payloads[2]["data"]["icon"] == "/upload/audit-agent.png"
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_does_not_fabricate_delegation_commentary():
+    """模型没说明时，主循环不替它编一句「接下来委派给 X」：只按真实事件投影。"""
+    channel = SSEChannel(HARNESS, "t-1", "r-1")
+
+    async def _events():
+        yield {
+            "type": "tool_started",
+            "name": "call_subagent",
+            "args": {"subagent_id": "s1", "input": "核对知识库卡片高度"},
+        }
+        yield {
+            "type": "subagent_event",
+            "event": {"type": "started", "subagent_id": "s1", "subagent_name": "界面审查助手"},
+        }
+
+    frames = [
+        frame async for frame in main_tool_turn.map_tool_loop_events(
+            channel, _events(), {"s1": "界面审查助手"}, {"answer": "", "trace": []},
+        )
+    ]
+    types = [_frame_payload(frame)["type"] for frame in frames]
+    assert types == ["subagent.preparing", "subagent.started"]

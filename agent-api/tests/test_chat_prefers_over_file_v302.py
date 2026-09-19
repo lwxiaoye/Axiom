@@ -57,10 +57,13 @@ def test_explicit_save_md_not_chat_prefer():
 
 
 def test_system_prompt_has_chat_vs_file_rule():
+    """基础提示词保留「对话内容与文件产物」的交付面区分，但由模型按目标决定是否落盘；
+    旧的「对话结论 vs 文件产物 / 先问再写」关键词硬规则已随 Harness 规范退役。"""
     from pathlib import Path
     src = Path("app/services/chat/turn_context_builder.py").read_text(encoding="utf-8")
-    assert "对话结论 vs 文件产物" in src
-    assert "先问再写" in src
+    assert "对话内容与文件产物" in src
+    assert "模型根据用户目标决定是否检索、获取资源、写入工作区或只在对话中回答" in src
+    assert "平台不按中文关键词强制下载、检索顺序、文件工具或附图形式" in src
 
 
 def test_research_mode_prompt_compiles_report_instead_of_write_file():
@@ -78,8 +81,11 @@ def test_research_mode_prompt_compiles_report_instead_of_write_file():
     assert "停止搜索并在对话中给出结论" in block
 
 
-def test_hard_gate_metric_name_present():
+def test_no_keyword_hard_gate_blocks_write_file():
+    """`chat_prefers_block_write` 硬闸已退役：Harness 不再凭中文关键词软拒 write_file
+    （规范：「不再用中文关键词猜测是否要文件」）。`_goal_prefers_chat_over_file_deliverable`
+    仅作为计划标题等启发式的输入保留，不得再长回一条阻断工具调用的闸。"""
     from pathlib import Path
     src = Path("app/services/agent_harness/model_driver.py").read_text(encoding="utf-8")
-    assert "chat_prefers_block_write" in src
+    assert "chat_prefers_block_write" not in src
     assert "_goal_prefers_chat_over_file_deliverable" in src

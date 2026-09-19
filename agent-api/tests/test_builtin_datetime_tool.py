@@ -1,12 +1,8 @@
 import asyncio
 import json
 import unittest
-import sys
-import types
 from datetime import datetime, timezone
 from unittest.mock import patch
-
-sys.modules.setdefault("httpx", types.SimpleNamespace(AsyncClient=object))
 
 from app.services.skills.builtin_tools import BUILTIN_TOOL_MAP, _format_datetime, execute_builtin_tool
 

@@ -10,6 +10,12 @@ import pytest
 from app.services.agent_api import access_service
 
 
+@pytest.fixture(autouse=True)
+def _api_key_pepper(monkeypatch):
+    """密钥哈希需要 pepper（线上来自 INTERNAL_SYNC_SECRET）；单测容器没有这个 env，自己给一个。"""
+    monkeypatch.setenv("AGENT_API_KEY_PEPPER", "unit-test-pepper")
+
+
 @pytest.mark.asyncio
 async def test_created_secret_is_encrypted_at_rest_and_not_exposed_by_authenticated_principal(monkeypatch):
     """Only owner management may recover the encrypted copy; normal auth never does."""

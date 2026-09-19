@@ -1,9 +1,5 @@
 import asyncio
-import sys
-import types
 import unittest
-
-sys.modules.setdefault("httpx", types.SimpleNamespace(AsyncClient=object))
 
 from app.services.skills.builtin_tools import BUILTIN_TOOL_MAP, execute_builtin_tool
 

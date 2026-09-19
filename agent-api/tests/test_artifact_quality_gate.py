@@ -103,7 +103,11 @@ class ArtifactQualityGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0]["preview"], "已完成初稿，正在完善产物细节")
         self.assertNotIn("封面层级混乱", json.dumps(events, ensure_ascii=False))
         self.assertNotIn("artifact_quality_gate", json.dumps(events, ensure_ascii=False))
-        self.assertTrue(any(e["type"] == "commentary" for e in events))
+        # 没有固定的「质量推回」轮：模型自愿停手后，Harness 不再合成一段公开过程说明去
+        # 逼它重跑，而是直接以模型自己的正文收尾（是否再调工具由模型/CompletionVerifier 决定）。
+        self.assertFalse(any(e["type"] == "commentary" for e in events))
+        self.assertEqual(events[-1]["type"], "final")
+        self.assertEqual(events[-1]["answer"], "文件已经做好了。")
         final = next(e for e in events if e["type"] == "final")
         self.assertTrue(final["answer"])
 

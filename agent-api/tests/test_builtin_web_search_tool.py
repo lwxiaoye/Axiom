@@ -1,10 +1,6 @@
 import asyncio
-import sys
-import types
 import unittest
 from unittest.mock import AsyncMock, patch
-
-sys.modules.setdefault("httpx", types.SimpleNamespace(AsyncClient=object))
 
 from app.services.skills.builtin_tools import BUILTIN_TOOL_MAP, execute_builtin_tool
 from app.services.workflows.node_template_service import build_preview_node

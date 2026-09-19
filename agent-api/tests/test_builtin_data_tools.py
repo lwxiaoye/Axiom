@@ -1,14 +1,11 @@
 import asyncio
 import base64
 import json
-import sys
 import tempfile
 import types
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
-
-sys.modules.setdefault("httpx", types.SimpleNamespace(AsyncClient=object))
 
 from app.services.skills.builtin_data_tools import (
     _referenced_sql_tables,
