@@ -80,19 +80,15 @@ const RAW = { isTransformResponse: false, apiUrl: '' } as const;
 export const getAgentSkillList = (params?: { keyword?: string; parentId?: string; source?: AgentSkill['source'] }) =>
   defHttp.get<AgentSkill[]>({ url: Api.list, params }, { ...RAW, errorMessageMode: 'none' });
 
+/**
+ * 平台技能（工作流 / 智能体编辑器里「系统技能」选择器的数据源）。
+ * 原来打 Java 的 /ai/skill/list，Java 下线后该地址 404，选择器永远为空；
+ * 改走 agent-api 的目录接口并只取 scope=system（内置 + 管理员分发的），返回形状不变。
+ */
 export async function getSkillMarketList(): Promise<SkillMarketSkill[]> {
   const data: any = await defHttp.get(
-    {
-      url: '/ai/skill/list',
-      params: {
-        pageNo: 1,
-        pageSize: 1000,
-        enabled: 1,
-        column: 'updateTime',
-        order: 'desc',
-      },
-    },
-    { errorMessageMode: 'none' }
+    { url: Api.list, params: { scope: 'system' } },
+    { ...RAW, errorMessageMode: 'none' }
   );
   const list = Array.isArray(data)
     ? data
@@ -108,7 +104,7 @@ export async function getSkillMarketList(): Promise<SkillMarketSkill[]> {
       const skillId = String(item?.skillId || item?.id || '').trim();
       return {
         id: skillId,
-        recordId: String(item?.id || '').trim(),
+        recordId: String(item?.recordId || item?.id || '').trim(),
         skillId,
         name: String(item?.name || skillId || '未命名 Skill'),
         description: String(item?.description || ''),
