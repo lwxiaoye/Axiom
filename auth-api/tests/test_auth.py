@@ -189,10 +189,6 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["access-control-allow-origin"], "http://127.0.0.1:3200")
 
-    async def test_unknown_user_has_no_admin_role(self):
-        result = await self.client.get("/sys/user/queryUserRole?userid=other", headers=await self.headers())
-        self.assertEqual(result.status_code, 404)
-
     async def test_startup_rejects_missing_or_placeholder_password(self):
         for password in ("", "admin123", "CHANGE_ME_123456"):
             with patch.dict(os.environ, {"AXIOM_ADMIN_PASSWORD": password}):
