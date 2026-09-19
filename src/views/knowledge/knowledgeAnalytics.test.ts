@@ -12,8 +12,9 @@ describe('knowledge analytics frontend contract', () => {
     // source=TEST、运营统计默认不计入，所以这里钉的是：测试面板不再指向已下线的 Java 路径。
     expect(api).toContain('`${KB}/retrieval`');
     expect(api).not.toContain('/ai/knowledge/retrieval/manual-test');
-    expect(api).toContain('getManagedKnowledgeAnalyticsOverview');
-    expect(api).toContain('getManagedKnowledgeBaseAnalytics');
+    // 后台「全部知识库总览」统计随 Java 管理页一起下线，api 层只剩用户侧单库统计
+    expect(api).not.toContain('/ai/knowledge/admin');
+    expect(api).not.toContain('getManagedKnowledgeAnalyticsOverview');
     expect(api).toContain('getOwnedKnowledgeBaseAnalytics');
   });
 
@@ -41,14 +42,18 @@ describe('knowledge analytics frontend contract', () => {
   it('renders the dense operations panel', () => {
     const panel = read('src/views/knowledge/components/KnowledgeAnalyticsPanel.vue');
     expect(panel).toContain('知识问答量');
-    expect(panel).toContain('按命中归属累计');
-    expect(panel).toContain("scope: 'admin' | 'owner'");
+    expect(panel).toContain('按命中文件累计');
   });
 
-  it('omits the knowledge-base total for an owner single-base report', () => {
+  it('is an owner single-base report only: no admin scope, no knowledge-base total or ranking', () => {
     const panel = read('src/views/knowledge/components/KnowledgeAnalyticsPanel.vue');
 
-    expect(panel).toContain('<article v-if="!isSingleBase"><span>知识库总量');
-    expect(panel).toContain("'single-base-stock': isSingleBase");
+    // 管理侧总览（不带 knowledgeId、scope=admin）没有调用方也没有数据源了，面板必须挂在一个知识库上
+    expect(panel).toContain('const props = defineProps<{ knowledgeId: string }>();');
+    expect(panel).not.toContain("scope: 'admin'");
+    expect(panel).not.toContain('getManagedKnowledgeBaseAnalytics');
+    expect(panel).not.toContain('知识库总量');
+    expect(panel).not.toContain('知识库排行');
+    expect(panel).toContain('await getOwnedKnowledgeBaseAnalytics(props.knowledgeId, range)');
   });
 });

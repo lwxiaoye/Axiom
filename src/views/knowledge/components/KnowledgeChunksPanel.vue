@@ -92,13 +92,12 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { LoadingOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { useMessage } from '/@/hooks/web/useMessage';
-import { deleteChunk, deleteManagedChunk, getChunkList, getDocumentList, getManagedChunkList, getManagedDocumentList, knowledgeErrorMessage, rebuildKnowledgeChunks, setChunkEnabled, setManagedChunkEnabled } from '../knowledge.api';
+import { deleteChunk, getChunkList, getDocumentList, knowledgeErrorMessage, rebuildKnowledgeChunks, setChunkEnabled } from '../knowledge.api';
 import type { KnowledgeChunk, KnowledgeDocument } from '../knowledge.types';
 
 const props = withDefaults(defineProps<{
   knowledgeId: string;
   canEdit?: boolean;
-  management?: boolean;
   documentId?: string;
   description?: string;
   titleTag?: string;
@@ -125,9 +124,9 @@ const pagination = reactive({ current: 1, pageSize: 20, total: 0 });
 const rebuilding = ref(false);
 
 // 「列表空，但文档自己记着有分段」= 切片正本表没同步，才提示重建；关键词搜不到、
-// 文档本来就 0 段、管理侧列表（走旧路径）都不算。
+// 文档本来就 0 段都不算。
 const needsRebuild = computed(() => {
-  if (props.management || loading.value || chunks.value.length || keyword.value.trim()) return false;
+  if (loading.value || chunks.value.length || keyword.value.trim()) return false;
   const filterId = props.documentId || selectedDocumentId.value;
   const candidates = filterId ? documents.value.filter((document) => document.id === filterId) : documents.value;
   return candidates.some((document) => Number(document.chunkCount) > 0);
@@ -156,7 +155,7 @@ async function loadChunks() {
   if (!kid) return;
   loading.value = true;
   try {
-    const page = await (props.management ? getManagedChunkList : getChunkList)({
+    const page = await getChunkList({
       knowledgeId: kid,
       documentId: props.documentId || selectedDocumentId.value,
       pageNo: pagination.current,
@@ -174,7 +173,7 @@ async function loadChunks() {
 async function loadDocumentOptions() {
   const kid = props.knowledgeId;
   if (!kid) return;
-  const page = await (props.management ? getManagedDocumentList : getDocumentList)({ knowledgeId: kid, pageNo: 1, pageSize: 1000 });
+  const page = await getDocumentList({ knowledgeId: kid, pageNo: 1, pageSize: 1000 });
   if (kid !== props.knowledgeId) return;
   documents.value = page?.records || [];
   documentOptions.value = documents.value.map((document: KnowledgeDocument) => ({ label: document.originalName, value: document.id }));
@@ -182,7 +181,7 @@ async function loadDocumentOptions() {
 
 async function rebuildChunks() {
   const kid = props.knowledgeId;
-  if (!kid || !props.canEdit || props.management || rebuilding.value) return;
+  if (!kid || !props.canEdit || rebuilding.value) return;
   rebuilding.value = true;
   try {
     const result = await rebuildKnowledgeChunks(kid);
@@ -218,7 +217,7 @@ function openChunk(record: KnowledgeChunk) {
 // 开关会弹回原位、列表纹丝不动，必须把原因显示出来，否则用户只看到「点了没反应」。
 async function toggleChunk(record: KnowledgeChunk, enabled: boolean) {
   if (!props.canEdit) return;
-  await (props.management ? setManagedChunkEnabled : setChunkEnabled)(record.id, enabled).then(
+  await setChunkEnabled(record.id, enabled).then(
     () => { record.enabled = enabled ? 1 : 0; },
     (error) => createMessage.error(knowledgeErrorMessage(error, enabled ? '启用分段失败' : '停用分段失败')),
   );
@@ -227,7 +226,7 @@ async function toggleChunk(record: KnowledgeChunk, enabled: boolean) {
 async function removeChunk(record: KnowledgeChunk) {
   if (!props.canEdit) return;
   try {
-    await (props.management ? deleteManagedChunk : deleteChunk)(record.id);
+    await deleteChunk(record.id);
   } catch (error) {
     createMessage.error(knowledgeErrorMessage(error, '删除分段失败'));
     return;

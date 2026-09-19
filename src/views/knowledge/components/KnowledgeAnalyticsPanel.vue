@@ -3,7 +3,7 @@
     <header class="analytics-header">
       <div>
 
-        <h2>{{ isSingleBase ? '运营统计' : '知识库运营统计' }}</h2>
+        <h2>运营统计</h2>
         <p>统计从功能上线后开始累计；多知识库检索按实际参与的知识库分别归属。</p>
       </div>
       <div class="analytics-range" aria-label="统计时间范围">
@@ -25,8 +25,7 @@
       <a-alert v-if="!hasRetrievals" type="info" show-icon class="analytics-empty" message="还没有检索记录">
         <template #description>{{ emptyHint }}</template>
       </a-alert>
-      <div :class="['analytics-stock-grid', { 'single-base-stock': isSingleBase }]" aria-label="当前库存">
-        <article v-if="!isSingleBase"><span>知识库总量</span><strong>{{ number(overview.stock?.knowledgeBaseCount) }}</strong><small>当前未删除</small></article>
+      <div class="analytics-stock-grid" aria-label="当前库存">
         <article><span>文件总量</span><strong>{{ number(overview.stock?.documentCount) }}</strong><small>当前未删除</small></article>
         <article><span>分片总量</span><strong>{{ number(overview.stock?.chunkCount) }}</strong><small>当前可用库存</small></article>
       </div>
@@ -60,16 +59,6 @@
         </section>
       </div>
 
-      <section v-if="!isSingleBase" class="analytics-card ranking-card">
-        <div class="card-heading"><div><h3>知识库排行</h3><p>按召回次数排序；多库检索按命中归属累计。</p></div></div>
-        <a-table :columns="baseColumns" :data-source="overview.knowledgeBases || []" :pagination="false" size="small" row-key="id" :scroll="{ x: 760 }">
-          <template #bodyCell="{ column, record }">
-            <a-button v-if="column.key === 'name'" type="link" size="small" class="ranking-link" @click="emit('openKnowledge', record.id)">{{ record.name }}</a-button>
-            <span v-else-if="column.key === 'noHitRate'">{{ percent(record.noHitRate) }}</span>
-          </template>
-        </a-table>
-      </section>
-
       <section class="analytics-card ranking-card">
         <div class="card-heading"><div><h3>热门文件</h3><p>同次召回内，同一文件只计一次文件召回。</p></div></div>
         <a-table :columns="documentColumns" :data-source="overview.documents || []" :pagination="false" size="small" row-key="id" :scroll="{ x: 620 }">
@@ -92,19 +81,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import * as echarts from 'echarts';
 import { Empty } from 'ant-design-vue';
-import {
-  getManagedKnowledgeAnalyticsOverview,
-  getManagedKnowledgeBaseAnalytics,
-  getOwnedKnowledgeBaseAnalytics,
-} from '../knowledge.api';
+import { getOwnedKnowledgeBaseAnalytics } from '../knowledge.api';
 import type { KnowledgeAnalyticsOverview, KnowledgeAnalyticsPreset, KnowledgeAnalyticsRange } from '../knowledge.types';
 
-const props = withDefaults(defineProps<{
-  scope: 'admin' | 'owner';
-  knowledgeId?: string;
-}>(), { knowledgeId: '' });
-
-const emit = defineEmits<{ openKnowledge: [id: string] }>();
+// 只剩用户侧单库统计：后台「全部知识库总览」随 Java 管理页一起下线，面板必须挂在一个知识库上。
+const props = defineProps<{ knowledgeId: string }>();
 const simpleImage = Empty.PRESENTED_IMAGE_SIMPLE;
 const overview = shallowRef<KnowledgeAnalyticsOverview>();
 const loading = ref(false);
@@ -119,23 +100,10 @@ const presets: Array<{ key: Exclude<KnowledgeAnalyticsPreset, 'custom'>; label: 
   { key: 'last7', label: '近 7 天' },
   { key: 'last30', label: '近 30 天' },
 ];
-const isSingleBase = computed(() => Boolean(props.knowledgeId));
 const hasTrend = computed(() => Boolean(overview.value?.trend?.length));
 // 区间内有没有任何一次检索：决定顶部是否提示「还没有检索记录」
 const hasRetrievals = computed(() => Number(overview.value?.metrics?.retrievalCount || 0) > 0);
-const emptyHint = computed(() => (
-  isSingleBase.value
-    ? '所选区间内还没有人在对话、智能体或工作流里检索到这个知识库。检索一旦发生就会在这里累计；页面上的「召回测试」不计入。'
-    : '所选区间内还没有正式检索记录。'
-));
-const baseColumns = [
-  { title: '知识库', key: 'name', dataIndex: 'name' },
-  { title: '问答量', dataIndex: 'qaCount', width: 100 },
-  { title: '召回次数', dataIndex: 'retrievalCount', width: 110 },
-  { title: '文件召回', dataIndex: 'fileRetrievalCount', width: 110 },
-  { title: '分片命中', dataIndex: 'chunkHitCount', width: 110 },
-  { title: '无命中率', key: 'noHitRate', width: 100 },
-];
+const emptyHint = '所选区间内还没有人在对话、智能体或工作流里检索到这个知识库。检索一旦发生就会在这里累计；页面上的「召回测试」不计入。';
 const documentColumns = [
   { title: '文件', dataIndex: 'name' },
   { title: '文件召回', dataIndex: 'fileRetrievalCount', width: 120 },
@@ -183,13 +151,7 @@ async function load() {
   error.value = false;
   try {
     const range = rangeForPreset(preset.value);
-    if (props.knowledgeId) {
-      overview.value = props.scope === 'owner'
-        ? await getOwnedKnowledgeBaseAnalytics(props.knowledgeId, range)
-        : await getManagedKnowledgeBaseAnalytics(props.knowledgeId, range);
-    } else {
-      overview.value = await getManagedKnowledgeAnalyticsOverview(range);
-    }
+    overview.value = await getOwnedKnowledgeBaseAnalytics(props.knowledgeId, range);
     await renderChart();
   } catch {
     error.value = true;
@@ -229,7 +191,7 @@ function resizeChart() {
   chart?.resize();
 }
 
-watch(() => [props.scope, props.knowledgeId], () => void load());
+watch(() => props.knowledgeId, () => void load());
 watch(() => overview.value?.trend, () => void renderChart(), { deep: true });
 onMounted(() => {
   window.addEventListener('resize', resizeChart);
@@ -251,7 +213,7 @@ onBeforeUnmount(() => {
 .analytics-range { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .analytics-error, .analytics-empty { margin-bottom: 16px; }
 .analytics-stock-grid, .analytics-metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.analytics-stock-grid.single-base-stock { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.analytics-stock-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .analytics-metric-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 10px; }
 .analytics-stock-grid article, .analytics-metric-grid article { min-height: 104px; padding: 15px 16px; border: 1px solid #e6eaf1; border-radius: 8px; background: #fff; }
 .analytics-stock-grid span, .analytics-metric-grid span { display: block; color: #68758b; font-size: 12px; }
@@ -273,7 +235,6 @@ onBeforeUnmount(() => {
 .quality-card dd small { color: #8490a5; font-size: 11px; }
 .quality-note { margin: 0; color: #8b96a9; font-size: 12px; line-height: 1.55; }
 .ranking-card :deep(.ant-table) { margin-top: 12px; }
-.ranking-link { padding: 0; color: #2e4b8e; font-weight: 600; }
 @media (max-width: 1100px) { .analytics-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .analytics-header { display: block; }.analytics-range { justify-content: flex-start; margin-top: 12px; }.analytics-stock-grid, .analytics-metric-grid, .analytics-main-grid { grid-template-columns: 1fr; }.analytics-chart { height: 220px; } }
 </style>

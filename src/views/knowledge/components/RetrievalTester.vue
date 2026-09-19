@@ -72,12 +72,12 @@
   import { SearchOutlined } from '@ant-design/icons-vue';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { getProxyStaticFileUrl } from '/@/utils/common/fileUrl';
-  import { testManagedRetrieval, testRetrieval } from '../knowledge.api';
+  import { testRetrieval } from '../knowledge.api';
   import type { RetrievalItem, RetrievalResponse } from '../knowledge.types';
 
   type RichContentPart = { type: 'text' | 'image'; value: string; alt?: string };
 
-  const props = defineProps<{ knowledgeId: string; defaultTopK: number; defaultThreshold: number; management?: boolean }>();
+  const props = defineProps<{ knowledgeId: string; defaultTopK: number; defaultThreshold: number }>();
   const { createMessage } = useMessage();
   const question = ref('');
   const topK = ref(props.defaultTopK || 5);
@@ -100,7 +100,7 @@
     }
     loading.value = true;
     try {
-      result.value = await (props.management ? testManagedRetrieval : testRetrieval)({
+      result.value = await testRetrieval({
         knowledgeIds: [props.knowledgeId], query: question.value.trim(), topK: topK.value,
         scoreThreshold: threshold.value, semanticWeight: semanticWeight.value, keywordWeight: keywordWeight.value,
       });
