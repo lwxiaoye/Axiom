@@ -127,7 +127,7 @@ class WorkflowOwnerRollbackTests(IsolatedAsyncioTestCase):
         app = SimpleNamespace(id="app-1")
         owner = UserContext(user_id="owner-1", username="owner")
         session = _AsyncSession()
-        rollback = mock.AsyncMock(return_value=8)
+        rollback = mock.AsyncMock(return_value=(8, False))  # (新线上版本号, 是否需失效 API 密钥)
         sync_runtime = mock.AsyncMock()
 
         with mock.patch.object(wf, "async_session", return_value=session):
@@ -164,8 +164,8 @@ class WorkflowOwnerRollbackTests(IsolatedAsyncioTestCase):
 
         with mock.patch.object(wf, "_next_version_no", new=mock.AsyncMock(return_value=6)):
             with mock.patch.object(wf.presentation_service, "promote_published_assignment", new=mock.AsyncMock()):
-                with mock.patch.object(wf, "upsert_app_info_for_approved_version", new=mock.AsyncMock()):
-                    new_version = await wf._rollback_to_version(
+                with mock.patch.object(wf, "sync_app_info_for_approved_version", new=mock.AsyncMock()):
+                    new_version, should_invalidate_api = await wf._rollback_to_version(
                         session,
                         app,
                         2,
@@ -174,6 +174,7 @@ class WorkflowOwnerRollbackTests(IsolatedAsyncioTestCase):
                     )
 
         self.assertEqual(new_version, 6)
+        self.assertFalse(should_invalidate_api)
         self.assertEqual(app.config_json, '{"model":"old"}')
         self.assertEqual(definition.published_json, '{"nodes":[{"id":"old"}]}')
         self.assertEqual(session.added[0].version_no, 6)

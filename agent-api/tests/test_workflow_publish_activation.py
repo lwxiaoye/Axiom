@@ -86,18 +86,21 @@ class WorkflowPublishActivationTests(IsolatedAsyncioTestCase):
 
         with mock.patch.object(wf, "_require_review_permission", new=mock.AsyncMock()):
             with mock.patch.object(wf, "async_session", return_value=session):
-                with mock.patch.object(wf, "upsert_app_info_for_approved_version", new=catalog_sync):
+                with mock.patch.object(wf, "sync_app_info_for_approved_version", new=catalog_sync):
                     with mock.patch.object(wf.capability_registry, "sync_from_app", new=mock.AsyncMock()):
                         with mock.patch.object(wf, "_version_dict", return_value={"id": "version-1"}):
-                            result = await wf.review_approve(
-                                wf.ReviewActionRequest(versionId="version-1"), reviewer
-                            )
+                            # 上线时会再次核对外观分配（皮肤可能在审核期间被删，走库）；本用例只钉状态机
+                            with mock.patch.object(wf.presentation_service, "promote_published_assignment", new=mock.AsyncMock()):
+                                result = await wf.review_approve(
+                                    wf.ReviewActionRequest(versionId="version-1"), reviewer
+                                )
 
         self.assertEqual(app.status, "published")
         self.assertEqual(definition.published_version, 7)
         self.assertEqual(version.status, "approved")
         self.assertEqual(result["message"], "已通过并上线")
-        self.assertTrue(catalog_sync.await_args.kwargs["catalog_enabled"])
+        # 每次审核通过都是广场发布：目录同步以 (session, app, version) 调一次，不再有渠道开关
+        catalog_sync.assert_awaited_once_with(session, app, version)
 
     async def test_direct_publish_reactivates_a_previously_unpublished_app(self):
         app = SimpleNamespace(
@@ -115,11 +118,14 @@ class WorkflowPublishActivationTests(IsolatedAsyncioTestCase):
 
         with mock.patch.object(wf, "_validate_before_publish", new=mock.AsyncMock()):
             with mock.patch.object(wf, "_upsert_definition", new=mock.AsyncMock(return_value=definition)):
-                with mock.patch.object(wf, "upsert_app_info_for_approved_version", new=catalog_sync):
-                    await wf._do_publish_now(session, app, '{"nodes":[]}', None, publisher)
+                with mock.patch.object(wf, "sync_app_info_for_approved_version", new=catalog_sync):
+                    with mock.patch.object(wf.presentation_service, "sync_draft_assignment", new=mock.AsyncMock()):
+                        with mock.patch.object(wf.presentation_service, "promote_published_assignment", new=mock.AsyncMock()):
+                            await wf._do_publish_now(session, app, '{"nodes":[]}', None, publisher)
 
         self.assertEqual(app.status, "published")
-        self.assertTrue(catalog_sync.await_args.kwargs["catalog_enabled"])
+        catalog_sync.assert_awaited_once()
+        self.assertIs(catalog_sync.await_args.args[1], app)
 
     async def test_unpublished_app_stays_unpublished_when_its_resubmission_is_not_approved(self):
         app = SimpleNamespace(
@@ -134,7 +140,9 @@ class WorkflowPublishActivationTests(IsolatedAsyncioTestCase):
 
         with mock.patch.object(wf, "_validate_before_publish", new=mock.AsyncMock()):
             with mock.patch.object(wf, "_next_version_no", new=mock.AsyncMock(return_value=5)):
-                version = await wf._do_submit_review(session, app, '{"nodes":[]}', None, owner)
+                # 提交审核会顺手校验并同步草稿的外观分配（走库、读 app.tenant_id）；本用例只钉状态机
+                with mock.patch.object(wf.presentation_service, "sync_draft_assignment", new=mock.AsyncMock()):
+                    version = await wf._do_submit_review(session, app, '{"nodes":[]}', None, owner)
 
         self.assertEqual(version.status, "pending_review")
         self.assertEqual(app.status, "unpublished")

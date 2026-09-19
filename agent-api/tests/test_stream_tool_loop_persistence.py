@@ -121,6 +121,20 @@ def _search_tool() -> MainTool:
     )
 
 
+def _update_plan_tool() -> MainTool:
+    async def noop(_args):
+        return "ok"
+
+    return MainTool(
+        name="update_plan",
+        description="plan",
+        parameters={},
+        execute=noop,
+        internal=True,
+        control_command=True,
+    )
+
+
 class StreamToolLoopPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_actions_continue_without_status_only_plan_updates(self):
         """计划已存在时，下一真实动作与终答都不被 update_plan 卡住。"""
@@ -190,7 +204,11 @@ class StreamToolLoopPersistenceTests(unittest.IsolatedAsyncioTestCase):
             [sse_answer_with_update_plan(report, steps), DONE],
             [sse({"content": "不应再次总结"}), DONE],
         ]
-        events = await _drive(model="m", api_key="k", user_input="深度研究", tools=[])
+        # update_plan 必须是本轮注册的工具：快速收尾只认 tool_map 里的 update_plan，
+        # 未注册的同名调用按未知工具纠错回灌、再采样一轮（那就不是本用例要钉的路径）。
+        events = await _drive(
+            model="m", api_key="k", user_input="深度研究", tools=[_update_plan_tool()],
+        )
         final = next(e for e in events if e["type"] == "final")
         self.assertEqual(final["answer"], report)
         self.assertEqual(len(FakeAsyncClient.responses), 1)

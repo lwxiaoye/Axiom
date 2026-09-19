@@ -85,7 +85,12 @@ def test_runtime_orm_exposes_consumed_contracts():
         AgentToolResultBlob,
     )
 
-    assert RUNTIME_SCHEMA_HEAD == "runtime_0020_workflow_results"
+    # head 常量与迁移文件的一致性由 tests/test_schema_head_sync.py 统一守；这里不钉具体
+    # revision（每加一条迁移就红一次），只确认本测试关心的迁移仍在链上、head 不落后于它。
+    runtime_versions = Path(__file__).resolve().parents[1] / "migrations" / "versions" / "runtime"
+    chain = "\n".join(p.read_text(encoding="utf-8") for p in runtime_versions.glob("*.py"))
+    assert 'revision = "runtime_0020_workflow_results"' in chain
+    assert f'down_revision = "{RUNTIME_SCHEMA_HEAD}"' not in chain, "head 常量落后于迁移文件"
     assert AgentModelAttemptAudit.__table__.c.run_sequence.name == (
         "run_request_sequence"
     )
