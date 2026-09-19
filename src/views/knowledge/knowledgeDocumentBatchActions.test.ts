@@ -2,10 +2,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const api = readFileSync(resolve(process.cwd(), 'src/views/knowledge/knowledge.api.ts'), 'utf8');
-const managementDetail = readFileSync(
-  resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeDetail.vue'),
-  'utf8',
-);
 const myKnowledge = readFileSync(
   resolve(process.cwd(), 'src/views/peopleCenter/tabs/MyKnowledgeTab.vue'),
   'utf8',
@@ -16,38 +12,25 @@ const centerStyles = readFileSync(
 );
 
 describe('knowledge document batch actions', () => {
-  it('exposes raw-file download and batch-delete APIs on both permission boundaries', () => {
-    expect(api).toContain("documentDownload: '/ai/knowledge/document/download'");
-    expect(api).toContain("documentDownloadZip: '/ai/knowledge/document/download-zip'");
+  it('exposes raw-file download and batch-delete APIs through agent-api', () => {
     expect(api).toContain('export const deleteDocuments = (ids: string[])');
     expect(api).toContain('export const downloadKnowledgeDocument = (id: string, fileName: string)');
     expect(api).toContain('export const downloadKnowledgeDocumentArchive = (ids: string[])');
-    expect(api).toContain('export const deleteManagedDocuments = (ids: string[])');
-    expect(api).toContain('export const downloadManagedKnowledgeDocument = (id: string, fileName: string)');
-    expect(api).toContain('export const downloadManagedKnowledgeDocumentArchive = (ids: string[])');
-    // 用户侧走 agent-api（原 Java 接口已下线），管理侧仍在旧路径上。
+    // 用户侧走 agent-api（原 Java 接口已下线）
     expect(api).toContain('`${KB}/documents/${id}/download`');
     expect(api).toContain("saveBlob(blob, fileName)");
     expect(api).toContain('`${KB}/documents/download-zip`');
     expect(api).toContain("saveBlob(blob, '知识库原始文档.zip')");
-    expect(api).toContain('downloadBlobFile(managementUrl(Api.documentDownload), fileName, { id })');
-    expect(api).toContain("downloadBlobFile(managementUrl(Api.documentDownloadZip), '知识库原始文档.zip', { ids: ids.join(',') })");
     expect(api).not.toContain('sourceUri');
   });
 
-  it('keeps downloads available to viewers while limiting deletion to editors in both document lists', () => {
+  it('keeps downloads available to viewers while limiting deletion to editors', () => {
     expect(myKnowledge).toContain('下载原文');
     expect(myKnowledge).toContain('aria-label="批量操作"');
     expect(myKnowledge).toContain('selectedDocumentIds');
     expect(myKnowledge).toContain('v-if="canEditCurrent"');
     expect(myKnowledge).toContain('await deleteDocuments(selectedDocumentIds.value)');
     expect(myKnowledge).toContain('downloadKnowledgeDocumentArchive(selectedDocumentIds.value)');
-
-    expect(managementDetail).toContain('下载原文');
-    expect(managementDetail).toContain('批量下载原文');
-    expect(managementDetail).toContain('selectedDocumentIds');
-    expect(managementDetail).toContain('await deleteManagedDocuments(deletingIds)');
-    expect(managementDetail).toContain('downloadManagedKnowledgeDocumentArchive(selectedDocumentIds.value)');
   });
 
   it('keeps bulk and per-document actions in dedicated, consistently styled action zones', () => {

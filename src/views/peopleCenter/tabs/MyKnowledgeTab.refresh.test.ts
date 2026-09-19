@@ -70,14 +70,12 @@ describe('MyKnowledgeTab chunk refresh', () => {
     expect(component).not.toContain('/^[\\d\\W_]+$/.test(name)');
   });
 
-  it('allows editors to delete chunks from the user-side and admin-side lists', () => {
+  it('allows editors to delete chunks from the user-side list', () => {
     const api = readFileSync(resolve(process.cwd(), 'src/views/knowledge/knowledge.api.ts'), 'utf8');
-    const detail = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeDetail.vue'), 'utf8');
     const chunksPanel = readFileSync(resolve(process.cwd(), 'src/views/knowledge/components/KnowledgeChunksPanel.vue'), 'utf8');
     expect(api).toContain("chunkDelete: '/ai/knowledge/chunk/delete'");
     expect(api).toContain('export const deleteChunk = (id: string)');
     expect(component).toContain('<KnowledgeChunksPanel');
-    expect(detail).toContain('<KnowledgeChunksPanel');
     expect(chunksPanel).toContain('title="确定删除该分段？"');
     expect(chunksPanel).toContain('@confirm="removeChunk(item)"');
     // 面板同时服务用户侧与管理侧（props.management 三元选 deleteChunk / deleteManagedChunk），

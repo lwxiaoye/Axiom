@@ -15,6 +15,12 @@ from app.services.skills.skill_package_bridge import (
 
 
 class FirstPartyPackageAdaptationTests(unittest.TestCase):
+    @unittest.skipUnless(
+        bridge._ppt_engine_wasm_bytes() is not None,
+        "PPTD wasm 不在 agent-api 目录里：正本是 deploy/opensandbox-api/sandbox/pptd_wasm_bg.wasm，"
+        "由沙箱镜像（deploy/opensandbox-api/sandbox/Dockerfile → agent-sandbox-py）装到 "
+        "/opt/open-kimi-ppt/scripts/local-export/；_ppt_engine_wasm_bytes() 只找 agent-api 下的两个候选路径",
+    )
     def test_ppt_studio_gets_repository_export_wrapper(self):
         files = {
             "SKILL.md": b"ppt",

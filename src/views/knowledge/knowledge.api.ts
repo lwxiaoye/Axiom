@@ -1,12 +1,10 @@
 import { defHttp } from '/@/utils/http/axios';
-import { downloadFile as downloadBlobFile } from '/@/api/common/api';
 import { recordAuditEvent } from '/@/api/audit/audit.api';
 import { useGlobSetting } from '/@/hooks/setting';
 import type {
   KnowledgeAcl,
   KnowledgeAnalyticsOverview,
   KnowledgeAnalyticsRange,
-  KnowledgeAnalyticsRanking,
   KnowledgeBase,
   KnowledgeChunk,
   KnowledgeDocument,
@@ -18,23 +16,9 @@ import type {
 } from './knowledge.types';
 
 const Api = {
-  baseList: '/ai/knowledge/base/list',
-  baseDetail: '/ai/knowledge/base/queryById',
-  baseAdd: '/ai/knowledge/base/add',
-  baseEdit: '/ai/knowledge/base/edit',
-  baseEnable: '/ai/knowledge/base/enable',
-  baseDisable: '/ai/knowledge/base/disable',
-  baseDelete: '/ai/knowledge/base/delete',
   documentList: '/ai/knowledge/document/list',
   documentUpload: '/ai/knowledge/document/upload',
   documentPreview: '/ai/knowledge/document/preview',
-  documentRetry: '/ai/knowledge/document/retry',
-  documentEnable: '/ai/knowledge/document/enable',
-  documentDisable: '/ai/knowledge/document/disable',
-  documentDelete: '/ai/knowledge/document/delete',
-  documentBatchDelete: '/ai/knowledge/document/delete-batch',
-  documentDownload: '/ai/knowledge/document/download',
-  documentDownloadZip: '/ai/knowledge/document/download-zip',
   chunkList: '/ai/knowledge/chunk/list',
   chunkEdit: '/ai/knowledge/chunk/edit',
   chunkImageUpload: '/ai/knowledge/chunk/image/upload',
@@ -42,11 +26,12 @@ const Api = {
   chunkDisable: '/ai/knowledge/chunk/disable',
   chunkDelete: '/ai/knowledge/chunk/delete',
   retrievalTest: '/ai/knowledge/retrieval/test',
-  aclList: '/ai/knowledge/acl/list',
-  aclSave: '/ai/knowledge/acl/save',
 };
 
 // 后台知识库内容管理与用户侧 ACL 接口必须分开，不能依赖前端页面来源决定授权范围。
+// 后台管理页（KnowledgeList/KnowledgeDetail/analytics）已随 Java 下线删除；下面剩余的
+// Managed* 函数只被 components/ 下共用面板的 `props.management` 分支引用，当前没有任何
+// 调用方把 management 置真。
 const ManagementApiPrefix = '/ai/knowledge/admin';
 const managementUrl = (url: string) => `${ManagementApiPrefix}${url.replace('/ai/knowledge', '')}`;
 
@@ -57,7 +42,7 @@ const knowledgeApiBaseUrl = useGlobSetting().apiUrl;
 // 原 /ai/knowledge/* 由 JeecgBoot(Java) 提供，Java 下线后 auth-api 只剩一个统一
 // 返回 503 的桩，页面表现为永远转圈。知识库现由 agent-api 自持（它握有 Qdrant 与
 // Embedding 配置）。以下重写「我的知识库」实际用到的接口，保持原有函数签名与返回
-// 结构，页面无需改动；后台管理页的其余接口仍走旧路径，不在本次范围内。
+// 结构，页面无需改动。
 const KB = '/agent-api/knowledge';
 // agent-api 不在 /api 前缀之下，且直接返回裸 JSON（不是 Jeecg 的 {success,result}
 // 信封）。与 agentApi.ts 里既有的 agent-api 调用保持同一组选项。
@@ -218,27 +203,6 @@ export const getKnowledgeAcl = (knowledgeId: string) =>
 export const saveKnowledgeAcl = (knowledgeId: string, items: KnowledgeAcl[]) =>
   defHttp.post({ url: `${KB}/bases/${knowledgeId}/acl`, params: { acls: items } }, KB_OPTS);
 
-export const getManagedKnowledgeList = (params: Recordable) =>
-  defHttp.get<PageResult<KnowledgeBase>>({ url: managementUrl(Api.baseList), params }, { errorMessageMode: 'none' });
-
-export const getManagedKnowledgeDetail = (id: string) =>
-  defHttp.get<KnowledgeBase>({ url: managementUrl(Api.baseDetail), params: { id } }).then((result) => {
-    recordAuditEvent({ category: 'knowledge_access', action: '查看知识库（管理）', resource: id });
-    return result;
-  });
-
-export const createManagedKnowledge = (params: Partial<KnowledgeBase>) =>
-  defHttp.post<KnowledgeBase>({ url: managementUrl(Api.baseAdd), params });
-
-export const updateManagedKnowledge = (params: Partial<KnowledgeBase>) =>
-  defHttp.put<KnowledgeBase>({ url: managementUrl(Api.baseEdit), params });
-
-export const setManagedKnowledgeEnabled = (id: string, enabled: boolean) =>
-  defHttp.post<KnowledgeBase>({ url: managementUrl(enabled ? Api.baseEnable : Api.baseDisable), params: { id } }, { joinParamsToUrl: true });
-
-export const deleteManagedKnowledge = (id: string) =>
-  defHttp.delete({ url: managementUrl(Api.baseDelete), params: { id } }, { joinParamsToUrl: true });
-
 export const getManagedDocumentList = (params: Recordable) =>
   defHttp.get<PageResult<KnowledgeDocument>>({ url: managementUrl(Api.documentList), params }, { errorMessageMode: 'none' });
 
@@ -255,28 +219,6 @@ export const previewManagedKnowledgeDocument = (knowledgeId: string, file: File,
     { file, data: { knowledgeId, ...options } },
     { isReturnResponse: true },
   );
-
-export const retryManagedDocument = (id: string) =>
-  defHttp.post({ url: managementUrl(Api.documentRetry), params: { id } }, { joinParamsToUrl: true });
-
-export const setManagedDocumentEnabled = (id: string, enabled: boolean) =>
-  defHttp.post({ url: managementUrl(enabled ? Api.documentEnable : Api.documentDisable), params: { id } }, { joinParamsToUrl: true });
-
-export const deleteManagedDocument = (id: string) =>
-  defHttp.delete({ url: managementUrl(Api.documentDelete), params: { id } }, { joinParamsToUrl: true });
-
-export const deleteManagedDocuments = (ids: string[]) =>
-  defHttp.delete({ url: managementUrl(Api.documentBatchDelete), data: ids });
-
-export const downloadManagedKnowledgeDocument = (id: string, fileName: string) => {
-  recordAuditEvent({ category: 'export', action: '导出知识库文档（管理）', resource: id, detail: fileName });
-  return downloadBlobFile(managementUrl(Api.documentDownload), fileName, { id });
-};
-
-export const downloadManagedKnowledgeDocumentArchive = (ids: string[]) => {
-  recordAuditEvent({ category: 'export', action: '批量导出知识库文档（管理）', resource: ids.join(',') });
-  return downloadBlobFile(managementUrl(Api.documentDownloadZip), '知识库原始文档.zip', { ids: ids.join(',') });
-};
 
 export const getManagedChunkList = (params: Recordable) =>
   defHttp.get<PageResult<KnowledgeChunk>>({ url: managementUrl(Api.chunkList), params }, { errorMessageMode: 'none' });
@@ -300,20 +242,8 @@ export const deleteManagedChunk = (id: string) =>
 export const testManagedRetrieval = (params: Recordable) =>
   defHttp.post<RetrievalResponse>({ url: managementUrl(Api.retrievalTest), params });
 
-export const getManagedKnowledgeAcl = (knowledgeId: string) =>
-  defHttp.get<KnowledgeAcl[]>({ url: managementUrl(Api.aclList), params: { knowledgeId } });
-
-export const saveManagedKnowledgeAcl = (knowledgeId: string, items: KnowledgeAcl[]) =>
-  defHttp.put({ url: managementUrl(Api.aclSave), params: { knowledgeId, items } });
-
 export const getManagedKnowledgeAnalyticsOverview = (params: KnowledgeAnalyticsRange) =>
   defHttp.get<KnowledgeAnalyticsOverview>({ url: `${ManagementApiPrefix}/analytics/overview`, params }, { errorMessageMode: 'none' });
-
-export const getManagedKnowledgeAnalyticsBases = (params: KnowledgeAnalyticsRange & { limit?: number }) =>
-  defHttp.get<KnowledgeAnalyticsRanking[]>({ url: `${ManagementApiPrefix}/analytics/knowledge-bases`, params }, { errorMessageMode: 'none' });
-
-export const getManagedKnowledgeAnalyticsDocuments = (params: KnowledgeAnalyticsRange & { knowledgeId?: string; limit?: number }) =>
-  defHttp.get<KnowledgeAnalyticsRanking[]>({ url: `${ManagementApiPrefix}/analytics/documents`, params }, { errorMessageMode: 'none' });
 
 export const getManagedKnowledgeBaseAnalytics = (id: string, params: KnowledgeAnalyticsRange) =>
   defHttp.get<KnowledgeAnalyticsOverview>({

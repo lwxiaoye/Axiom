@@ -1,6 +1,6 @@
 module.exports = {
   testEnvironment: 'node',
-  roots: ['<rootDir>/src/views/skills', '<rootDir>/src/components/Markdown'],
+  roots: ['<rootDir>/src/components/Markdown'],
   testMatch: ['**/*.test.ts'],
   transform: {
     '^.+\\.ts$': [
