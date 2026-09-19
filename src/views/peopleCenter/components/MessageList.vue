@@ -1426,10 +1426,11 @@ function closeAttachmentViewer() {
   attachmentViewerFile.value = null;
 }
 
-function onAttachmentViewerFailed() {
+function onAttachmentViewerFailed(reason?: string) {
   stopAttachmentViewerLoading();
   attachmentViewerFile.value = null;
-  antMessage.error('预览失败');
+  // 有具体原因就展示具体原因（后端 detail / 格式不支持），没有再退回泛泛的「预览失败」
+  antMessage.error(reason ? `预览失败：${reason}` : '预览失败');
 }
 
 function askChoiceOptions(message: ChatMessage) {

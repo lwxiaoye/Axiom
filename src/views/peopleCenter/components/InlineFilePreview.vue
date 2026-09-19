@@ -164,7 +164,8 @@ const emit = defineEmits<{
   (e: 'aiEdit', payload: { instruction: string; scope: 'page' | 'all'; page: number }): void;
   (e: 'savePages', pages: string[], done: (ok: boolean) => void): void;
   (e: 'close'): void;
-  (e: 'failed'): void;
+  /** reason：加载失败的可读原因（后端 detail 或本地判定），宿主要展示给用户、不得静默 */
+  (e: 'failed', reason?: string): void;
   (e: 'ready'): void;
 }>();
 
@@ -398,7 +399,13 @@ function onExcelViewerError() {
 onMounted(async () => {
   const m = mode.value;
   if (!m) {
-    if (props.standalone) emit('failed');
+    // 没有匹配到渲染器：说清是格式不支持还是文件过大，宿主 toast 原样展示
+    if (props.standalone) {
+      const ext = fileExt();
+      emit('failed', ext
+        ? `.${ext} 格式暂不支持在线预览，或文件过大，请下载后本地查看`
+        : '该文件暂不支持在线预览，请下载后本地查看');
+    }
     return;
   }
   slowTimer = window.setTimeout(() => {
@@ -477,11 +484,12 @@ onMounted(async () => {
     if (disposed) return;
     ready.value = true;
     openStandaloneViewer();
-  } catch {
+  } catch (e) {
     if (!disposed) {
       failed.value = true;
       viewerRequested.value = false;
-      emit('failed');
+      // 把后端 detail（如「.xyz 格式暂不支持在线预览」）带给宿主，而不是只报一句「预览失败」
+      emit('failed', e instanceof Error ? e.message : '');
     }
   }
 });
