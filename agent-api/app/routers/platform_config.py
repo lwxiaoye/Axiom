@@ -163,13 +163,19 @@ async def test_ocr(
             return {"status": "failed", "message": "未填写视觉模型名称"}
         vision_base = str(body.get("visionBaseUrl") or "").strip().rstrip("/")
         if not vision_base:
-            return {"status": "info", "message": "未填独立端点：运行时经平台 New API 用当前用户 Key 调用该模型。填 baseUrl+Key 可在此实测。"}
-        # 填了独立端点：真发一张 1x1 测试图，验证 baseUrl + Key + 模型可用
+            return {"status": "info", "message": "未填请求地址：运行时经平台网关用当前用户的 Key 调用该模型。填上地址和 API Key 才能在这里实测。"}
+        # 填了独立端点：真发一张测试图，验证 baseUrl + Key + 模型可用
         api_key = await cfg.resolve_secret(cfg.OCR_KEY, "visionApiKey", body.get("visionApiKey", ""))
         if not api_key:
-            return {"status": "failed", "message": "填了 baseUrl 但缺少视觉模型 API Key"}
+            return {"status": "failed", "message": "填了请求地址但缺少 API Key"}
         # 测试图不能用 1x1 极小图：智谱等上游会直接拒收（错误码 1210「图片输入格式/
         # 解析错误」），导致配置明明正确却测试失败。改为现场生成一张正常尺寸的简单图。
+        #
+        # 模型名参考（2026-09-19 用管理员的 DashScope key 在 compatible-mode 实测）：
+        #   qwen3-vl-plus / qwen-vl-max / qwen-vl-plus / qwen3-vl-flash / qwen-vl-ocr 都存在
+        #   （返回 AllocationQuota.FreeTierOnly：账号开着「仅用免费额度」且额度已用完，关掉该
+        #   设置或充值后即可用）；qwen3.7-vl-plus、qwen3.5-vl-plus、qwen3.6-vl-plus 不存在（404）。
+        #   同一段调用代码用平台网关的 grok-4.6 能正常返回描述，所以这条链路本身是通的。
         import base64
         import io
         from PIL import Image, ImageDraw
@@ -189,16 +195,22 @@ async def test_ocr(
                         "messages": [{
                             "role": "user",
                             "content": [
-                                {"type": "text", "text": "这是一张测试图，回复 ok 即可。"},
+                                {"type": "text", "text": "用一句话说出这张图片里的文字。"},
                                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{tiny_png}"}},
                             ],
                         }],
-                        "max_tokens": 16,
+                        "max_tokens": 64,
                     },
                 )
-            if resp.status_code == 200 and (resp.json().get("choices")):
-                return {"status": "success", "message": f"视觉模型 {model} 调用成功，图片识别可用"}
-            return {"status": "failed", "message": f"端点返回 HTTP {resp.status_code}：{resp.text[:160]}"}
+            if resp.status_code != 200:
+                return {"status": "failed", "message": f"端点返回 HTTP {resp.status_code}：{resp.text[:160]}"}
+            # 成功标准是「真的返回了描述」：有些网关对不支持图片的模型也回 200 + 空 content，
+            # 只看 choices 存在会把这种情况误报为可用，管理员到对话里才发现图片读不出来。
+            data = resp.json()
+            description = str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+            if description:
+                return {"status": "success", "message": f"视觉模型 {model} 可用，识别结果：{description[:60]}"}
+            return {"status": "failed", "message": f"视觉模型 {model} 返回了空内容，可能不支持图片输入"}
         except Exception as e:  # noqa: BLE001
             logger.warning("视觉模型连通性测试失败: %s", e)
             return {"status": "failed", "message": f"调用失败：{str(e)[:160]}"}
