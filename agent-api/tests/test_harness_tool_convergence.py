@@ -27,7 +27,9 @@ def test_default_next_action_not_confirm_goal():
 
 def test_context_builder_prefers_colleague_tone():
     src = _src("app/services/chat/turn_context_builder.py")
-    assert "像跟同事同步" in src
+    # 「像跟同事同步」已并入 Codex 式过程说明契约：资深合作者的口吻，不是动作标题
+    assert "像资深合作者带用户继续往前走" in src
+    assert "有资深合作者的自信" in src
     assert "一两句自然结论：文件名+要点，像人在回话" in src
 
 

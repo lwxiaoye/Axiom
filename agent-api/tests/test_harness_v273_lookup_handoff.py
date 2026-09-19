@@ -12,7 +12,8 @@ def test_lookup_substantive_regex_and_handoff_guard_present():
     src = _src("app/services/agent_harness/model_driver.py")
     assert "_LOOKUP_SUBSTANTIVE_ANSWER_RE" in src
     assert "if _LOOKUP_SUBSTANTIVE_ANSWER_RE.search(t):" in src
-    assert "net_auto_continue_close_lookup" in src
+    # 短答不再触发「auto-continue 收口」网：那是按关键词推断收尾方式的旧机制，已退役
+    assert "net_auto_continue_close_lookup" not in src
 
 
 def test_lookup_substantive_matches_weather_short_answer():

@@ -32,9 +32,11 @@ def test_goal_forbids_research_structural():
     assert not _goal_forbids_research("写一份需要最新数据的行业报告")
 
 
-def test_product_no_research_guard_present():
+def test_product_no_research_guard_retired():
+    # 「用户说不要调研 → 按关键词物理拦 search_web」的硬闸已退役（Harness 规范：不按领域
+    # 关键词推断必需/禁用工具）。_goal_forbids_research 只剩计划标题启发式在用。
     src = _src("app/services/agent_harness/model_driver.py")
-    assert "product_block_search_no_research" in src
+    assert "product_block_search_no_research" not in src
     assert "_goal_forbids_research" in src
 
 
