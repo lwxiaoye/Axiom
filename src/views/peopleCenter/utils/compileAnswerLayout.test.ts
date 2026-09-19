@@ -81,7 +81,7 @@ describe('compileAnswerLayout', () => {
   });
 
   it('三个对话入口都使用无损编译器，生产链路不再调用旧整形器', () => {
-    for (const filename of ['MessageList.vue', 'SubagentChatPanel.vue', 'SideChatPanel.vue']) {
+    for (const filename of ['MessageList.vue', 'SideChatPanel.vue']) {
       const source = fs.readFileSync(path.resolve(__dirname, `../components/${filename}`), 'utf8');
       expect(source).toContain("import { compileAnswerLayout }");
       expect(source).not.toContain("import { normalizeAnswerStructure }");

@@ -21,10 +21,6 @@
              记忆抽取是后台行为，每轮在对话里报一次账对用户没有价值，只是噪音。
              后端仍然照常下发 memory.updated 事件（记忆功能本身不受影响），只是前端不再渲染；
              要看记什么了走顶栏「记忆」入口。想恢复的话：这里加回一个 chip 读 memory.updated 即可。 -->
-        <div v-if="message.routedAgent" class="routed-agent">
-          <RobotOutlined />
-          已为你转交「{{ message.routedAgent }}」
-        </div>
         <!-- 「你在 Xs 后停止」已不展示（2026-08-21 用户拍板）：
              停键后执行头已经带时长，再写一行停止留痕是重复噪音。
              后端 runCancelled 仍照常记录；过程时间线照常保留。 -->
@@ -163,40 +159,6 @@
                          这里仍用搜索图标 +「已打开结果页」，避免地球图标看起来像另一次浏览。 -->
                     <span class="step-node"><ExecutionActionIcon kind="search" /></span>
                     <span class="ast-label" :title="`已打开 ${row.step.pages.length} 个结果页`">已打开 {{ row.step.pages.length }} 个结果页</span>
-                  </div>
-                  <div
-                    v-else-if="row.step.kind === 'subagentGroup'"
-                    :class="['agent-step-sub', 'subagent-collab', row.step.running ? 'running' : 'completed']"
-                    role="button"
-                    tabindex="0"
-                    @click="toggleSubCollab(message)"
-                    @keydown.enter="toggleSubCollab(message)"
-                  >
-                    <span class="step-node">
-                      <ExecutionActionIcon kind="subagent" :status="row.step.running ? 'running' : 'completed'" />
-                    </span>
-                    <span class="ast-label" :title="`${row.step.running ? '正在与' : '已与'} ${row.step.count} 个智能体协作`">{{ row.step.running ? '正在与' : '已与' }} {{ row.step.count }} 个智能体协作</span>
-                    <span class="collab-toggle">{{ row.step.expanded ? '收起' : '展开' }}</span>
-                  </div>
-                  <!-- Codex 的 Spawn/SendInput 只在动作真实完成后落历史项：成员胶囊因此随
-                       subagent.started 插在“任务已交给它”步骤之后，不抢占消息顶部。 -->
-                  <div v-else-if="row.step.kind === 'subagent'" :class="['subagent-member-row', row.step.status]">
-                    <button
-                      type="button"
-                      class="sub-team-pill"
-                      :title="subagentStepTitle(message, row.step)"
-                      @click="openSubagentStep(message, row.step)"
-                    >
-                      <span class="pill-agent-avatar">
-                        <img
-                          :src="subagentStepIconUrl(message, row.step)"
-                          :alt="`${row.step.name || '子智能体'}头像`"
-                          @error="recoverAgentIcon($event, subagentStepItem(message, row.step))"
-                        />
-                      </span>
-                      <span class="pill-name">{{ row.step.name || '子智能体' }}</span>
-                    </button>
-                    <span v-if="row.step.status === 'failed'" class="subagent-member-error">委派失败</span>
                   </div>
                   <div v-else-if="row.step.kind === 'artifact'" :class="['agent-step-artifact', row.step.status]">
                     <span class="step-node">
@@ -481,7 +443,6 @@
           <ChoiceQuestionCard
             v-else-if="message.interactive && message.interactive.type === 'userSelect' && !isPlanConfirmation(message)"
             :question="message.interactive.params?.description || '需要你补充信息后继续'"
-            :hint="interactiveSourceHint(message)"
             :options="askChoiceOptions(message)"
             :mode="message.interactive.params?.multiple ? 'multiple' : 'single'"
             :model-value="message.interactive.params?.multiple ? (askMultiSel[message.id] || []) : ''"
@@ -498,7 +459,6 @@
           >
             <div class="ask-head ask-head-form">
               <span class="ask-title">{{ message.interactive.params?.description || '需要你补充信息后继续' }}</span>
-              <span v-if="interactiveSourceHint(message)" class="ask-source">{{ interactiveSourceHint(message) }}</span>
             </div>
             <!-- formInput 完整字段渲染与「我的智能体」运行窗共用同一组件：下拉/开关/日期/
                  文件等字段冒泡到主对话不再退化成纯文本框 -->
@@ -508,19 +468,6 @@
                 :id-prefix="'chat-hitl-' + message.id"
                 @submit="(v) => emit('resume', message.id, v)"
               />
-            </div>
-          </div>
-          <div v-if="message.clarification?.length" class="execution-hitl hitl-card clarify-card">
-            <p class="hitl-desc">匹配到多个可用智能体，请选择要使用的：</p>
-            <div class="hitl-options">
-              <button
-                v-for="opt in message.clarification"
-                :key="opt.id"
-                type="button"
-                @click="emit('clarify', message.id, opt)"
-              >
-                {{ opt.name }}
-              </button>
             </div>
           </div>
           <div v-if="hasPendingApproval(message)" class="execution-hitl hitl-card approval-card">
@@ -958,7 +905,6 @@
 import { computed, reactive, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import {
-  RobotOutlined,
   LikeOutlined,
   DislikeOutlined,
   LinkOutlined,
@@ -1017,7 +963,6 @@ import {
   type ArtifactPageView,
   type ExecutionPlan,
   type ExecutionRow,
-  type SubagentRun,
   type QuestionCardView,
 } from '../composables/executionTimeline';
 import { stepIconStatus } from '../composables/executionIconStatus';
@@ -1033,7 +978,7 @@ import { commentaryRepeatsFinalAnswer } from '../utils/commentaryVisibility';
 import { stopProtocolLinkAtCjkPunctuation } from '../utils/markdownLinkify';
 import { stripInlineSourceMarkers } from '../utils/stripInlineSourceMarkers';
 import { isResearchTurn, linkResearchCites, researchCompletionStats as buildResearchCompletionStats, researchStructureMarkdown, researchStructureTitle, sanitizeResearchTitle, stripLeadingTitleHeadings, stripResearchScaffold } from '../utils/researchReport';
-import type { AttachmentIssue, CitationSource, GeneratedFile, SkillItem, SubagentItem } from '../agentApi';
+import type { AttachmentIssue, CitationSource, GeneratedFile } from '../agentApi';
 import { myFilesRouteFor, visibleDeliverables } from '../composables/deliverable';
 import { fileKindOf } from '../composables/fileKind';
 import { generationMeterStatus, interviewGenerationMeterStatus } from '../composables/generationMeterStatus';
@@ -1060,8 +1005,6 @@ import { isRenderableChatImageUrl, renderChatImageFigure, renderMissingChatImage
 import SourcesPanel, { type SourceItem } from './SourcesPanel.vue';
 import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github.css';
-
-export type { SubagentRun } from '../composables/executionTimeline';
 
 export interface ChatMessage {
   id: number;
@@ -1109,9 +1052,6 @@ export interface ChatMessage {
       forbidden?: string[];
       budget_hint?: string;
     };
-    /** 挂起来源子智能体身份（后端 input.required 直带，事件回放同样携带）；消歧卡不带 */
-    subagent_id?: string;
-    subagent_name?: string;
   } | null;
   /** 引用来源（§7.3 知识库/联网/文件三源共用），随消息事件下发并持久化 */
   citations?: Array<{
@@ -1131,11 +1071,9 @@ export interface ChatMessage {
   executionCollapsed?: boolean;
   /** 自动折叠一次性闸（见 executionTimeline.revealAssistantOutput）：用户手动操作后自动折叠让位 */
   executionAutoCollapsed?: boolean;
-  /** 多子智能体聚合行的本地展开态，仅影响展示，不写入服务端轨迹。 */
-  subCollabExpanded?: boolean;
-  /** 主对话内联过程流：思考、工具、沙箱、子智能体按到达时序直接交错展示 */
+  /** 主对话内联过程流：思考、工具、沙箱按到达时序直接交错展示 */
   agentSteps?: AgentStep[];
-  /** 模型已经发出的真实工具调用计划；tool.* / subagent.* 事件驱动状态。 */
+  /** 模型已经发出的真实工具调用计划；tool.* 事件驱动状态。 */
   executionPlan?: ExecutionPlan;
   /** 模型 update_plan 拆解的语义任务步骤（task.plan 事件）：顶栏「任务与协作」面板数据源，
    *  形状与 executionTimeline.ExecutionMessage.taskPlan 一致（applyTaskPlan 写入） */
@@ -1207,21 +1145,6 @@ export interface ChatMessage {
   /** bash/write_file/edit_file/download_url 的结构化文件产物（口径见 ARTIFACT_PRODUCERS） */
   generatedFiles?: GeneratedFile[];
   loadedCapabilities?: string[];
-  /** call_subagent 编排（subagent.* 事件，ADR-046）：主模型自主委派的子智能体及状态 */
-  subagentCalls?: Array<{ name: string; status: 'running' | 'completed' | 'failed' }>;
-  /** 子智能体「工作窗口」运行档（subagent.node/delta/reasoning 累积）：每次 call_subagent 一档，
-   *  点击时间线子智能体节点在侧栏窗口展示其逐节点干活流程 + 思考 + 输出 */
-  subagentRuns?: SubagentRun[];
-  /** 自动路由命中的子智能体名（route.selected 事件，§8.1/ADR-045） */
-  routedAgent?: string;
-  /** R5 消歧：匹配到多个候选智能体，交用户选择（clarification.required 事件） */
-  clarification?: Array<{ id: string; name: string }>;
-  /** R5 消歧卡原轮一次性上下文快照（skill/上传附件）：点选重发精确复用该轮的，
-   *  而非“最近一轮”的（出卡后用户可能又发过别的消息）；useCenterChat 写入/消费 */
-  clarificationContext?: {
-    skills: SkillItem[];
-    attachments: Array<{ filename: string; text: string; kind?: string; image_url?: string }>;
-  } | null;
   /** 敏感工具审批（approval.required 事件，§11）：用户通过后同幂等键重试即执行 */
   approval?: { call_id: string; tool_name?: string; prompt?: string } | null;
   /** R6 外部应用推荐（recommendation 事件，§8.4）：前往使用卡，不派发 */
@@ -1244,8 +1167,6 @@ export interface ChatMessage {
 
 const props = defineProps<{
   messages: ChatMessage[];
-  /** 当前用户可委派目录：仅用于把运行档 id 映射为最新智能体头像。 */
-  subagents?: SubagentItem[];
   loading?: boolean;
   /** 附件原文仍在本会话内存中（上一轮带过附件且未刷新）：降级横幅才提供「重试本轮」 */
   retryAttachments?: boolean;
@@ -1267,7 +1188,6 @@ const emit = defineEmits<{
   (e: 'regenerate', modelId?: string): void;
   (e: 'resume', messageId: number, resumeValue: unknown): void;
   (e: 'edit', messageId: number, content: string): void;
-  (e: 'clarify', messageId: number, option: { id: string; name: string }): void;
   (e: 'approve', messageId: number, approved: boolean): void;
   (e: 'scrollState', atBottom: boolean): void;
   (e: 'openArtifact', artifact: Artifact): void;
@@ -1279,79 +1199,7 @@ const emit = defineEmits<{
   (e: 'previewFile', file: GeneratedFile): void;
   (e: 'aiEditFile', file: GeneratedFile, payload: { instruction: string; scope: 'page' | 'all'; page: number }): void;
   (e: 'saveSlides', slidesFile: GeneratedFile, deckFile: GeneratedFile, pages: string[], done: (ok: boolean) => void): void;
-  /** 执行团队胶囊：点委派动作下方的成员名牌 → 直接弹该子智能体过程窗 */
-  (e: 'openSubagent', run: SubagentRun): void;
 }>();
-
-/** 委派帧里的头像是运行档权威身份快照；当前目录仅补全存量历史。 */
-function getSubagentItem(run: SubagentRun): SubagentItem {
-  const current = props.subagents?.find((item) => item.id === run.id);
-  return {
-    id: run.id,
-    name: run.name || '子智能体',
-    icon: run.icon || current?.icon || '',
-  };
-}
-
-function subagentRunForStep(
-  message: ChatMessage,
-  step: Extract<AgentStep, { kind: 'subagent' }>,
-): SubagentRun | undefined {
-  const runs = message.subagentRuns || [];
-  return (step.runKey ? runs.find((run) => run.runKey === step.runKey) : undefined)
-    || [...runs].reverse().find((run) => run.name === step.name);
-}
-
-function subagentStepItem(
-  message: ChatMessage,
-  step: Extract<AgentStep, { kind: 'subagent' }>,
-): SubagentItem {
-  const run = subagentRunForStep(message, step);
-  if (run) return getSubagentItem(run);
-  const current = props.subagents?.find((item) => item.name === step.name);
-  return current || { id: '', name: step.name || '子智能体', icon: '' };
-}
-
-function subagentStepIconUrl(
-  message: ChatMessage,
-  step: Extract<AgentStep, { kind: 'subagent' }>,
-): string {
-  const item = subagentStepItem(message, step);
-  return getAgentIconUrl(item) || getAgentFallbackIcon(item);
-}
-
-function subagentStepTitle(
-  message: ChatMessage,
-  step: Extract<AgentStep, { kind: 'subagent' }>,
-): string {
-  const run = subagentRunForStep(message, step);
-  return run ? pillTitle(run) : step.name || '子智能体';
-}
-
-function openSubagentStep(
-  message: ChatMessage,
-  step: Extract<AgentStep, { kind: 'subagent' }>,
-): void {
-  const run = subagentRunForStep(message, step);
-  if (run) emit('openSubagent', run);
-}
-
-/** 悬停提示：真实智能体名称 + 可选岗位名 + 终态/验收计数 + 委派任务。 */
-function pillTitle(run: SubagentRun): string {
-  const acc = run.review || run.acceptance;
-  const state = run.status === 'running'
-    ? '进行中'
-    : run.interrupted
-      ? '已中断'
-      : run.status === 'failed'
-        ? '失败'
-        : acc && acc.total
-          ? `验收 ${acc.passedCount}/${acc.total}`
-          : '已完成';
-  const name = run.name || '子智能体';
-  const role = run.roleName && run.roleName !== name ? `，岗位：${run.roleName}` : '';
-  return [`${name}（${state}${role}）`, run.task].filter(Boolean).join('：');
-}
 
 const messageListRef = ref<HTMLElement | null>(null);
 const copiedId = ref<number | null>(null);
@@ -1374,7 +1222,7 @@ function submitPlanRevise(message: ChatMessage) {
 // Codex 式执行卡折叠态（按消息 id）：未手动切过时，运行/等待中展开，完成且已出答案自动收起
 const lightboxSrc = ref<string | null>(null);
 
-const RESOURCE_ATTACHMENT_KINDS = new Set(['thread_ref', 'knowledge', 'skill', 'subagent', 'web']);
+const RESOURCE_ATTACHMENT_KINDS = new Set(['thread_ref', 'knowledge', 'skill', 'web']);
 const DOC_VIEWER_EXTS = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'md', 'markdown', 'html', 'htm']);
 const CODE_VIEWER_EXTS = new Set([
   'txt', 'json', 'log', 'xml', 'yaml', 'yml', 'csv',
@@ -1607,12 +1455,6 @@ function formItems(interactive: any): any[] {
   return Array.isArray(items) ? items : [];
 }
 
-/** HITL 卡归属语境：标注「是谁在问」；ask_user_choice 是主助手自己提问，不标注。
- *
- *  优先用后端 input.required 直带的 subagent_name（2026-07-26）：
- *  - `@` 模式整场会话就是子智能体、不发 subagent chip 事件，chip 反推恒为空 → 此前无标注；
- *  - 刷新回放时 chip 的 running 会被归一成 completed，反推只能「取最后一个」猜。
- *  旧事件没有该字段时回落到原来的 chip 反推，保证历史消息不退化。 */
 function isPlanConfirmation(message: ChatMessage): boolean {
   const interactive = message.interactive;
   if (!interactive) return false;
@@ -1653,15 +1495,6 @@ function hasReadyPlanDocument(message: ChatMessage): boolean {
   // 这一轮的权威计划文稿。是否可以画卡统一交给 buildPlanCardMarkdown：
   // 它会拒绝标准模式的种子 taskPlan，只放行真实计划报告/确认卡。
   return Boolean(planCardMarkdown(message));
-}
-
-function interactiveSourceHint(message: ChatMessage): string {
-  if (!message.interactive || message.interactive.ask_user) return '';
-  const direct = message.interactive.subagent_name;
-  if (direct) return `来自子智能体「${direct}」`;
-  const calls = message.subagentCalls || [];
-  const active = [...calls].reverse().find((c) => c.status === 'running') || calls[calls.length - 1];
-  return active?.name ? `来自子智能体「${active.name}」` : '';
 }
 
 mermaid.initialize({
@@ -2135,7 +1968,7 @@ function showStandalonePreamble(message: ChatMessage): boolean {
     message.role === 'assistant' &&
       message.preambleIsInitialProgress &&
       hasVisiblePreamble(message) &&
-      !(message.agentSteps?.length || message.toolSteps?.length || message.subagentCalls?.length) &&
+      !(message.agentSteps?.length || message.toolSteps?.length) &&
       !message.taskPlan?.length &&
       !isExecutionWaiting(message),
   );
@@ -2157,12 +1990,9 @@ function isRenderable(message: ChatMessage): boolean {
     Boolean(
         message.error ||
         message.interactive ||
-        message.clarification?.length ||
         message.approval ||
         message.externalRecs?.length ||
         message.toolSteps?.length ||
-        message.subagentCalls?.length ||
-        message.routedAgent ||
         message.runStartedAt
     )
   );
@@ -2433,9 +2263,9 @@ function hasPendingApproval(message: ChatMessage): boolean {
   );
 }
 
-// 等待用户输入的交互态（HITL/消歧/审批）：不是「在跑」，执行卡显示等待标题、隐藏跳动计时
+// 等待用户输入的交互态（HITL/审批）：不是「在跑」，执行卡显示等待标题、隐藏跳动计时
 function isExecutionWaiting(message: ChatMessage): boolean {
-  return Boolean(message.interactive || message.clarification?.length || hasPendingApproval(message));
+  return Boolean(message.interactive || hasPendingApproval(message));
 }
 
 // 流式期间常驻最后一条助手消息（等待用户输入的交互卡阶段除外——那不是「在跑」）
@@ -2568,7 +2398,6 @@ function showExecutionTrace(message: ChatMessage): boolean {
     (hasVisiblePreamble(message) && !hasVisibleAssistantBody(message)) ||
       message.agentSteps?.length ||
       message.toolSteps?.length ||
-      message.subagentCalls?.length ||
       showTransientReasoningSummary(message) ||
       loadedSkillNames(message).length ||
       message.taskPlan?.length ||
@@ -2649,9 +2478,8 @@ function transientReasoningText(message: ChatMessage): string {
 function showInitialProgressReasoning(message: ChatMessage): boolean {
   return Boolean(
     transientReasoningText(message)
-    && !(message.agentSteps || []).some((step) => step.kind === 'tool' || step.kind === 'subagent')
-    && !message.toolSteps?.length
-    && !message.subagentCalls?.length,
+    && !(message.agentSteps || []).some((step) => step.kind === 'tool')
+    && !message.toolSteps?.length,
   );
 }
 
@@ -2750,8 +2578,8 @@ function visibleAgentSteps(message: ChatMessage): AgentStep[] {
 
 // 执行行按结构指纹缓存（照 renderCache 的模式，2026-07-28）。
 // 生成期间 nowTick 每 250ms 跳一次 → 整个渲染函数每秒重跑 4 次，而模板里 v-if 与 v-for
-// 各调一次 executionRows，于是 buildExecutionRows→collapseSubagentRows→dedupeRepeatedNotes
-// →collapseSandboxRuns 这条链对**全部历史消息**每秒各跑 8 遍——那些行一个字都不会变。
+// 各调一次 executionRows，于是 buildExecutionRows→dedupeRepeatedNotes→collapseSandboxRuns
+// 这条链对**全部历史消息**每秒各跑 8 遍——那些行一个字都不会变。
 // 指纹只收会改变行结构的字段（execRowsSignature 有详细理由）：命中就复用同一个数组，
 // label/耗时/favicon 这类展示字段照旧由模板直接读 row.step.x，实时性不受影响。
 type ActivityExecutionRow = Extract<ExecutionRow, { type: 'step' }>;
@@ -2763,14 +2591,11 @@ function executionRows(message: ChatMessage): ActivityExecutionRow[] {
   const openGroups = Object.keys(runGroupOpen.value).filter(
     (key) => runGroupOpen.value[key] && key.startsWith(`${message.id}:rg:`),
   );
-  const key = execRowsSignature({
-    agentSteps: message.agentSteps,
-    subCollabExpanded: message.subCollabExpanded,
-  }, running, openGroups);
+  const key = execRowsSignature({ agentSteps: message.agentSteps }, running, openGroups);
   const cached = execRowsCache.get(message.id);
   if (cached && cached.key === key) return cached.rows;
   const rows = collapseSandboxRuns(
-    dedupeRepeatedNotes(collapseSubagentRows(message, buildExecutionRows(undefined, visibleAgentSteps(message), running))),
+    dedupeRepeatedNotes(buildExecutionRows(undefined, visibleAgentSteps(message), running)),
     String(message.id),
     runGroupOpen.value,
   ).filter((row): row is ActivityExecutionRow => row.type === 'step');
@@ -2814,46 +2639,6 @@ function dedupeRepeatedNotes(rows: ExecutionRow[]): ExecutionRow[] {
     out.push(row);
   }
   return out;
-}
-
-/** V3 批次4 多子智能体聚合（2026-07-23 拍板）：同一消息内出现 ≥2 个不同子智能体时，
- *  注入「正在与 N 个智能体协作」聚合头；未展开时各子智能体行收进聚合头之后，点击展开
- *  才逐个显示。单子智能体保持原样（普通对话/@ 模式铁律下永远单个，不受影响）。
- *  身份判据必须是 step.name：label 会随过程推进改写，
- *  同一个子智能体被调用两次时（铁律②允许多次调用）两行 label 不同，用 label 去重会
- *  把它误算成 2 个，凭空冒出「正在与 2 个智能体协作」。 */
-function collapseSubagentRows(message: ChatMessage, rows: ExecutionRow[]): ExecutionRow[] {
-  const names = new Set<string>();
-  let running = false;
-  for (const row of rows) {
-    if (row.type === 'step' && row.step.kind === 'subagent') {
-      names.add(String(row.step.name || ''));
-      if (row.step.status === 'running') running = true;
-    }
-  }
-  if (names.size < 2) return rows;
-  const expanded = Boolean(message.subCollabExpanded);
-  const out: ExecutionRow[] = [];
-  let injected = false;
-  for (const row of rows) {
-    const isSub = row.type === 'step' && row.step.kind === 'subagent';
-    if (isSub && !injected) {
-      out.push({
-        type: 'step',
-        stepIndex: row.stepIndex,
-        nested: row.nested,
-        step: { kind: 'subagentGroup', count: names.size, running, expanded },
-      });
-      injected = true;
-    }
-    if (isSub && !expanded) continue;
-    out.push(row);
-  }
-  return out;
-}
-
-function toggleSubCollab(message: ChatMessage): void {
-  message.subCollabExpanded = !message.subCollabExpanded;
 }
 
 /** 同消息图片附件计数（与 AttachmentCard.isImage 同判据：kind=image 或图片扩展名）：
@@ -4531,19 +4316,6 @@ watch(
   .message-bubble :deep(pre.artifact-loading-block)::before {
     animation: none;
   }
-}
-
-.routed-agent {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 6px;
-  padding: 2px 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  font-size: 12px;
-  color: #4b5563;
-  background: #f9fafb;
 }
 
 .context-compacted-chip {
@@ -6494,91 +6266,12 @@ watch(
   color: #c2c7d0;
 }
 
-/* 子智能体协作节点：图标在卡片内与标题同行对齐 */
-.agent-step-sub {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  column-gap: var(--execution-icon-gap);
-  min-width: 0;
-  flex-wrap: nowrap;
-  margin: 2px 0;
-  padding: 9px 12px;
-  border-radius: 12px;
-  background: #f6f7f9;
-  font-size: 14px;
-  color: #1f2937;
-}
-
-.agent-step-sub > .step-node {
-  margin-top: 0;
-  flex: none;
-}
-
-.agent-step-sub.subagent-collab {
-  cursor: pointer;
-  user-select: none;
-}
-.agent-step-sub.subagent-collab .collab-toggle {
-  margin-left: 8px;
-  flex: none;
-  font-size: 11.5px;
-  color: var(--wf-text-tertiary, #9aa0ab);
-}
-.agent-step-sub.subagent-collab:hover .collab-toggle {
-  color: var(--wf-text-secondary, #5a6070);
-}
-.agent-step-sub.failed {
-  color: var(--execution-text);
-  background: #f6f7f9;
-}
-
-/* 委派任务引述：左侧细线引用样式，最多两行（完整任务文本悬停 title 可见） */
-.agent-step-sub .sub-task {
-  display: -webkit-box;
-  overflow: hidden;
-  flex-basis: 100%;
-  margin-top: 4px;
-  padding-left: 10px;
-  border-left: 2px solid #dfe2e8;
-  color: #9ca3af;
-  font-size: 12px;
-  line-height: 1.65;
-  word-break: break-word;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-/* 结果报告卡：markdown 渲染成真排版（标题/要点/段落），白底与灰容器分层；
-   过长内部滚动，完整原文仍在「子智能体工作窗口」 */
-.agent-step-sub .sub-report {
-  flex-basis: 100%;
-  margin-top: 8px;
-  padding: 12px 15px;
-  border: 1px solid #e8eaee;
-  border-radius: 10px;
-  background: #fff;
-  color: #3f4450;
-  font-size: 12.5px;
-  line-height: 1.75;
-  max-height: 420px;
-  overflow-y: auto;
-  word-break: break-word;
-}
-
-.agent-step-sub .sub-report.failed {
-  border-color: #e8eaee;
-  background: #fbfbfc;
-  color: var(--execution-text);
-}
-
 /* 只有执行步骤在 hover 时变黑；过程开场说明不在此选择器内，始终保持灰色。 */
 .execution-stream :is(
   .agent-step-tool,
   .agent-step-artifact,
   .agent-step-verification,
   .agent-step-read,
-  .agent-step-sub,
   .exec-plan-item
 ):hover,
 .execution-stream :is(
@@ -6586,65 +6279,11 @@ watch(
   .agent-step-artifact,
   .agent-step-verification,
   .agent-step-read,
-  .agent-step-sub,
   .exec-plan-item
 ):hover .ast-label,
 .execution-stream .agent-step:hover .step-node,
 .execution-stream .exec-plan-item:hover .exec-plan-icon {
   color: var(--execution-text-hover);
-}
-
-/* 报告卡内部排版（v-html 注入需 :deep）：紧凑层级，首元素不留头部空白 */
-.agent-step-sub .sub-report :deep(h1),
-.agent-step-sub .sub-report :deep(h2),
-.agent-step-sub .sub-report :deep(h3),
-.agent-step-sub .sub-report :deep(h4) {
-  margin: 12px 0 6px;
-  color: #23272e;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.5;
-}
-
-.agent-step-sub .sub-report :deep(h1:first-child),
-.agent-step-sub .sub-report :deep(h2:first-child),
-.agent-step-sub .sub-report :deep(h3:first-child),
-.agent-step-sub .sub-report :deep(h4:first-child),
-.agent-step-sub .sub-report :deep(p:first-child) {
-  margin-top: 0;
-}
-
-.agent-step-sub .sub-report :deep(p) {
-  margin: 6px 0;
-}
-
-.agent-step-sub .sub-report :deep(ul),
-.agent-step-sub .sub-report :deep(ol) {
-  margin: 6px 0;
-  padding-left: 18px;
-}
-
-.agent-step-sub .sub-report :deep(li) {
-  margin: 3px 0;
-}
-
-.agent-step-sub .sub-report :deep(strong) {
-  color: #23272e;
-  font-weight: 600;
-}
-
-.agent-step-sub .sub-report :deep(pre) {
-  margin: 6px 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: #f6f7f9;
-  overflow-x: auto;
-}
-
-.agent-step-sub .sub-report :deep(hr) {
-  margin: 10px 0;
-  border: 0;
-  border-top: 1px solid #eef0f3;
 }
 
 /* 正文行内引用角标（v-html 注入，须 :deep）：小圆片，点击打开来源 */
@@ -6832,90 +6471,6 @@ watch(
   font-size: 12px;
   color: #4b5563;
   background: #f9fafb;
-}
-
-/* 成员身份只在任务真实交给子智能体后进入时间线；不挂消息头、不使用动画。 */
-.subagent-member-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 8px;
-  min-height: 28px;
-}
-
-.sub-team-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  gap: 6px;
-  padding: 3px 10px 3px 4px;
-  border: 1px solid #e7e8eb;
-  border-radius: 999px;
-  background: #fff;
-  font-size: 14px;
-  line-height: 20px;
-  color: #74777d;
-  cursor: pointer;
-}
-
-.sub-team-pill:hover,
-.sub-team-pill:focus-visible {
-  border-color: #d9dbe0;
-  color: #4d5159;
-}
-
-.sub-team-pill .pill-agent-avatar {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  flex: none;
-  overflow: hidden;
-  place-items: center;
-  border-radius: 6px;
-  background: #f1f0f8;
-}
-
-.sub-team-pill .pill-agent-avatar img {
-  display: block;
-  width: 16px;
-  height: 16px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-
-.subagent-member-error {
-  color: #8b919a;
-  font-size: 12px;
-}
-
-.subagent-calls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-
-.subagent-call {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  font-size: 12px;
-  color: #4b5563;
-  background: #f9fafb;
-}
-
-.subagent-call.completed {
-  color: #374151;
-  border-color: #d1d5db;
-}
-
-.subagent-call.failed {
-  color: #4b5563;
-  border-color: #d8dbe2;
-  background: #f7f8fa;
 }
 
 /* 正文上方「已阅读 N 个网页」入口：放大镜 + 文案 + 层叠站点图标，点击开右侧搜索结果 */
@@ -7277,12 +6832,6 @@ watch(
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-}
-
-.ask-source {
-  color: #9096a1;
-  font-size: 12px;
-  font-weight: 400;
 }
 
 .approval-card {

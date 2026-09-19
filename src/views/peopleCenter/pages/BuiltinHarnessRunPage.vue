@@ -109,10 +109,10 @@ import { Modal, message } from 'ant-design-vue';
 import { ArrowLeftOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import ChatPage from './ChatPage.vue';
-import RunCompactHeader from '../../agent/run/components/RunCompactHeader.vue';
-import RunSessionList from '../../agent/run/components/RunSessionList.vue';
-import RunSidebarToggle from '../../agent/run/components/RunSidebarToggle.vue';
-import type { RunSession } from '../../agent/run/agentRun.api';
+import RunCompactHeader from '../components/run/RunCompactHeader.vue';
+import RunSessionList from '../components/run/RunSessionList.vue';
+import RunSidebarToggle from '../components/run/RunSidebarToggle.vue';
+import type { RunSession } from '../components/run/runSession';
 import { CenterContextKey, type CenterContext } from '../centerContext';
 import { getBuiltinApp, type BuiltinAppItem } from '../agentApi';
 import { getBuiltinAssistantByPreset, type AssistantPreset } from '../builtinAssistants';
@@ -130,7 +130,7 @@ const props = defineProps<{
 
 const route = useRoute();
 const router = useRouter();
-// 子智能体是从工作台点进来的独立页面，必须给一条明确的回头路；直接贴地址栏
+// 内置助手是从广场点进来的独立页面，必须给一条明确的回头路；直接贴地址栏
 // 打开时没有上一页，退回智能体广场。
 const { goBack, canGoBack } = usePageBack('/center/agent');
 
@@ -358,7 +358,7 @@ onBeforeUnmount(() => {
 });
 </script>
 
-<style lang="less" src="../../agent/run/agent-run-shell.less"></style>
+<style lang="less" src="../components/run/agent-run-shell.less"></style>
 <style lang="less">
 /* 主页面也使用这份全局样式；不能让两个 style src 共用 Vue 插件的描述符。 */
 @import '../styles/centerNew.less';

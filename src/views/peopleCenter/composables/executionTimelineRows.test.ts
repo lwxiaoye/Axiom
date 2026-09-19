@@ -75,11 +75,6 @@ describe('execRowsSignature：结构变了就必须变', () => {
     expect(execRowsSignature(base, true)).not.toBe(execRowsSignature(base, false));
   });
 
-  it('多子智能体聚合头的展开态（收起时成员行整批不渲染）', () => {
-    expect(execRowsSignature({ ...base, subCollabExpanded: true }, false))
-      .not.toBe(execRowsSignature(base, false));
-  });
-
   it('归拢组展开态（组键顺序不影响结果，避免 Object.keys 顺序抖动导致的假失效）', () => {
     expect(execRowsSignature(base, false, ['3:rg:1'])).not.toBe(execRowsSignature(base, false, []));
     expect(execRowsSignature(base, false, ['3:rg:1', '3:rg:5']))

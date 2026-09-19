@@ -83,7 +83,6 @@ import {
   LoadingOutlined,
   MessageFilled,
   ReadFilled,
-  RobotFilled,
   ToolFilled,
 } from '@ant-design/icons-vue';
 
@@ -136,17 +135,16 @@ const parsePartial = computed(() => !props.attachment.uploading && props.attachm
 const isThreadRef = computed(() => props.attachment.kind === 'thread_ref');
 const isKnowledge = computed(() => props.attachment.kind === 'knowledge');
 const isSkill = computed(() => props.attachment.kind === 'skill');
-const isSubagent = computed(() => props.attachment.kind === 'subagent');
 const isWeb = computed(() => props.attachment.kind === 'web');
 
 const ext = computed(() => {
-  if (isThreadRef.value || isKnowledge.value || isSkill.value || isSubagent.value || isWeb.value) return '';
+  if (isThreadRef.value || isKnowledge.value || isSkill.value || isWeb.value) return '';
   const name = props.attachment.filename || '';
   return name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
 });
 
 const isImage = computed(() => {
-  if (isThreadRef.value || isKnowledge.value || isSkill.value || isSubagent.value || isWeb.value) return false;
+  if (isThreadRef.value || isKnowledge.value || isSkill.value || isWeb.value) return false;
   if (props.attachment.kind === 'image') return true;
   return fileKindOf(props.attachment.filename) === 'image';
 });
@@ -223,7 +221,6 @@ const fileIcon = computed(() => {
   if (isThreadRef.value) return MessageFilled;
   if (isKnowledge.value) return ReadFilled;
   if (isSkill.value) return ToolFilled;
-  if (isSubagent.value) return RobotFilled;
   if (isWeb.value) return GlobalOutlined;
   if (ext.value === 'pdf' || props.attachment.kind === 'pdf') return FilePdfFilled;
   if (['docx', 'doc'].includes(ext.value) || props.attachment.kind === 'docx') return FileWordFilled;
@@ -238,7 +235,6 @@ const typeLabel = computed(() => {
   if (isThreadRef.value) return '对话';
   if (isKnowledge.value) return '知识库';
   if (isSkill.value) return '技能';
-  if (isSubagent.value) return '智能体';
   if (isWeb.value) return '搜索';
   if (ext.value === 'pdf' || props.attachment.kind === 'pdf') return 'PDF';
   if (['docx', 'doc'].includes(ext.value) || props.attachment.kind === 'docx') return '文档';
@@ -261,7 +257,6 @@ const kindClass = computed(() => {
   if (isThreadRef.value) return 'k-thread';
   if (isKnowledge.value) return 'k-kb';
   if (isSkill.value) return 'k-skill';
-  if (isSubagent.value) return 'k-agent';
   if (isWeb.value) return 'k-web';
   if (ext.value === 'pdf' || props.attachment.kind === 'pdf') return 'k-pdf';
   if (['docx', 'doc'].includes(ext.value) || props.attachment.kind === 'docx') return 'k-doc';
@@ -366,7 +361,6 @@ const kindClass = computed(() => {
 .attachment-file-icon.k-thread { color: #2563eb; }
 .attachment-file-icon.k-kb { color: #0f766e; }
 .attachment-file-icon.k-skill { color: #2563eb; }
-.attachment-file-icon.k-agent { color: #1f2937; }
 .attachment-file-icon.k-web { color: #2563eb; }
 
 .attachment-file-meta {

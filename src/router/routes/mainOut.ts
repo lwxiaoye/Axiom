@@ -8,7 +8,7 @@ import { legacySectionToPath } from '/@/views/peopleCenter/centerRoute';
 
 export const mainOutRoutes: AppRouteModule[] = [
   {
-    // 系统内置 Harness 应用：与子智能体一样使用独立运行页，不复用 /center 外壳。
+    // 系统内置 Harness 应用：使用独立运行页，不复用 /center 外壳。
     path: '/center/chat/ppt',
     name: 'BuiltinPresentationRun',
     component: () => import('/@/views/peopleCenter/pages/BuiltinHarnessRunPage.vue'),
@@ -108,15 +108,6 @@ export const mainOutRoutes: AppRouteModule[] = [
     component: () => import('/@/views/workflow/agent/index.vue'),
     meta: {
       title: '对话Agent配置',
-    },
-  },
-  {
-    // WS5：独立 Agent 运行页（对话式，多会话；用我们自己的 /agent-api）
-    path: '/agent/run/:appId',
-    name: 'AgentRun',
-    component: () => import('/@/views/agent/run/index.vue'),
-    meta: {
-      title: '智能体运行',
     },
   },
 ];

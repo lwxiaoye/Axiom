@@ -58,8 +58,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue';
 import { DeleteOutlined, EditOutlined, PushpinFilled, PushpinOutlined } from '@ant-design/icons-vue';
-import type { RunSession } from '../agentRun.api';
-import { formatSessionTime, groupRunSessions } from '../sessionGroups';
+import type { RunSession } from './runSession';
+import { formatSessionTime, groupRunSessions } from './sessionGroups';
 
 const props = defineProps<{
   sessions: RunSession[];

@@ -16,7 +16,6 @@ const IMAGE_NAME_RE = /\.(png|jpe?g|gif|webp|bmp|svg|ico|heic|heif|avif|tiff?)$/
 export const COMPOSER_REFERENCE_KINDS = [
   'skill',
   'knowledge',
-  'subagent',
   'web',
   'thread_ref',
 ] as const;
@@ -47,7 +46,6 @@ export function composerBubbleAttachments(opts: {
   threads?: Array<{ title?: string }>;
   knowledge?: Array<{ name: string }>;
   skills?: Array<{ id?: string; name: string }>;
-  subagent?: { name?: string } | null;
   webSearch?: boolean;
 }): ComposerBubbleAttachment[] {
   const cards: ComposerBubbleAttachment[] = [];
@@ -82,7 +80,6 @@ export function composerBubbleAttachments(opts: {
   for (const s of opts.skills || []) {
     push({ filename: s.name, kind: 'skill', referenceId: s.id });
   }
-  if (opts.subagent?.name) push({ filename: opts.subagent.name, kind: 'subagent' });
   if (opts.webSearch) push({ filename: '网页搜索', kind: 'web' });
   return cards;
 }

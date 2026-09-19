@@ -90,7 +90,7 @@ function isExecutingPlan(message: GenerationMeterMessage): boolean {
 }
 
 function hasActed(message: GenerationMeterMessage): boolean {
-  return (message.agentSteps || []).some((step) => step.kind === 'tool' || step.kind === 'subagent');
+  return (message.agentSteps || []).some((step) => step.kind === 'tool');
 }
 
 function liveToolStatus(message: GenerationMeterMessage): GenerationMeterLabel | '' {
@@ -101,7 +101,6 @@ function liveToolStatus(message: GenerationMeterMessage): GenerationMeterLabel |
     if (!step || !('status' in step) || step.status !== 'running') continue;
     if (!isLiveRunningAction(steps, i)) continue;
     if (step.kind === 'tool') return toolLabel(toolName(step), executingPlan);
-    if (step.kind === 'subagent') return GENERATION_METER_LABELS.tool;
   }
   return '';
 }

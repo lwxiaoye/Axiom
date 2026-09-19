@@ -215,8 +215,6 @@ describe('wiring contract', () => {
       'views/peopleCenter/composables/useCenterChat.ts',
       'views/peopleCenter/components/ModelSelector.vue',
       'views/peopleCenter/builtinAssistants/interview/useInterviewSession.ts',
-      'views/agent/run/useAgentRun.ts',
-      'views/agent/run/index.vue',
       'views/workflow/editor/index.vue',
     ]) {
       const code = read(rel);
@@ -228,8 +226,6 @@ describe('wiring contract', () => {
     for (const rel of [
       'views/peopleCenter/components/ModelSelector.vue',
       'views/peopleCenter/builtinAssistants/interview/useInterviewSession.ts',
-      'views/agent/run/useAgentRun.ts',
-      'views/agent/run/index.vue',
       'views/workflow/editor/index.vue',
     ]) {
       expect(read(rel)).not.toMatch(/localStorage\.(get|set|remove)Item\(/);

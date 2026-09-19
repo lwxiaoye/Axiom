@@ -30,9 +30,7 @@ const meterSource = readFileSync(resolve(root, 'composables/generationMeterStatu
 const chatTabSource = readFileSync(resolve(root, 'tabs/ChatTab.vue'), 'utf8');
 const overlaySource = readFileSync(resolve(root, 'components/WorkspaceOverlay.vue'), 'utf8');
 const visibilitySource = readFileSync(resolve(root, 'mainChatFeatureVisibility.ts'), 'utf8');
-const execTeamSource = readFileSync(resolve(root, 'components/ExecTeamPanel.vue'), 'utf8');
 const chatPageSource = readFileSync(resolve(root, 'pages/ChatPage.vue'), 'utf8');
-const subagentPanelSource = readFileSync(resolve(root, 'components/SubagentChatPanel.vue'), 'utf8');
 const agentMarketSource = readFileSync(resolve(root, 'composables/useAgentMarket.ts'), 'utf8');
 const agentMarketTabSource = readFileSync(resolve(root, 'tabs/AgentMarketTab.vue'), 'utf8');
 
@@ -242,11 +240,10 @@ describe('主对话 Harness 前端契约', () => {
     expect(target.agentSteps).toEqual([]);
   });
 
-  it('有任务计划或子智能体委派时，入口切换为三行错峰点亮的任务计划态', () => {
+  it('有任务计划时，入口切换为三行错峰点亮的任务计划态', () => {
     expect(collaborationSource).toContain('v-if="hasTaskActivity"');
     expect(collaborationSource).toContain("step.status === 'pending' || step.status === 'running'");
-    expect(collaborationSource).toContain("teamMembers.value.some((run) => run.status === 'running')");
-    expect(collaborationSource).toContain('hasOpenPlanSteps.value || hasRunningTeam.value');
+    expect(collaborationSource).toContain('const hasTaskActivity = computed(() => hasOpenPlanSteps.value)');
     expect(collaborationSource).toContain("hasTaskActivity ? '任务计划' : '任务协作'");
     expect(collaborationSource).toContain('@keyframes tct-plan-line-highlight');
     expect(collaborationSource).toContain('animation-delay: 0.3s');
@@ -258,52 +255,6 @@ describe('主对话 Harness 前端契约', () => {
     expect(highlight).not.toContain('#4f6ef7');
     expect(highlight).not.toContain('#aeb9ec');
     expect(collaborationSource).toMatch(/\.task-collaboration-trigger\.task-active[\s\S]*?color: #4d525c;/);
-  });
-
-  it('委派步骤下方的成员胶囊显示真实智能体名称，不让场景化岗位名覆盖', () => {
-    expect(messageListSource).toContain("{{ row.step.name || '子智能体' }}");
-    expect(messageListSource).not.toContain('{{ run.roleName || run.name }}');
-    expect(messageListSource).toContain('岗位：${run.roleName}');
-  });
-
-  it('成员只在 started 后以无动画头像名称胶囊进入执行时间线', () => {
-    expect(chatTabSource).toContain(':subagents="subagents"');
-    expect(messageListSource).toContain('class="pill-agent-avatar"');
-    expect(messageListSource).toContain('subagentStepIconUrl(message, row.step)');
-    expect(messageListSource).toContain("row.step.kind === 'subagent'");
-    expect(messageListSource).not.toContain('class="sub-team-pills"');
-    expect(messageListSource).toContain('border-radius: 999px');
-    expect(messageListSource).toContain(":class=\"['subagent-member-row', row.step.status]\"");
-    expect(messageListSource).toContain('.subagent-member-row {');
-    expect(messageListSource).not.toContain('pill-breathe');
-    expect(messageListSource).not.toContain('pill-status');
-  });
-
-  it('委派过程按真实事件展开，整轮状态头与子智能体步骤分层展示', () => {
-    expect(apiSource).toContain("case 'subagent.preparing':");
-    expect(timelineSource).toContain('正在打开「${name}」并准备委派');
-    expect(timelineSource).toContain("operation: 'subagent_prepare'");
-    expect(timelineSource).toContain("operation: 'subagent_node'");
-    expect(timelineSource).toContain('currentNodeStep.label = nodeLabel');
-    expect(timelineSource).not.toContain('「${name}」已完成委派任务');
-    expect(messageListSource).toContain('{{ execHeadTitle(message) }}');
-    expect(messageListSource).toContain('class="exec-head"');
-    expect(messageListSource).toContain('class="exec-head-elapsed">{{ execHeadTimeText(message) }}');
-    expect(messageListSource).toContain('v-show="!isExecCollapsed(message)"');
-    expect(messageListSource).toContain('hasExecutionStreamBody(message)');
-    expect(messageListSource).toContain("['subagent-member-row', row.step.status]");
-  });
-
-  it('委派帧把真实头像存入运行档，不能依赖临时 @ 候选目录', () => {
-    expect(apiSource).toContain('icon: d.icon ? String(d.icon) : undefined');
-    expect(timelineSource).toContain('...(ev.icon ? { icon: ev.icon } : {}),');
-    expect(messageListSource).toContain("icon: run.icon || current?.icon || ''");
-  });
-
-  it('@ 候选只读取当前用户实际可委派的 Agent API 集合', () => {
-    expect(apiSource).toContain("requestAgentApi(`/chat/subagents?${params.toString()}`, { method: 'GET' })");
-    expect(apiSource).not.toContain("url: '/app/appInfo/my/all/list'");
-    expect(apiSource).toContain("const params = new URLSearchParams({ limit: '50' })");
   });
 
   it('智能体广场创建人头像直接使用应用接口返回字段', () => {
@@ -755,47 +706,6 @@ describe('主对话 Harness 前端契约', () => {
     expect(chatSource).toContain('!CANCEL_INTENT_RE.test(content)');
     expect(chatSource).toContain('isWaitingForUserStatus(liveActive?.status)');
     expect(chatSource).toContain('if (!accepted && !chatInput.value) chatInput.value = draft');
-  });
-
-  it('主 Agent 产品名称是 AXIOM Agent', () => {
-    expect(execTeamSource).toContain("'AXIOM Agent'");
-    expect(execTeamSource).not.toContain("'项目主管'");
-    expect(timelineSource).toContain('缺省回退 AXIOM Agent');
-    expect(apiSource).toContain('AXIOM Agent 在本次任务里的场景化身份');
-  });
-
-  it('执行团队成员恢复独立过程窗并绑定本次流式运行档', () => {
-    expect(chatTabSource).toContain("emit(\n    'openSubagentChat'");
-    expect(chatTabSource).not.toMatch(
-      /function onOpenSubagentRun[\s\S]{0,360}emit\('selectSubagent'/,
-    );
-    expect(chatPageSource).toContain('<SubagentChatPanel');
-    expect(chatPageSource).toContain(':delegation-run="findDelegationRun(sa.runKey)"');
-    expect(centerSource).toContain('openSubagent(match ||');
-    expect(subagentPanelSource).toContain('class="agent-run-page"');
-    expect(subagentPanelSource).toContain('placeholder="输入你的问题..."');
-    expect(subagentPanelSource).toContain('props.delegationRun?.output');
-    expect(subagentPanelSource).toContain('delegationRun.reasoning');
-    expect(subagentPanelSource).toContain('delegationRun?.nodes');
-    expect(subagentPanelSource).toContain('showLiveDelegation');
-    expect(subagentPanelSource).toContain('delegationRun?.files');
-    expect(subagentPanelSource).toContain('<RunGeneratedFiles v-if="delegationFiles.length"');
-    expect(subagentPanelSource).toContain('skipLiveDelegation.value = true');
-    expect(subagentPanelSource).toContain('function onNewConversation()');
-    expect(subagentPanelSource).toContain('class="run-brand"');
-    expect(subagentPanelSource).toContain('class="run-brand-avatar"');
-    expect(subagentPanelSource).toContain('aria-label="关闭子智能体对话"');
-    expect(subagentPanelSource).toMatch(
-      /class="sac-close-btn"[\s\S]*?@click\.stop="emit\('close'\)"/,
-    );
-    expect(subagentPanelSource).not.toContain('class="back-btn"');
-    expect(subagentPanelSource).toContain('<AgentOutputDisclaimer v-if="messages.length || showLiveDelegation" />');
-    expect(subagentPanelSource).not.toContain('class="run-header"');
-    expect(subagentPanelSource).toContain('打开完整对话');
-    expect(subagentPanelSource).toContain('openAgentRunWindow');
-    expect(subagentPanelSource).not.toContain('送回主任务');
-    expect(chatPageSource).not.toContain('onSendBack');
-    expect(chatPageSource).not.toContain('@send-back');
   });
 
   it('运行中回车默认入队，点调整方向才注入，停键不因草稿消失', () => {

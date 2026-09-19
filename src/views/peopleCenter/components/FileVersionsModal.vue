@@ -51,10 +51,6 @@ import {
   type UserFileVersion,
 } from '../myfiles.api';
 import { formatFileSize } from '../composables/executionTimeline';
-import {
-  isAgentRunEmbedded,
-  requestEmbeddedAgentRunDownloadVersion,
-} from '../../agent/run/agentRunBack';
 
 const props = defineProps<{
   /** 要查看版本的文件（null=关闭）。 */
@@ -118,15 +114,6 @@ watch(
 async function onDownload(v: UserFileVersion) {
   if (!props.file) return;
   try {
-    if (isAgentRunEmbedded()) {
-      requestEmbeddedAgentRunDownloadVersion({
-        fileId: props.file.id,
-        id: v.id,
-        versionNo: v.versionNo,
-        filename: v.filename,
-      });
-      return;
-    }
     await downloadFileVersion(props.file.id, v);
   } catch (e) {
     message.error(e instanceof Error ? e.message : '下载失败');

@@ -67,12 +67,11 @@ describe('演示文稿助手前端契约', () => {
     expect(existsSync(resolve(root, '../../../public/agent-icons/presentation-assistant.png'))).toBe(true);
   });
 
-  it('专属空态保留定制欢迎语，同时移除推荐区、Skill 和子智能体选择', () => {
+  it('专属空态保留定制欢迎语，同时移除推荐区和 Skill 选择', () => {
     expect(presentationModuleSource).toContain('你好，今天想制作什么演示文稿？');
     expect(presentationModuleSource).toContain('生成可编辑的演示文稿');
     expect(presentationModuleSource).toContain('hideRecommendGrid: true');
     expect(presentationModuleSource).toContain('hideSkillSelector: true');
-    expect(presentationModuleSource).toContain('hideSubagent: true');
     expect(presentationModuleSource).toContain('hidePlanMode: true');
     expect(presentationModuleSource).toContain('hideResearch: true');
     expect(chatTabSource).toContain('v-if="!uiPolicy?.hideResearch"');
@@ -91,16 +90,14 @@ describe('演示文稿助手前端契约', () => {
     expect(centerStyleSource).toMatch(/\.chat-home\.empty-state\.presentation-state \.composer-dock\s*\{\s*margin-top:\s*82px;/);
   });
 
-  it('发送前再清理普通 Skill 和子智能体残留', () => {
+  it('发送前再清理普通 Skill 残留', () => {
     expect(chatSource).toContain('const sendPolicy = getBuiltinUiPolicy(assistantPreset.value)');
     expect(chatSource).toContain('if (sendPolicy?.hideSkillSelector) selectedSkills.value = []');
-    expect(chatSource).toContain('if (sendPolicy?.hideSubagent) selectedSubagent.value = undefined');
     expect(chatSource).toContain('if (sendPolicy?.hidePlanMode) planMode.value = false');
     expect(chatSource).toContain('if (sendPolicy?.hideResearch) researchProfile.value = false');
     expect(chatSource).toContain('turnPolicy?.hidePlanMode ? false : Boolean(opts?.planMode)');
     expect(chatSource).toContain('turnPolicy?.hideResearch ? false : Boolean(opts?.researchProfile)');
     expect(chatSource).toContain('const sentSkills = sendPolicy?.hideSkillSelector ? []');
-    expect(chatSource).toContain('const delegatedSubagent = sendPolicy?.hideSubagent ? undefined');
   });
 
   it('registry 只保存身份和 uiPolicy key，不含校园工具 allowlist', () => {

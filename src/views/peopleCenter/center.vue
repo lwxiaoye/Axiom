@@ -64,7 +64,6 @@
         <TaskCollaborationPopover
           :panel="runPanel"
           :conversation-key="taskConversationKey"
-          @open-team="onOpenTeam"
         />
         <button
           v-if="MAIN_CHAT_FEATURE_VISIBILITY.workspace"
@@ -108,16 +107,6 @@
         </button>
       </div>
     </header>
-    <!-- 执行团队（2026-07-27 二期）：右侧伴随面板/全屏全景——实时监视属性，与已删除的
-         ArtifactPanel（静态产物预览）定位不同，勿混同（产品定义 §展示容器） -->
-    <ExecTeamPanel
-      v-if="execTeamOpen"
-      :runs="runPanel.subagentRuns"
-      :focus-key="execTeamFocus"
-      @close="execTeamOpen = false"
-      @select-run="onTeamSelectRun"
-      @focus-chat="execTeamOpen = false"
-    />
     <Transition name="history-backdrop">
       <button
         v-if="historyOpen"
@@ -461,15 +450,13 @@ import { useUserStore } from '/@/store/modules/user';
 import { useGlobSetting } from '/@/hooks/setting';
 import { usePermission } from '/@/hooks/web/usePermission';
 import { getProxyStaticFileUrl } from '/@/utils/common/fileUrl';
-import type { AgentItem, SubagentItem } from './agentApi';
+import type { AgentItem } from './agentApi';
 import { useAgentMarket, type CenterSectionKey } from './composables/useAgentMarket';
 import { useCenterChat } from './composables/useCenterChat';
 import MemoryDrawer from './components/MemoryDrawer.vue';
 import ProfileModal from './components/ProfileModal.vue';
 import WorkspaceOverlay from './components/WorkspaceOverlay.vue';
 import TaskCollaborationPopover from './components/TaskCollaborationPopover.vue';
-import ExecTeamPanel from './components/ExecTeamPanel.vue';
-import type { SubagentRun } from './components/MessageList.vue';
 import { deriveRunPanel } from './composables/executionTimeline';
 import { threadConversationActivity } from './composables/threadConversationActivity';
 import { CenterContextKey } from './centerContext';
@@ -713,8 +700,6 @@ const {
   isFinishedRun,
   currentRunPlan,
   chatMessages,
-  subagents,
-  openSubagent,
   threadList,
   threadsLoading,
   threadHasMore,
@@ -833,7 +818,7 @@ function openNewChat() {
   }
 }
 
-// Run 级计划卡只读 Harness 的完整计划快照；工具/委派细节仍从消息时间线投影。
+// Run 级计划卡只读 Harness 的完整计划快照；工具细节仍从消息时间线投影。
 const runPanel = computed(() => {
   const base = deriveRunPanel(chatMessages.value);
   const plan = currentRunPlan.value;
@@ -856,38 +841,6 @@ const taskConversationKey = computed(() => {
   const last = chatMessages.value[chatMessages.value.length - 1]?.id || 0;
   return currentThreadId.value || `${first}-${last}`;
 });
-
-// 执行团队全景（2026-07-27 二期）：面板分区标题/成员行 → 打开伴随面板（可升全屏）；
-// 全景里点成员卡才下钻 @ 窗（先看位置再深潜，面板保持打开作返程锚点）。
-const execTeamOpen = ref(false);
-const execTeamFocus = ref('');
-
-function onOpenTeam(runKey?: string) {
-  execTeamFocus.value = runKey || '';
-  execTeamOpen.value = true;
-}
-
-// 换会话/新建对话即关面板：团队是「本轮」的，留着上一轮的窗（或空态窗）只会误导
-watch(taskConversationKey, () => {
-  execTeamOpen.value = false;
-  execTeamFocus.value = '';
-});
-
-function onTeamSelectRun(run: SubagentRun) {
-  onSelectRun(run);
-}
-
-// 点任务面板里的子智能体 → 打开该次委派的悬浮过程窗，不改写 composer 的 @ 目标。
-// 只按 id 精确匹配：按 name 兜底在重名场景下会打开完全无关的另一个子智能体（不同 id/历史/能力）。
-function onSelectRun(run: SubagentRun) {
-  const match = run.id ? subagents.value.find((s) => s.id === run.id) : null;
-  const id = match?.id || run.id;
-  if (!id) {
-    showNotice('无法定位该子智能体，请先在「我的智能体」中确认它已发布');
-    return;
-  }
-  openSubagent(match || ({ id, name: run.name } as SubagentItem), run.runKey);
-}
 
 // 会话重命名：抽屉内联编辑，Enter/失焦保存、Esc 取消
 const renamingId = ref('');

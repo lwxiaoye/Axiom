@@ -42,7 +42,6 @@
       v-if="chatMessages.length > 0"
       ref="messageListRef"
       :messages="chatMessages"
-      :subagents="subagents"
       :loading="loading"
       :retry-attachments="retryAttachments"
       :hide-source-citations="campusMode"
@@ -50,12 +49,10 @@
       :answer-layout="campusMode ? 'campus' : 'standard'"
       :meter-copy="interviewMode ? 'interview' : 'standard'"
       @open-agent="(app) => emit('openAgent', app)"
-      @open-subagent="onOpenSubagentRun"
       @regenerate="(modelId) => emit('regenerate', modelId)"
       @feedback="(id, value) => emit('feedback', id, value)"
       @resume="(id, val) => emit('resume', id, val)"
       @edit="(id, content) => emit('edit', id, content)"
-      @clarify="(id, opt) => emit('clarify', id, opt)"
       @approve="(id, approved) => emit('approve', id, approved)"
       @scroll-state="(atBottom) => (chatAtBottom = atBottom)"
       @open-artifact="onOpenArtifact"
@@ -81,7 +78,7 @@
         'composer',
         'chat-composer',
         {
-          'has-skill': selectedSubagent || selectedSkills.length || webSearch,
+          'has-skill': selectedSkills.length || webSearch,
           'drag-active': dragActive,
           'task-mode-active': planMode,
           'task-mode-running': planMode && loading,
@@ -334,12 +331,6 @@
           />
         </template>
         <AttachmentCard
-          v-if="selectedSubagent && !presentationMode && !uiPolicy?.hideSubagent"
-          :attachment="{ filename: selectedSubagent.name, kind: 'subagent' }"
-          removable
-          @remove="emit('removeSubagent')"
-        />
-        <AttachmentCard
           v-if="webSearch"
           :attachment="{ filename: '网页搜索', kind: 'web' }"
           removable
@@ -349,28 +340,10 @@
 
       <div v-if="mentionOpen && !presentationMode && !uiPolicy?.hideMention" ref="mentionListRef" class="mention-picker" role="listbox">
         <div v-if="!mentionItems.length" class="mention-empty">
-          {{ subagents.length || skills.length ? '没有匹配的智能体或 Skill' : '暂无可用的智能体或 Skill' }}
+          {{ skills.length ? '没有匹配的 Skill' : '暂无可用的 Skill' }}
         </div>
         <template v-else>
           <div ref="mentionScrollRef" class="mention-scroll" @scroll.passive="updateMentionFade">
-            <template v-if="filteredSubagents.length">
-              <div class="mention-group-label">智能体 · 委托给对话</div>
-              <button
-                v-for="(item, idx) in filteredSubagents"
-                :key="'agent-' + item.id"
-                type="button"
-                role="option"
-                :aria-selected="idx === mentionActive"
-                :class="['mention-item', { active: idx === mentionActive }]"
-                @mousedown.prevent="pickSubagent(item)"
-                @mousemove="mentionActive = idx"
-              >
-                <span class="mention-item-icon" aria-hidden="true"><RobotOutlined /></span>
-                <span class="mention-item-name"><template v-for="(p, pi) in matchParts(item.name)" :key="pi"><b v-if="p.hit" class="mention-hit">{{ p.text }}</b><template v-else>{{ p.text }}</template></template></span>
-                <span v-if="item.description" class="mention-item-desc"><template v-for="(p, pi) in matchParts(item.description)" :key="'d' + pi"><b v-if="p.hit" class="mention-hit">{{ p.text }}</b><template v-else>{{ p.text }}</template></template></span>
-                <span v-if="agentTag(item)" class="mention-item-tag">{{ agentTag(item) }}</span>
-              </button>
-            </template>
             <template v-if="filteredSkills.length">
               <div class="mention-group-label">Skill</div>
               <button
@@ -378,10 +351,10 @@
                 :key="'skill-' + item.id"
                 type="button"
                 role="option"
-                :aria-selected="filteredSubagents.length + idx === mentionActive"
-                :class="['mention-item', { active: filteredSubagents.length + idx === mentionActive }]"
+                :aria-selected="idx === mentionActive"
+                :class="['mention-item', { active: idx === mentionActive }]"
                 @mousedown.prevent="pickSkill(item)"
-                @mousemove="mentionActive = filteredSubagents.length + idx"
+                @mousemove="mentionActive = idx"
               >
                 <span class="mention-item-icon" aria-hidden="true"><CodeSandboxOutlined /></span>
                 <span class="mention-item-name"><template v-for="(p, pi) in matchParts(item.name)" :key="pi"><b v-if="p.hit" class="mention-hit">{{ p.text }}</b><template v-else>{{ p.text }}</template></template></span>
@@ -730,10 +703,10 @@ import InterviewPanel from '../builtinAssistants/interview/InterviewPanel.vue';
 import InterviewMenu from '../builtinAssistants/interview/InterviewMenu.vue';
 import { InterviewSessionKey } from '../builtinAssistants/interview/useInterviewSession';
 import { onClickOutside, useMediaQuery, usePreferredReducedMotion } from '@vueuse/core';
-import { ArrowDownOutlined, ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeSandboxOutlined, DeleteOutlined, EditOutlined, EllipsisOutlined, EnterOutlined, ExclamationCircleOutlined, HolderOutlined, LoadingOutlined, OrderedListOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, RedoOutlined, RobotOutlined, RollbackOutlined, SearchOutlined, UndoOutlined } from '@ant-design/icons-vue';
+import { ArrowDownOutlined, ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeSandboxOutlined, DeleteOutlined, EditOutlined, EllipsisOutlined, EnterOutlined, ExclamationCircleOutlined, HolderOutlined, LoadingOutlined, OrderedListOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, RedoOutlined, RollbackOutlined, SearchOutlined, UndoOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 import draggable from 'vuedraggable';
-import type { AgentItem, ChatQueueItem, GeneratedFile, KnowledgeSelection, SkillItem, SubagentItem, ThreadReference, UploadedFile } from '../agentApi';
+import type { AgentItem, ChatQueueItem, GeneratedFile, KnowledgeSelection, SkillItem, ThreadReference, UploadedFile } from '../agentApi';
 import { saveArtifactFile, fetchUserFileText, type UserFileSelection } from '../myfiles.api';
 import MessageList, { type ChatMessage } from '../components/MessageList.vue';
 import WorkAgentMascot from '../components/WorkAgentMascot.vue';
@@ -823,8 +796,6 @@ const props = defineProps<{
   selectedKnowledgeList: KnowledgeSelection[];
   selectedFileList: UserFileSelection[];
   selectedThreadList: ThreadReference[];
-  selectedSubagent?: SubagentItem;
-  subagents: SubagentItem[];
   skills: SkillItem[];
   webSearch: boolean;
   attachments: UploadedFile[];
@@ -1100,10 +1071,6 @@ const emit = defineEmits<{
   (e: 'updateKnowledge', list: KnowledgeSelection[]): void;
   (e: 'updateFiles', list: UserFileSelection[]): void;
   (e: 'updateThreads', list: ThreadReference[]): void;
-  (e: 'selectSubagent', item: SubagentItem): void;
-  (e: 'openSubagentChat', item: SubagentItem, run: SubagentRunLike): void;
-  (e: 'removeSubagent'): void;
-  (e: 'ensureSubagents'): void;
   (e: 'selectSkill', item: SkillItem): void;
   (e: 'ensureSkills'): void;
   (e: 'toggleWeb'): void;
@@ -1111,7 +1078,6 @@ const emit = defineEmits<{
   (e: 'removeAttachment', index: number): void;
   (e: 'retryAttachment', index: number): void;
   (e: 'edit', messageId: number, content: string): void;
-  (e: 'clarify', messageId: number, option: { id: string; name: string }): void;
   (e: 'approve', messageId: number, approved: boolean): void;
   (e: 'startAgent', agent: AgentItem): void;
   (e: 'openAgent', app: any): void;
@@ -1437,7 +1403,6 @@ const hasComposerChips = computed(() => Boolean(
   || props.selectedThreadList.length
   || props.selectedKnowledgeList.length
   || props.selectedSkills.length
-  || props.selectedSubagent
   || props.webSearch,
 ));
 
@@ -1517,16 +1482,6 @@ function onFileChange(e: Event) {
   input.value = '';
 }
 
-const filteredSubagents = computed(() => {
-  const q = mentionQuery.value.toLowerCase();
-  const list = q
-    ? props.subagents.filter(
-        (s) => s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q),
-      )
-    : props.subagents;
-  return list.slice(0, 50);
-});
-
 const filteredSkills = computed(() => {
   const q = mentionQuery.value.toLowerCase();
   const list = q
@@ -1537,11 +1492,8 @@ const filteredSkills = computed(() => {
   return list.slice(0, 50);
 });
 
-// @ 面板的扁平候选序列（智能体在前、Skill 在后），供键盘 ↑/↓/Enter 跨两组统一移动高亮
-const mentionItems = computed(() => [
-  ...filteredSubagents.value.map((item) => ({ kind: 'agent' as const, item })),
-  ...filteredSkills.value.map((item) => ({ kind: 'skill' as const, item })),
-]);
+// @ 面板的扁平候选序列（Skill），供键盘 ↑/↓/Enter 统一移动高亮
+const mentionItems = computed(() => filteredSkills.value.map((item) => ({ kind: 'skill' as const, item })));
 
 // 滚动区底部渐隐：下方还有候选时优雅淡出，替代生硬的半行截断
 const mentionScrollRef = ref<HTMLElement | null>(null);
@@ -1554,13 +1506,7 @@ function updateMentionFade() {
 
 watch([mentionOpen, mentionItems], () => nextTick(updateMentionFade));
 
-// 行尾作用域小标签（对齐 Codex：右侧灰字）。智能体按归属，Skill 按来源。
-function agentTag(item: SubagentItem) {
-  if (item.scope === 'shared') return '共享';
-  if (item.scope === 'owned') return '我的';
-  return '';
-}
-
+// 行尾作用域小标签（对齐 Codex：右侧灰字）。Skill 按来源。
 const SKILL_SOURCE_LABEL: Record<string, string> = { builtin: '内置', upload: '上传', url: '网络' };
 function skillTag(item: SkillItem) {
   return SKILL_SOURCE_LABEL[item.source || ''] || '已启用';
@@ -1595,7 +1541,6 @@ function onInput(e: Event) {
     mentionActive.value = 0; // 过滤条件变化，高亮回到第一项（Codex 式）
     if (!mentionOpen.value) {
       mentionOpen.value = true;
-      emit('ensureSubagents');
       emit('ensureSkills');
     }
   } else {
@@ -1622,8 +1567,7 @@ function pickActiveMention() {
   const list = mentionItems.value;
   const chosen = list[mentionActive.value] || list[0];
   if (!chosen) return;
-  if (chosen.kind === 'agent') pickSubagent(chosen.item);
-  else pickSkill(chosen.item);
+  pickSkill(chosen.item);
 }
 
 // Tab 补全：面板打开时等同 Enter 选中（对齐 Codex）；面板关闭时保持默认焦点行为。
@@ -1664,11 +1608,6 @@ function onComposerBackspace(e: KeyboardEvent) {
     emit('toggleWeb');
     return;
   }
-  if (props.selectedSubagent) {
-    e.preventDefault();
-    emit('removeSubagent');
-    return;
-  }
   if (props.selectedSkills.length) {
     e.preventDefault();
     emit('removeSkill', props.selectedSkills[props.selectedSkills.length - 1].id);
@@ -1703,23 +1642,6 @@ function resetMentionInput() {
   mentionActive.value = 0;
   nextTick(() => textareaRef.value?.focus());
 }
-
-function pickSubagent(item: SubagentItem) {
-  emit('selectSubagent', item);
-  resetMentionInput();
-}
-
-// 执行团队胶囊：恢复为打开该次委派的独立过程窗；不能改写 composer 下一轮目标。
-// 只按 id 精确匹配：按 name 兜底在重名场景会打开完全无关的另一个子智能体。
-function onOpenSubagentRun(run: SubagentRunLike) {
-  const match = run.id ? props.subagents.find((s) => s.id === run.id) : null;
-  emit(
-    'openSubagentChat',
-    match || ({ id: run.id, name: run.name || run.roleName || '子智能体' } as SubagentItem),
-    run,
-  );
-}
-type SubagentRunLike = { id: string; runKey: string; name: string; roleName?: string };
 
 function pickSkill(item: SkillItem) {
   emit('selectSkill', item);

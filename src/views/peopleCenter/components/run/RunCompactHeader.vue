@@ -1,5 +1,5 @@
 <template>
-  <header class="run-compact-header" :class="{ 'has-close-action': showClose }">
+  <header class="run-compact-header">
     <button
       v-if="showBack"
       type="button"
@@ -17,54 +17,23 @@
     />
 
     <strong class="run-compact-title" :title="title">{{ title }}</strong>
-
-    <div class="run-compact-actions">
-      <button
-        v-if="showInspiration"
-        type="button"
-        class="run-compact-inspiration-toggle"
-        :aria-expanded="!inspirationCollapsed"
-        aria-label="打开场景问题推荐"
-        @click="emit('toggle-inspiration')"
-      >
-        <BulbOutlined />
-        <span>场景</span>
-      </button>
-      <button
-        v-if="showClose"
-        type="button"
-        class="run-compact-close"
-        aria-label="关闭子智能体对话"
-        @click="emit('close')"
-      >
-        <CloseOutlined />
-      </button>
-    </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { ArrowLeftOutlined, BulbOutlined, CloseOutlined } from '@ant-design/icons-vue';
+import { ArrowLeftOutlined } from '@ant-design/icons-vue';
 import RunSidebarToggle from './RunSidebarToggle.vue';
 
 withDefaults(defineProps<{
   title: string;
   sidebarCollapsed: boolean;
-  inspirationCollapsed?: boolean;
-  showInspiration?: boolean;
-  showClose?: boolean;
   showBack?: boolean;
 }>(), {
-  inspirationCollapsed: true,
-  showInspiration: false,
-  showClose: false,
   showBack: false,
 });
 
 const emit = defineEmits<{
   (event: 'toggle-sidebar'): void;
-  (event: 'toggle-inspiration'): void;
-  (event: 'close'): void;
   (event: 'back'): void;
 }>();
 </script>
@@ -109,14 +78,8 @@ const emit = defineEmits<{
     white-space: nowrap;
   }
 
-  .has-close-action .run-compact-title {
-    max-width: calc(100% - 260px);
-  }
-
   :deep(.run-compact-history-toggle),
-  .run-compact-back,
-  .run-compact-inspiration-toggle,
-  .run-compact-close {
+  .run-compact-back {
     display: inline-flex;
     height: 44px;
     flex: 0 0 auto;
@@ -146,46 +109,14 @@ const emit = defineEmits<{
     height: 17px;
   }
 
-  .run-compact-actions {
-    display: flex;
-    margin-left: auto;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .run-compact-inspiration-toggle {
-    width: 52px;
-    flex-direction: column;
-    gap: 1px;
-  }
-
-  .run-compact-inspiration-toggle :deep(.anticon) {
-    font-size: 14px;
-  }
-
-  .run-compact-inspiration-toggle span:last-child {
-    font-size: 9.5px;
-    font-weight: 650;
-    line-height: 11px;
-  }
-
-  .run-compact-close {
-    width: 44px;
-    font-size: 16px;
-  }
-
   :deep(.run-compact-history-toggle:hover),
-  .run-compact-back:hover,
-  .run-compact-inspiration-toggle:hover,
-  .run-compact-close:hover {
+  .run-compact-back:hover {
     border-color: var(--run-left-control-hover-border, #dcdee2);
     background: #f7f7f8;
   }
 
   :deep(.run-compact-history-toggle:focus-visible),
-  .run-compact-back:focus-visible,
-  .run-compact-inspiration-toggle:focus-visible,
-  .run-compact-close:focus-visible {
+  .run-compact-back:focus-visible {
     outline: 2px solid var(--run-focus-ring, #4f46e5);
     outline-offset: 2px;
   }
@@ -204,21 +135,14 @@ const emit = defineEmits<{
     font-size: 13.5px;
   }
 
-  .has-close-action .run-compact-title {
-    max-width: calc(100% - 246px);
-  }
-
-  :deep(.run-compact-history-toggle),
-  .run-compact-inspiration-toggle {
+  :deep(.run-compact-history-toggle) {
     width: 50px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   :deep(.run-compact-history-toggle),
-  .run-compact-back,
-  .run-compact-inspiration-toggle,
-  .run-compact-close {
+  .run-compact-back {
     transition: none;
   }
 }

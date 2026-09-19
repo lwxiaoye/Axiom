@@ -79,18 +79,16 @@ describe('折叠组头如实报失败（2026-07-29）', () => {
 });
 
 describe('常驻标记的刷新恢复（2026-07-29 深扫补齐后半段）', () => {
-  // 后端把上下文压缩提示/路由智能体/外部推荐/内部推荐 id 投影进了 trace（白名单+投影
+  // 后端把上下文压缩提示/外部推荐/内部推荐 id 投影进了 trace（白名单+投影
   // 分支双闸），但**前端不读就等于没做**——那半最容易被误判成"已完成"。这里锁消费点。
-  it('restoreExecutionTrace 透传四个常驻字段', async () => {
+  it('restoreExecutionTrace 透传三个常驻字段', async () => {
     const { restoreExecutionTrace } = await import('./executionTimeline');
     const out: any = restoreExecutionTrace({
       compacted_note: '已自动整理较早对话',
-      routed_agent: { id: 'a1', name: '数据分析助手' },
       recommendations: [{ name: '外部应用' }],
       recommended_agent_ids: ['app-1', 'app-2'],
     } as any);
     expect(out.compactedNote).toBe('已自动整理较早对话');
-    expect(out.routedAgent).toBe('数据分析助手');
     expect(out.externalRecs).toHaveLength(1);
     // 内部推荐只带 id：整卡快照会在智能体改名/下架后与真实应用对不上
     expect(out.recommendedAgentIds).toEqual(['app-1', 'app-2']);
@@ -101,7 +99,6 @@ describe('常驻标记的刷新恢复（2026-07-29 深扫补齐后半段）', ()
     const { restoreExecutionTrace } = await import('./executionTimeline');
     const out: any = restoreExecutionTrace({} as any);
     expect(out.compactedNote).toBeUndefined();
-    expect(out.routedAgent).toBeUndefined();
     expect(out.externalRecs).toBeUndefined();
     expect(out.recommendedAgentIds).toBeUndefined();
   });

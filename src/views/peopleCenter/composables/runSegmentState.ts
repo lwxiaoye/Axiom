@@ -267,7 +267,7 @@ export function createRunSegmentSession(opts: RunSegmentSessionOpts) {
         message
         && (message.executionSegmentIndex || 0) > 0
         && !String(message.content || '').trim()
-        && !message.agentSteps?.some((s) => s.kind === 'tool' || s.kind === 'subagent')
+        && !message.agentSteps?.some((s) => s.kind === 'tool')
         && !message.toolSteps?.length,
       );
     },

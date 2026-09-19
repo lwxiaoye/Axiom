@@ -1,17 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 
-test('主 Agent 正文、commentary、子智能体委派与独立对话复用同一个流式节奏器', () => {
+test('主 Agent 正文与 commentary 复用同一个流式节奏器', () => {
   const chatSource = fs.readFileSync(path.resolve(__dirname, './useCenterChat.ts'), 'utf8');
   const streamSource = fs.readFileSync(path.resolve(__dirname, './smoothStreamText.ts'), 'utf8');
   const processSource = fs.readFileSync(path.resolve(__dirname, './harnessProcessStreams.ts'), 'utf8');
   const apiSource = fs.readFileSync(path.resolve(__dirname, '../agentApi.ts'), 'utf8');
   const messageListSource = fs.readFileSync(path.resolve(__dirname, '../components/MessageList.vue'), 'utf8');
-  const subagentSource = fs.readFileSync(path.resolve(__dirname, '../components/SubagentChatPanel.vue'), 'utf8');
-  const agentRunSource = fs.readFileSync(path.resolve(__dirname, '../../agent/run/useAgentRun.ts'), 'utf8');
-  const directAgentRunSource = fs.readFileSync(path.resolve(__dirname, '../../agent/run/index.vue'), 'utf8');
-  const runMarkdownSource = fs.readFileSync(path.resolve(__dirname, '../../agent/run/components/RunAssistantMarkdown.vue'), 'utf8');
-  const runShellSource = fs.readFileSync(path.resolve(__dirname, '../../agent/run/agent-run-shell.less'), 'utf8');
 
   expect(chatSource).toContain("import { createSmoothStreamText } from './smoothStreamText';");
   expect(chatSource).toContain('return createSmoothStreamText({');
@@ -42,18 +37,4 @@ test('主 Agent 正文、commentary、子智能体委派与独立对话复用同
   expect(streamSource).toContain('BASE_CHARS_PER_SECOND + backlog * BACKLOG_RATE_GAIN');
   expect(streamSource).toContain("window.matchMedia('(prefers-reduced-motion: reduce)')");
   expect(streamSource).not.toContain('setInterval');
-
-  expect(subagentSource).toContain("import { createSmoothStreamText } from '../composables/smoothStreamText';");
-  expect(subagentSource).toContain(':content="displayDelegationOutput"');
-  expect(subagentSource).toContain('delegationStreamText.finalize(output)');
-  expect(agentRunSource).toContain("import { createSmoothStreamText } from '../../peopleCenter/composables/smoothStreamText';");
-  expect(agentRunSource).toContain('streamText.push(streamContent)');
-  expect(agentRunSource).toContain('await streamText.finish(resultText(finalResult))');
-  expect(directAgentRunSource).toContain("import { createSmoothStreamText } from '../../peopleCenter/composables/smoothStreamText';");
-  expect(directAgentRunSource).toContain('streamText.push(streamContent)');
-  expect(directAgentRunSource).toContain('await streamText.finish(resultText(finalResult))');
-  expect(runMarkdownSource).toContain("import { compileAnswerLayout } from '../../../peopleCenter/utils/compileAnswerLayout';");
-  expect(runMarkdownSource).toContain("markdown.render(compileAnswerLayout(content || '').markdown)");
-  expect(runShellSource).toMatch(/\.run-msg\.assistant \.run-bubble \{[\s\S]*?font-size:\s*16px/);
-  expect(runShellSource).toMatch(/\.run-msg\.assistant \.markdown-body :deep\(p\) \{ margin-bottom:\s*18px; \}/);
 });

@@ -126,22 +126,12 @@ export type ActiveRun = {
   plan?: Record<string, any>;
   goal_contract?: Record<string, any>;
   approved_plan_version?: number;
-  subagent_id?: string;
   resume_token?: string;
   started_at?: string;
   completed_at?: string;
 };
 
 export type { AssistantPreset } from './builtinAssistants';
-
-export type SubagentItem = {
-  id: string;
-  name: string;
-  description?: string;
-  icon?: string;
-  type?: string;
-  scope?: 'owned' | 'shared';
-};
 
 function normalizeBaseUrl(url?: string) {
   return String(url || '').trim().replace(/\/$/, '');
@@ -333,10 +323,6 @@ export type InteractivePayload = {
     forbidden?: string[];
     budget_hint?: string;
   };
-  /** 挂起来源子智能体身份（后端 input.required 直带，事件回放同样携带）。
-   *  @ 模式不产生 subagentCalls chip，只能靠这两个字段标注来源；消歧卡两字段为空不下发。 */
-  subagent_id?: string;
-  subagent_name?: string;
 };
 
 export type CitationSource = {
@@ -508,57 +494,10 @@ export type TaskPlanEvent = {
   }>;
 };
 
-export type RouteSelected = { subagent_id: string; name: string };
-/** R5 消歧：匹配到多个候选智能体，交用户选择（clarification.required 事件）。
- *  skill_ids/attachments 回放原轮一次性上下文（P2a）：重订阅时前端本地已无原轮快照，
- *  据此在点选重发时精确复用原轮技能/附件（附件为文本 ref，无 image_url data URL）。 */
-export type Clarification = {
-  prompt: string;
-  options: { id: string; name: string }[];
-  skill_ids?: string[];
-  attachments?: Array<{ filename: string; kind?: string; text: string }>;
-};
 /** 敏感工具审批（approval.required 事件，§11）：用户通过后同幂等键重试即执行 */
 export type ApprovalRequest = { call_id: string; tool_name?: string; prompt?: string };
 /** R6 外部应用推荐（recommendation 事件，§8.4）：前往使用卡，不派发 */
 export type Recommendation = { id: string; name: string; description?: string; url?: string };
-/** call_subagent 编排（subagent.* 事件，ADR-046）：主模型自主调用子智能体的生命周期 +
- *  内部干活流程（node/delta/reasoning，供「子智能体工作窗口」实时展示） */
-export type SubagentStepEvent = {
-  phase: 'preparing' | 'started' | 'completed' | 'failed' | 'node' | 'delta' | 'reasoning' | 'review';
-  id: string;
-  name: string;
-  /** 委派瞬间经服务端 ACL/发布态校验的工作台头像；用于历史运行档稳定回放。 */
-  icon?: string;
-  preview?: string;
-  error?: string;
-  /** 委派的任务描述（started 随带，截断）：时间线上展示"主对话让子智能体做什么" */
-  task?: string;
-  /** node 阶段：工作流节点名 + 状态（success/failed/…） */
-  label?: string;
-  status?: string;
-  /** delta 阶段：子智能体节点的公开输出文本（增量） */
-  text?: string;
-  // ---- 执行团队一期（2026-07-27）----
-  /** started/completed：模型按场景生成的岗位名（委派时冻结） */
-  roleName?: string;
-  /** started：AXIOM Agent 在本次任务里的场景化身份（执行团队主管卡标题） */
-  managerRole?: string;
-  /** started：该成员的子任务清单 */
-  subtasks?: string[];
-  /** started：委派时的验收标准 */
-  acceptanceCriteria?: string[];
-  /** review：验收单逐条裁定；completed：验收摘要 */
-  review?: {
-    verdicts: Array<{ criterion: string; passed: boolean | null; evidence?: string }>;
-    passedCount: number;
-    total: number;
-  };
-  acceptance?: { passedCount: number; total: number };
-  /** completed：子智能体已落库产物回执（必须有 file id） */
-  files?: GeneratedFile[];
-};
-
 export type RecommendAgentsPayload = {
   ids: string[];
   intent?: 'explicit_request' | 'capability_gap';
@@ -626,9 +565,6 @@ type StreamCallbacks = {
   onArtifactSaved?: (payload: { source?: string; files: GeneratedFile[] }) => void;
   onResearchProgress?: (payload: ResearchProgressPayload) => void;
   onToolEvent?: (ev: ToolStepEvent) => void;
-  onSubagentStep?: (ev: SubagentStepEvent) => void;
-  onRouteSelected?: (route: RouteSelected) => void;
-  onClarification?: (payload: Clarification) => void;
   onApproval?: (payload: ApprovalRequest) => void;
   onRecommendation?: (items: Recommendation[]) => void;
   /** 结构化智能体推荐卡：前端仅使用服务端已校验的 id 和命中理由，
@@ -653,7 +589,7 @@ type StreamCallbacks = {
   /** run.failed / error 事件：区别于正常回复，供 UI 标红并避免误判为成功。 */
   onError?: (message: string) => void;
   /** 每个被接受的 v1 事件的 sequence（严格递增）。订阅方持有 lastSequence，
-   *  断线重连用 ?after=lastSequence 游标续传——避免全量回放把 tool/subagent
+   *  断线重连用 ?after=lastSequence 游标续传——避免全量回放把 tool
    *  事件重复灌进 reducer（时间线/工作卡重复）。 */
   onSequence?: (sequence: number) => void;
   /** 事件游标出现断层；调用方必须重拉权威 Run/Plan 快照。 */
@@ -1056,88 +992,6 @@ async function readChatStream(
               timestamp: Number(data.timestamp) || undefined,
             });
             return;
-          case 'subagent.started':
-            cb.onSubagentStep?.({
-              phase: 'started',
-              id: String(d.subagent_id || ''),
-              name: String(d.name || ''),
-              icon: d.icon ? String(d.icon) : undefined,
-              task: d.task ? String(d.task) : undefined,
-              // 执行团队一期：岗位名/子任务清单/验收标准（缺省不带）
-              roleName: d.role_name ? String(d.role_name) : undefined,
-              managerRole: d.manager_role ? String(d.manager_role) : undefined,
-              subtasks: Array.isArray(d.subtasks) ? d.subtasks.map(String) : undefined,
-              acceptanceCriteria: Array.isArray(d.acceptance_criteria)
-                ? d.acceptance_criteria.map(String)
-                : undefined,
-            });
-            return;
-          case 'subagent.preparing':
-            cb.onSubagentStep?.({
-              phase: 'preparing',
-              id: String(d.subagent_id || ''),
-              name: String(d.name || ''),
-              task: d.task ? String(d.task) : undefined,
-            });
-            return;
-          case 'subagent.review':
-            // 执行团队一期：验收单逐条裁定（先于 completed 到达）
-            cb.onSubagentStep?.({
-              phase: 'review', id: String(d.subagent_id || ''), name: String(d.name || ''),
-              review: {
-                verdicts: Array.isArray(d.verdicts)
-                  ? d.verdicts.map((v: any) => ({
-                      criterion: String(v?.criterion || ''),
-                      passed: typeof v?.passed === 'boolean' ? v.passed : null,
-                      evidence: v?.evidence ? String(v.evidence) : undefined,
-                    }))
-                  : [],
-                passedCount: Number(d.passed_count || 0),
-                total: Number(d.total || 0),
-              },
-            });
-            return;
-          case 'subagent.completed':
-            cb.onSubagentStep?.({
-              phase: 'completed', id: String(d.subagent_id || ''), name: String(d.name || ''),
-              preview: d.result_preview,
-              roleName: d.role_name ? String(d.role_name) : undefined,
-              acceptance: d.acceptance && typeof d.acceptance === 'object'
-                ? {
-                    passedCount: Number(d.acceptance.passed_count || 0),
-                    total: Number(d.acceptance.total || 0),
-                  }
-                : undefined,
-              files: mapSavedArtifactFiles(d.files, 'generated'),
-            });
-            return;
-          case 'subagent.failed':
-            cb.onSubagentStep?.({
-              phase: 'failed', id: String(d.subagent_id || ''), name: String(d.name || ''),
-              error: d.error,
-            });
-            return;
-          case 'subagent.node':
-            cb.onSubagentStep?.({
-              phase: 'node', id: String(d.subagent_id || ''), name: '',
-              label: String(d.label || ''), status: String(d.status || ''),
-            });
-            return;
-          case 'subagent.delta':
-            cb.onSubagentStep?.({
-              phase: 'delta', id: String(d.subagent_id || ''), name: '', text: String(d.text || ''),
-            });
-            return;
-          case 'subagent.reasoning':
-            cb.onSubagentStep?.({
-              phase: 'reasoning', id: String(d.subagent_id || ''), name: '', text: String(d.text || ''),
-            });
-            return;
-          case 'subagent.reasoning.completed':
-            cb.onSubagentStep?.({
-              phase: 'reasoning', id: String(d.subagent_id || ''), name: '', text: '',
-            });
-            return;
           case 'input.required':
             sawTerminal = true; // 合法挂起：本轮以卡片收尾，也算「见过业务信号」
             cb.onInteractive?.({ ...d, kind: 'clarification' });
@@ -1197,17 +1051,6 @@ async function readChatStream(
             return;
           case 'citations':
             cb.onCitations?.(Array.isArray(d.sources) ? d.sources : []);
-            return;
-          case 'route.selected':
-            cb.onRouteSelected?.({ subagent_id: String(d.subagent_id || ''), name: String(d.name || '') });
-            return;
-          case 'clarification.required':
-            cb.onClarification?.({
-              prompt: String(d.prompt || ''),
-              options: Array.isArray(d.options) ? d.options : [],
-              skill_ids: Array.isArray(d.skill_ids) ? d.skill_ids.map(String) : undefined,
-              attachments: Array.isArray(d.attachments) ? d.attachments : undefined,
-            });
             return;
           case 'run.completed':
             reasoning = '';
@@ -1334,7 +1177,6 @@ export async function createAgentChatCompletion(
     /** 右侧轻量旁路会话：新建线程不进入主对话历史。 */
     side_chat?: boolean;
     regenerate?: boolean;
-    subagent_id?: string;
     web_search?: boolean;
     attachments?: Array<{
       filename: string;
@@ -1395,9 +1237,6 @@ export async function createAgentChatCompletion(
     onArtifactSaved?: (payload: { source?: string; files: GeneratedFile[] }) => void;
     onResearchProgress?: (payload: ResearchProgressPayload) => void;
     onToolEvent?: (ev: ToolStepEvent) => void;
-    onSubagentStep?: (ev: SubagentStepEvent) => void;
-    onRouteSelected?: (route: RouteSelected) => void;
-    onClarification?: (payload: Clarification) => void;
     onApproval?: (payload: ApprovalRequest) => void;
     onRecommendation?: (items: Recommendation[]) => void;
     onRecommendAgents?: (payload: RecommendAgentsPayload) => void;
@@ -1435,7 +1274,6 @@ export async function createAgentChatCompletion(
       source: skill.source || '',
     })) || undefined,
     regenerate: params.regenerate || undefined,
-    subagent_id: params.subagent_id || undefined,
     web_search: params.web_search || undefined,
     attachments: params.attachments?.length ? params.attachments : undefined,
     file_ids: params.file_ids?.length ? params.file_ids : undefined,
@@ -1500,9 +1338,6 @@ export async function createAgentChatCompletion(
       onArtifactSaved: params.onArtifactSaved,
       onResearchProgress: params.onResearchProgress,
       onToolEvent: params.onToolEvent,
-      onSubagentStep: params.onSubagentStep,
-      onRouteSelected: params.onRouteSelected,
-      onClarification: params.onClarification,
       onApproval: params.onApproval,
       onRecommendation: params.onRecommendation,
       onRecommendAgents: params.onRecommendAgents,
@@ -1555,7 +1390,6 @@ export async function resumeChatTurn(params: {
   onArtifactSaved?: (payload: { source?: string; files: GeneratedFile[] }) => void;
   onResearchProgress?: (payload: ResearchProgressPayload) => void;
   onToolEvent?: (ev: ToolStepEvent) => void;
-  onSubagentStep?: (ev: SubagentStepEvent) => void;
   onAttachmentsStatus?: (items: AttachmentIssue[]) => void;
   /** 敏感工具审批（P0-2 补齐）：resume 续接段同样可能挂起审批卡 */
   onApproval?: (payload: ApprovalRequest) => void;
@@ -1614,7 +1448,6 @@ export async function resumeChatTurn(params: {
     onArtifactSaved: params.onArtifactSaved,
     onResearchProgress: params.onResearchProgress,
     onToolEvent: params.onToolEvent,
-    onSubagentStep: params.onSubagentStep,
     onAttachmentsStatus: params.onAttachmentsStatus,
     onApproval: params.onApproval,
     onInputAccepted: params.onInputAccepted,
@@ -1640,7 +1473,7 @@ export async function getAgentModels(): Promise<AgentModelItem[]> {
 /** 智能体广场预检用模型列表：包含用户可用聊天模型和平台可用向量模型。 */
 export async function getMarketplaceModelOptions(): Promise<WorkflowModelOption[]> {
   const data: any = await defHttp.get(
-    { url: '/agent-api/workflow/marketplace/model/options' },
+    { url: '/agent-api/marketplace/model/options' },
     { isTransformResponse: false, apiUrl: '', errorMessageMode: 'none' },
   );
   const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
@@ -1862,7 +1695,6 @@ export async function getThreads(
       interactive_type: item.active_run.interactive_type
         ? String(item.active_run.interactive_type)
         : undefined,
-      subagent_id: item.active_run.subagent_id ? String(item.active_run.subagent_id) : undefined,
       resume_token: item.active_run.resume_token ? String(item.active_run.resume_token) : undefined,
     } : null,
   }));
@@ -2064,50 +1896,6 @@ export async function uploadChatFile(file: File, model?: string): Promise<Upload
   return response.json();
 }
 
-// @ 是委派入口，候选必须来自 Agent API 的可执行集合，而不是 Java 的「当前用户可见应用」。
-// /chat/subagents 与实际委派共用 published / 工作流版本 / 租户 / 角色部门 ACL 判据；
-// 不可执行的系统工具、外部应用和无权限应用不得只因“可见”就出现在这里。
-export function normalizeSubagentItems(data: any): SubagentItem[] {
-  const list = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.records)
-      ? data.records
-      : Array.isArray(data?.list)
-        ? data.list
-        : Array.isArray(data?.data)
-          ? data.data
-          : [];
-
-  return list
-    .map((item: any) => ({
-      id: String(item?.id || '').trim(),
-      name: String(item?.name || '未命名智能体'),
-      description: String(item?.description || ''),
-      icon: String(item?.icon || ''),
-      type: String(item?.type || ''),
-      scope: item?.scope === 'owned' || item?.scope === 'shared' ? item.scope : undefined,
-    }))
-    .filter((item: SubagentItem) => item.id);
-}
-
-export async function getSubagents(keyword?: string): Promise<SubagentItem[]> {
-  const params = new URLSearchParams({ limit: '50' });
-  const query = keyword?.trim();
-  if (query) params.set('keyword', query);
-  const data: any = await requestAgentApi(`/chat/subagents?${params.toString()}`, { method: 'GET' });
-  const normalized = normalizeSubagentItems(data);
-  const normalizedQuery = query?.toLowerCase();
-  return normalizedQuery
-    ? normalized.filter((item: SubagentItem) =>
-        item.name.toLowerCase().includes(normalizedQuery)
-        || (item.description || '').toLowerCase().includes(normalizedQuery),
-      )
-    : normalized;
-}
-
-// 子智能体独立对话窗的会话模型已统一到 /workflow/run/*（useAgentRun 运行栈）；
-// 曾并存的 /chat/subthread* 封装从未接线，2026-07-14 随后端端点一并移除。
-
 export async function getThreadMessages(
   threadId: string,
   scope?: ThreadScope,
@@ -2125,8 +1913,6 @@ export async function getThreadMessages(
     agent_mode?: string | null;
     feedback?: 'up' | 'down' | null;
     citations?: CitationSource[] | null;
-    /** 子智能体 chip 回放（agent_steps，§16.5）：刷新后仍可见「这轮谁办的事」 */
-    subagent_calls?: Array<{ name: string; status: string }> | null;
     /** 用户消息附件元数据快照（attachments_json）：刷新/历史回放后附件卡仍可见 */
     attachments?: Array<{
       filename: string;
@@ -2146,7 +1932,6 @@ export async function getThreadMessages(
       plan?: any[];
       task_plan?: any[] | null;
       steps?: any[];
-      subagents?: any[];
       files?: GeneratedFile[];
       agent_mode?: string | null;
       research_progress?: ResearchProgressPayload | null;
@@ -2205,7 +1990,6 @@ export async function getThreadActiveRun(threadId: string, scope?: ThreadScope):
     approved_plan_version: data.approved_plan_version == null
       ? undefined
       : Number(data.approved_plan_version),
-    subagent_id: data.subagent_id ? String(data.subagent_id) : undefined,
     resume_token: data.resume_token ? String(data.resume_token) : undefined,
     started_at: data.started_at ? String(data.started_at) : undefined,
     completed_at: data.completed_at ? String(data.completed_at) : undefined,
@@ -2369,8 +2153,6 @@ export type ChatQueueAttachment = {
  *  排队期间用户改选 Skill/知识库/文件不得漂移到已排队的消息上。 */
 export type QueueTurnContext = {
   skills?: SkillItem[];
-  /** @ 选中的委托目标；排队消息派发时仍须携带同一个 subagent_id。 */
-  subagent?: SubagentItem;
   knowledge?: KnowledgeSelection[];
   files?: Array<{ id: string; filename: string }>;
   /** 「最近的对话」引用（2026-07-28）：排队时的选择必须随快照走，否则派发轮悄悄丢掉引用 */

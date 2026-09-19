@@ -7,9 +7,8 @@ const centerStyles = readFileSync(resolve(root, 'styles/centerNew.less'), 'utf8'
 const messageList = readFileSync(resolve(root, 'components/MessageList.vue'), 'utf8');
 const modelSelector = readFileSync(resolve(root, 'components/ModelSelector.vue'), 'utf8');
 const plusSubmenu = readFileSync(resolve(root, 'components/PlusSubmenu.vue'), 'utf8');
-const subagentPanel = readFileSync(resolve(root, 'components/SubagentChatPanel.vue'), 'utf8');
-const runCompactHeader = readFileSync(resolve(root, '../agent/run/components/RunCompactHeader.vue'), 'utf8');
-const runShell = readFileSync(resolve(root, '../agent/run/agent-run-shell.less'), 'utf8');
+const runCompactHeader = readFileSync(resolve(root, 'components/run/RunCompactHeader.vue'), 'utf8');
+const runShell = readFileSync(resolve(root, 'components/run/agent-run-shell.less'), 'utf8');
 const skillSquare = readFileSync(resolve(root, 'components/SkillSquare.vue'), 'utf8');
 const chatTab = readFileSync(resolve(root, 'tabs/ChatTab.vue'), 'utf8');
 const myFilesTab = readFileSync(resolve(root, 'tabs/MyFilesTab.vue'), 'utf8');
@@ -142,25 +141,15 @@ describe('手机端登录与主对话布局契约', () => {
     expect(myFilesTab).toMatch(/\.myfiles-filter-strip\s*\{[^}]*overflow:\s*hidden;/);
   });
 
-  it('子智能体对话在手机和 iPad 使用主 Agent 同款全屏壳层', () => {
-    expect(subagentPanel).toContain("const SUBAGENT_COMPACT_SHELL_QUERY = '(max-width: 1024px)'");
-    expect(subagentPanel).toContain('class="run-mobile-sidebar-backdrop"');
-    expect(subagentPanel).toContain('<RunCompactHeader');
-    expect(subagentPanel).toContain('show-inspiration');
-    expect(subagentPanel).toContain('<Transition name="run-history-backdrop">');
-    expect(subagentPanel).toContain('isCompactSubagent && !sidebarCollapsed');
-    expect(subagentPanel).toContain('height: 100dvh !important;');
-    expect(subagentPanel).toContain('window.visualViewport?.addEventListener');
-    expect(subagentPanel).toContain("if (isCompactSubagent.value) sidebarCollapsed.value = true");
-    const pickStart = subagentPanel.indexOf('async function onPickSession');
-    const pickBody = subagentPanel.slice(pickStart, subagentPanel.indexOf('\nfunction onNewConversation', pickStart));
-    expect(pickBody.indexOf('sidebarCollapsed.value = true')).toBeGreaterThan(-1);
-    expect(pickBody.indexOf('sidebarCollapsed.value = true')).toBeLessThan(pickBody.indexOf('selectSession('));
-    expect(subagentPanel).toContain('.sac-rz {');
-    expect(subagentPanel).toContain('display: none;');
-    expect(subagentPanel).toContain('<AgentOutputDisclaimer v-if="messages.length || showLiveDelegation" />');
-    expect(runShell).not.toContain('.run-composer > :deep(.agent-output-disclaimer) { display: none; }');
-    expect(runCompactHeader).toContain('aria-label="打开场景问题推荐"');
+  it('内置助手页在手机和 iPad 使用全屏壳层与紧凑顶栏', () => {
+    const builtinPage = readFileSync(resolve(root, 'pages/BuiltinHarnessRunPage.vue'), 'utf8');
+    expect(builtinPage).toContain('class="run-mobile-sidebar-backdrop"');
+    expect(builtinPage).toContain('<RunCompactHeader');
+    expect(builtinPage).toContain('<Transition name="run-history-backdrop">');
+    expect(runShell).toContain('@media (max-width: 1024px)');
+    expect(runShell).toContain('.agent-run-page.is-fullpage { height: 100dvh;');
+    expect(runShell).not.toContain('.run-composer');
+    expect(runCompactHeader).toContain('aria-label="返回上一页"');
     expect(runCompactHeader).toContain('@media (max-width: 1024px)');
   });
 
@@ -195,13 +184,10 @@ describe('手机端登录与主对话布局契约', () => {
     expect(skillSquare).toContain('env(safe-area-inset-bottom)');
   });
 
-  it('子智能体与内置应用页在手机和 iPad 点选历史后立即收起侧栏', () => {
+  it('内置应用页在手机和 iPad 点选历史后立即收起侧栏', () => {
     const builtinPage = readFileSync(resolve(root, 'pages/BuiltinHarnessRunPage.vue'), 'utf8');
-    const pickStart = subagentPanel.indexOf('async function onPickSession');
-    const pickBody = subagentPanel.slice(pickStart, subagentPanel.indexOf('\nfunction onNewConversation', pickStart));
     const builtinStart = builtinPage.indexOf('async function selectConversation');
     const builtinBody = builtinPage.slice(builtinStart, builtinPage.indexOf('\nfunction confirmRemoveConversation', builtinStart));
-    expect(pickBody.indexOf('sidebarCollapsed.value = true')).toBeLessThan(pickBody.indexOf('selectSession('));
     expect(builtinBody.indexOf('sidebarCollapsed.value = true')).toBeLessThan(builtinBody.indexOf('loadThread('));
     expect(builtinBody).toContain('viewportWidth.value <= 1024');
   });

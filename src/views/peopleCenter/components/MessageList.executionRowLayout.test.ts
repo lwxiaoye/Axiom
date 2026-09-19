@@ -17,9 +17,8 @@ describe('MessageList 执行步骤单行布局', () => {
     const artifact = styleBlock('.agent-step-artifact {', '.agent-step-artifact.failed');
     const verification = styleBlock('.agent-step-verification {', '.agent-step-verification.failed');
     const read = styleBlock('.agent-step-read {', '.agent-step-read .ast-page-summary');
-    const subagent = styleBlock('.agent-step-sub {', '.agent-step-sub > .step-node');
 
-    for (const block of [tool, artifact, verification, read, subagent]) {
+    for (const block of [tool, artifact, verification, read]) {
       expect(block).toContain('flex-wrap: nowrap');
       expect(block).toContain('align-items: center');
     }

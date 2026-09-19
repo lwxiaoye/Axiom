@@ -25,7 +25,6 @@ export type BuiltinUiFlags = {
   hideComposerMascot: boolean;
   hideMention: boolean;
   hideSkillSelector: boolean;
-  hideSubagent: boolean;
   hideRecommendGrid: boolean;
   hidePlusMenu: boolean;
   hideModelSelector: boolean;

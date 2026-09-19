@@ -1,4 +1,4 @@
-import type { RunSession } from './agentRun.api';
+import type { RunSession } from './runSession';
 
 export type SessionGroup = {
   key: string;

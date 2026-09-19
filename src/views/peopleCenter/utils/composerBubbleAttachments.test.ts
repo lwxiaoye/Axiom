@@ -12,7 +12,6 @@ describe('composerBubbleAttachments', () => {
       threads: [{ title: '上周的方案讨论' }],
       knowledge: [{ name: '制度库' }],
       skills: [{ name: 'PPT 助手' }],
-      subagent: { name: '面试助手' },
       webSearch: true,
     });
     expect(cards.map((item) => `${item.kind}:${item.filename}`)).toEqual([
@@ -21,7 +20,6 @@ describe('composerBubbleAttachments', () => {
       'thread_ref:上周的方案讨论（对话记录）',
       'knowledge:制度库',
       'skill:PPT 助手',
-      'subagent:面试助手',
       'web:网页搜索',
     ]);
     expect(cards.find((item) => item.kind === 'skill')?.referenceId).toBeUndefined();
@@ -38,7 +36,6 @@ describe('composerBubbleAttachments', () => {
   it('同名同 kind 去重，空名字丢掉', () => {
     const cards = composerBubbleAttachments({
       skills: [{ name: 'PPT 助手' }, { name: 'PPT 助手' }, { name: '  ' }],
-      subagent: { name: '' },
       webSearch: false,
     });
     expect(cards).toEqual([{ filename: 'PPT 助手', kind: 'skill' }]);

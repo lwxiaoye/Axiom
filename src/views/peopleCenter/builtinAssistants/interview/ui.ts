@@ -8,7 +8,6 @@ export const INTERVIEW_UI_FLAGS: BuiltinUiFlags = {
   hideComposerMascot: false,
   hideMention: true,
   hideSkillSelector: true,
-  hideSubagent: true,
   hideRecommendGrid: true,
   hidePlusMenu: true,
   hideModelSelector: false,

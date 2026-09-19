@@ -5,7 +5,7 @@
       :class="['task-collaboration-trigger', { active: open, 'task-active': hasTaskActivity }]"
       :aria-expanded="open"
       aria-haspopup="dialog"
-      :aria-label="hasTaskActivity ? '查看任务计划与子智能体协作' : '查看任务步骤与子智能体协作'"
+      :aria-label="hasTaskActivity ? '查看任务计划' : '查看任务步骤'"
       @click="togglePanel"
     >
       <span class="tct-icon">
@@ -120,43 +120,6 @@
           </template>
         </section>
 
-        <section v-if="teamMembers.length" class="task-collaboration-section subagent-section">
-          <div class="task-collaboration-title">
-            <!-- 执行团队（2026-07-27 二期）：分区即入口——标题可点进团队全景，
-                 成员行点击进全景并聚焦该成员（先看位置，再决定下钻 @ 窗） -->
-            <button
-              type="button"
-              class="team-open"
-              aria-label="查看执行团队全景"
-              @click="openTeam()"
-            >
-              <span>执行团队</span>
-              <PremiumChevron direction="right" :size="14" interactive />
-            </button>
-            <!-- 角标 = 团队规模（去重后的成员数），不是委派次数：同一个子智能体被调用 3 次
-                 时这里曾显示 3，读起来像组了 3 个人（2026-07-28 修复） -->
-            <em>{{ teamMembers.length }}</em>
-          </div>
-          <button
-            v-for="run in teamMembers"
-            :key="run.runKey"
-            type="button"
-            class="collaboration-run"
-            @click="openTeam(run)"
-          >
-            <span :class="['collaboration-run-icon', run.status]" aria-hidden="true">
-              <RobotOutlined />
-            </span>
-            <span class="collaboration-run-copy">
-              <strong>{{ run.roleName || run.name || '子智能体' }}</strong>
-              <small>{{ runSummary(run) }}</small>
-            </span>
-            <span class="collaboration-run-state">
-              <span>{{ run.status === 'running' ? '进行中' : run.interrupted ? '已中断' : run.status === 'failed' ? '失败' : '完成' }}</span>
-              <PremiumChevron direction="right" :size="14" interactive />
-            </span>
-          </button>
-        </section>
       </div>
     </transition>
     </Teleport>
@@ -169,27 +132,18 @@ import { onClickOutside } from '@vueuse/core';
 import {
   CloseOutlined,
   MinusCircleOutlined,
-  RobotOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons-vue';
 import PremiumChevron from './PremiumChevron.vue';
 import type {
   PlanItemStatus,
   RunPanelModel,
-  SubagentRun,
 } from '../composables/executionTimeline';
-import { mergeTeamMembers, plainSummary } from '../composables/executionTimeline';
 
 const props = defineProps<{
   /** 统一任务运行面板数据（deriveRunPanel 派生）：与消息内执行卡同一份状态，无独立聚合 */
   panel: RunPanelModel;
   conversationKey?: string;
-}>();
-
-const emit = defineEmits<{
-  /** 执行团队全景（2026-07-27 二期）：无参=打开全景；带 runKey=打开并聚焦该成员。
-      原 selectRun（成员行直接下钻 @ 窗）已由「全景聚焦→卡片下钻」两段式取代 */
-  (e: 'openTeam', runKey?: string): void;
 }>();
 
 const rootRef = ref<HTMLElement | null>(null);
@@ -249,13 +203,10 @@ watch(
   },
 );
 
-/** 执行团队成员 = 按身份去重后的委派档（同一子智能体的多次委派合成一张卡，见 mergeTeamMembers） */
-const teamMembers = computed(() => mergeTeamMembers(props.panel.subagentRuns));
 const hasOpenPlanSteps = computed(() => !props.panel.settled && props.panel.plan.some(
   (step) => step.status === 'pending' || step.status === 'running',
 ));
-const hasRunningTeam = computed(() => teamMembers.value.some((run) => run.status === 'running'));
-const hasTaskActivity = computed(() => hasOpenPlanSteps.value || hasRunningTeam.value);
+const hasTaskActivity = computed(() => hasOpenPlanSteps.value);
 
 const planCompleted = computed(
   () => props.panel.plan.filter((step) => (
@@ -316,29 +267,6 @@ function stepBlocked(step: { blocked?: boolean; detail?: string; status?: string
   if (step.status && step.status !== 'pending') return false;
   if (String(step.detail || '').includes('等待上一步')) return false;
   return Boolean(step.blocked);
-}
-
-/** 副标题=人话一句话（执行团队口径）：不倒 Markdown 原文、不复述整篇报告。
- *  运行中=当前动作；已完成=验收计数 + 交付摘要；失败=错因。 */
-function runSummary(run: SubagentRun) {
-  if (run.status === 'failed' && !run.interrupted) {
-    return plainSummary(run.error || run.preview) || '子智能体执行失败';
-  }
-  if (run.interrupted) return '委派记录已中断（未完成，并非任务失败）';
-  if (run.status === 'running') {
-    const last = run.nodes.length ? run.nodes[run.nodes.length - 1] : null;
-    if (last?.label) return `正在：${last.label}`;
-    return plainSummary(run.task) || '正在执行主对话委派的任务';
-  }
-  const acc = run.review || run.acceptance;
-  const gist = plainSummary(run.preview || run.output, 60) || plainSummary(run.task, 60);
-  const passed = acc && acc.total ? `验收 ${acc.passedCount}/${acc.total}` : '';
-  return [passed, gist].filter(Boolean).join(' · ') || '已完成委派任务';
-}
-
-function openTeam(run?: SubagentRun) {
-  open.value = false;
-  emit('openTeam', run?.runKey);
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -541,31 +469,6 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-style: normal;
 }
-
-/* 执行团队分区标题即入口（幽灵按钮：悬停变实、箭头提示可进全景） */
-.team-open {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: -2px -6px;
-  padding: 2px 6px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #8a8f98;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.team-open:hover {
-  background: #f1f2f4;
-  color: #202228;
-}
-
-.team-open :deep(.anticon) {
-  font-size: 10px;
-}
-
 
 /* ===== 任务步骤（克制黑白，去掉内层卡片和版本号噪音）===== */
 .aicss-todo {
@@ -955,24 +858,21 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-.task-step-copy,
-.collaboration-run-copy {
+.task-step-copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 2px;
 }
 
-.task-step-copy strong,
-.collaboration-run-copy strong {
+.task-step-copy strong {
   color: #2b2e34;
   font-size: 12.5px;
   font-weight: 500;
   line-height: 20px;
 }
 
-.task-step-copy small,
-.collaboration-run-copy small {
+.task-step-copy small {
   overflow: hidden;
   color: #8a8f98;
   font-size: 11.5px;
@@ -1010,60 +910,6 @@ onBeforeUnmount(() => {
   padding: 6px 2px 4px;
   color: #a8adb6;
   font-size: 12px;
-}
-
-.subagent-section {
-  padding-bottom: 14px;
-}
-
-.collaboration-run {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  min-height: 48px;
-  padding: 7px 4px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.collaboration-run:hover {
-  background: #f7f7f8;
-}
-
-.collaboration-run-icon {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 9px;
-  background: #f0effc;
-  color: #6d62b5;
-  font-size: 14px;
-}
-
-.collaboration-run-icon.running {
-  background: #edf3ff;
-  color: #4f6ef7;
-}
-
-.collaboration-run-icon.failed {
-  background: #fdf0f0;
-  color: #b84d4d;
-}
-
-.collaboration-run-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #a0a5ae;
-  font-size: 10.5px;
-  white-space: nowrap;
 }
 
 .task-collaboration-empty {

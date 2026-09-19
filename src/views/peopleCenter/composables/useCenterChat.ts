@@ -1,5 +1,5 @@
 ﻿import { computed, getCurrentScope, onScopeDispose, ref, watch } from 'vue';
-import { addChatQueueItem, cancelChatRun, confirmChatQueue, createAgentChatCompletion, decideGatewayApproval, deleteChatQueueItem, deleteThread, getChatQueue, getRunByClientRequest, getRunState, getSkills, getSubagents, getThreadActiveRun, getThreadMessages, getThreadSettings, getThreads, submitChatRunInput, pinThread, popChatQueue, renameThread, reorderChatQueue, resumeChatTurn, subscribeChatRun, submitMessageFeedback, updateChatQueueItem, updateThreadModel, uploadChatFile, uploadWorkspaceFile, type ActiveRun, type AssistantPreset, type ChatQueueAttachment, type ChatQueueItem, type Clarification, type KnowledgeSelection, type SkillItem, type SubagentItem, type TaskPlanEvent, type ThreadItem, type ThreadReference, type ThreadScope, type ToolStepEvent, type UploadedFile } from '../agentApi';
+import { addChatQueueItem, cancelChatRun, confirmChatQueue, createAgentChatCompletion, decideGatewayApproval, deleteChatQueueItem, deleteThread, getChatQueue, getRunByClientRequest, getRunState, getSkills, getThreadActiveRun, getThreadMessages, getThreadSettings, getThreads, submitChatRunInput, pinThread, popChatQueue, renameThread, reorderChatQueue, resumeChatTurn, subscribeChatRun, submitMessageFeedback, updateChatQueueItem, updateThreadModel, uploadChatFile, uploadWorkspaceFile, type ActiveRun, type AssistantPreset, type ChatQueueAttachment, type ChatQueueItem, type KnowledgeSelection, type SkillItem, type TaskPlanEvent, type ThreadItem, type ThreadReference, type ThreadScope, type ToolStepEvent, type UploadedFile } from '../agentApi';
 import { openAgentRunWindow } from '@/views/workflow/shared/runtimeRoute';
 import type { ChatMessage } from '../components/MessageList.vue';
 import type { CenterSectionKey } from './useAgentMarket';
@@ -34,7 +34,6 @@ import {
   applyPlanUpdate,
   applyResearchProgress,
   applyTaskPlan,
-  applySubagentStep,
   applyCompaction,
   applyToolEvent,
   clearTransientReasoning,
@@ -245,17 +244,11 @@ export function useCenterChat(options: UseCenterChatOptions) {
   // composer 「最近的对话」（2026-07-28，+ 菜单）：引用历史会话的对话记录。
   // 一次性（发送即清空，语义同 Skill）：一份历史转录读一次就够了。
   const selectedThreadList = ref<ThreadReference[]>([]);
-  // 重新生成/消歧重发沿用上一轮的引用（同 lastTurnSkills 的理由：一次性选择已被清空，
+  // 重新生成沿用上一轮的引用（同 lastTurnSkills 的理由：一次性选择已被清空，
   // 不记住就会「重答一遍，但这次没看引用的对话」）
   let lastTurnThreads: ThreadReference[] = [];
   let lastTurnFiles: UserFileSelection[] = [];
   let lastTurnKnowledge: KnowledgeSelection[] = [];
-  // @ 选中的智能体：下一轮主对话携带 subagent_id，由主对话直接委托；发送后清空。
-  const selectedSubagent = ref<SubagentItem>();
-  // 执行团队成员的独立过程窗。runKey 绑定本次委派运行档，让窗口直接消费主对话
-  // 收到的流式 subagent.* 事件；它与 composer 的一次性 selectedSubagent 语义分离。
-  const openSubagents = ref<Array<SubagentItem & { runKey?: string }>>([]);
-  const subagents = ref<SubagentItem[]>([]);
   const mentionSkills = ref<SkillItem[]>([]);
   // 「网页搜索」pill（+ 菜单选中）：本会话内强制模型先联网再答的显式指令。联网搜索工具
   // 本身常驻后端（模型自主判断何时搜索），pill 只是用户点名要搜——会话级状态，随
@@ -536,7 +529,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
         thumbUrl: a.thumbUrl,
       })),
       skills: [...selectedSkills.value],
-      subagent: selectedSubagent.value ? { ...selectedSubagent.value } : undefined,
       knowledge: [...selectedKnowledgeList.value],
       files: selectedFileList.value.map((f) => ({ id: f.id, filename: f.filename })),
       threads: selectedThreadList.value.map((t) => ({ id: t.id, title: t.title })),
@@ -581,7 +573,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
 
   // 输入/附件/发送上下文任一变化即（防抖）落盘；发送清空 composer 后同一管线自动删除记录
   watch(
-    [chatInput, pendingAttachments, selectedSkills, selectedSubagent, selectedKnowledgeList, selectedFileList,
+    [chatInput, pendingAttachments, selectedSkills, selectedKnowledgeList, selectedFileList,
       selectedThreadList, webSearchOn, planMode, assistantPreset, selectedWorkFolder],
     schedulePersistComposerDraft,
     { deep: true },
@@ -616,9 +608,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
       ? restoredAttachments.filter((item) => item.kind === 'image')
       : restoredAttachments;
     selectedSkills.value = restrictedDraft ? [] : [...(record.skills || [])];
-    selectedSubagent.value = restrictedDraft
-      ? undefined
-      : record.subagent ? { ...record.subagent } : undefined;
     selectedKnowledgeList.value = draftPolicy?.hideKnowledge ? [] : [...(record.knowledge || [])];
     selectedFileList.value = draftPolicy?.hideFiles
       ? []
@@ -640,7 +629,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     return !chatInput.value.trim()
       && !pendingAttachments.value.length
       && !selectedSkills.value.length
-      && !selectedSubagent.value
       && !selectedKnowledgeList.value.length
       && !selectedFileList.value.length
       && !selectedThreadList.value.length
@@ -761,7 +749,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     }
     return null;
   }
-  let subagentsLoaded = false;
   let mentionSkillsLoaded = false;
   const historyOpen = ref(false);
   const threadSearch = ref('');
@@ -789,7 +776,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
   // 服务端是否已建 Run，查到就补一刀 cancel——不留后台幽灵 Run 跑完整轮。
   let activeClientRequestId = '';
   let lastTurnSkills: SkillItem[] = []; // 上一轮实际用过的 skill，供“重新生成”沿用
-  let lastTurnSubagentName = '';
 
   type BubbleAttachment = NonNullable<ChatMessage['attachments']>[number];
 
@@ -799,7 +785,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     threads?: Array<{ id?: string; title?: string }>;
     knowledge?: KnowledgeSelection[];
     skills?: SkillItem[];
-    subagent?: { name?: string } | null;
     webSearch?: boolean;
   }): BubbleAttachment[] {
     // 传入 opts 时只采用显式字段。缺省回落到当前 composer 会把 upload 调用和 extraDisplay
@@ -811,7 +796,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
       threads: opts?.threads ?? (live ? selectedThreadList.value : []),
       knowledge: opts?.knowledge ?? (live ? selectedKnowledgeList.value : []),
       skills: opts?.skills ?? (live ? selectedSkills.value : []),
-      subagent: opts && 'subagent' in opts ? opts.subagent : (live ? selectedSubagent.value : null),
       webSearch: opts && 'webSearch' in opts ? Boolean(opts.webSearch) : (live ? webSearchOn.value : false),
     });
   }
@@ -826,7 +810,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
     );
   }
   // 上一轮随消息发送的上传附件（一次性，发送时 pendingAttachments 已消费清空）：
-  // 重新生成/消歧卡点选重发沿用，否则原轮的文档/图片会在重发轮静默丢失
+  // 重新生成沿用，否则原轮的文档/图片会在重发轮静默丢失
   let lastTurnAttachments: TurnAttachment[] = [];
   // 上一轮是否带过附件（响应式镜像，供降级横幅判断「重试本轮」能否真正重新携带附件——
   // 刷新后本内存副本已失，按钮应换成「重新上传后可重试」提示而非空承诺）
@@ -986,7 +970,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
 
   // 已收游标登记（P0-3）：runId → 已接受 sequence / 已收正文 / 所写消息 id。停止请求失败
   // （旧 Run 仍在服务器跑）时按游标重新订阅、续写原消息——不登记就只能全量回放，
-  // tool/subagent 事件会重复灌进时间线、正文重复成第二个气泡。有界，超限淘汰最旧。
+  // tool 事件会重复灌进时间线、正文重复成第二个气泡。有界，超限淘汰最旧。
   const runStreamCursors = new Map<string, { seq: number; content: string; messageId: number; contentOffset: number }>();
   type RunSegmentController = {
     split: () => number;
@@ -1387,7 +1371,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
       threads: item.context?.threads,
       knowledge: item.context?.knowledge,
       skills: presentationQueue ? [] : item.context?.skills,
-      subagent: presentationQueue ? null : item.context?.subagent,
       webSearch: Boolean(item.context?.webSearch),
     });
     const queuedUserMessage: ChatMessage = {
@@ -1411,8 +1394,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
         : (item.context
           ? Boolean(item.context.researchProfile)
           : (researchProfile.value || Boolean(lastUnfinishedResearchRunId()))),
-      subagentId: presentationQueue ? undefined : item.context?.subagent?.id,
-      subagentName: presentationQueue ? undefined : item.context?.subagent?.name,
       queueDispatch: item.leaseToken ? { itemId: item.id, leaseToken: item.leaseToken } : undefined,
       userMessageLocalId: queuedUserMessage.id,
       contextOverride: item.context
@@ -1511,7 +1492,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     const presentationQueue = isRestrictedAssistantPreset(assistantPreset.value);
     const context = {
       skills: !presentationQueue && selectedSkills.value.length ? [...selectedSkills.value] : undefined,
-      subagent: !presentationQueue && selectedSubagent.value ? { ...selectedSubagent.value } : undefined,
       knowledge: selectedKnowledgeList.value.length ? [...selectedKnowledgeList.value] : undefined,
       files: selectedFileList.value.length
         ? selectedFileList.value.map((f) => ({ id: f.id, filename: f.filename }))
@@ -1525,7 +1505,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
       researchProfile: researchProfile.value,
     };
     const hasContext = Boolean(
-      context.skills || context.subagent || context.knowledge || context.files || context.threads || context.model
+      context.skills || context.knowledge || context.files || context.threads || context.model
       // 布尔 false 也必须落库；新队列项始终携带完整上下文快照。
       || typeof context.webSearch === 'boolean' || typeof context.planMode === 'boolean'
       || typeof context.researchProfile === 'boolean',
@@ -1561,7 +1541,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     chatInput.value = '';
     pendingAttachments.value = [];
     selectedSkills.value = [];
-    selectedSubagent.value = undefined;
     selectedThreadList.value = [];
     selectedFileList.value = [];
     selectedKnowledgeList.value = [];
@@ -1895,7 +1874,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
       files: selectedFileList.value,
       knowledge: selectedKnowledgeList.value,
       skills: selectedSkills.value,
-      subagent: selectedSubagent.value,
       webSearch: webSearchOn.value,
     });
     const persistAtts: ChatQueueAttachment[] = [
@@ -2053,7 +2031,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
   function shouldBufferUnclassifiedProcessNarration(messageId: number, incomingContent = ''): boolean {
     const message = chatMessages.value.find((item) => item.id === messageId);
     const acted = Boolean(
-      message?.agentSteps?.some((step) => step.kind === 'tool' || step.kind === 'subagent'),
+      message?.agentSteps?.some((step) => step.kind === 'tool'),
     );
     if (!acted) return false;
     const pending = String(incomingContent || '').trim();
@@ -2133,7 +2111,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
   }
 
   // 后端 recommend_agents 事件下发的智能体 id → 在「智能体广场」全量可见目录里回源。
-  // 这里故意不用 subagents/@ 候选：外部智能体可以被推荐并新窗口打开，但不因此获得委派权限。
+  // 推荐卡只用于跳转打开，不进入 @ 链路。
   // 当前广场已不可见的 id 静默丢弃；全部失效时自然退回纯文字。
   function findAppsByIds(ids: string[], reasons?: Record<string, string>) {
     const set = new Set((ids || []).map(String));
@@ -2215,14 +2193,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
         : {}),
       // 重新生成的旧版本不再保留可操作的交互入口。
       ...(isAssistant && message.status === 'superseded' ? { superseded: true, interactive: null } : {}),
-      // chip 回放（agent_steps）：刷新/切回后保留「这轮谁办的事」；running 残留归一成 completed
-      // 不还原（历史消息不存在进行中态）
-      subagentCalls: isAssistant && message.subagent_calls?.length
-        ? message.subagent_calls.map((c) => ({
-            name: c.name || '子智能体',
-            status: c.status === 'failed' ? 'failed' as const : 'completed' as const,
-          }))
-        : undefined,
     };
   }
 
@@ -2374,12 +2344,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
       attachments?: TurnAttachment[];
       /** 编辑重发（F2）：后端删除 id >= 此值的历史消息（线性覆盖，与本地裁剪对齐） */
       truncateFromMessageId?: number;
-      /** R5 消歧卡点选：以显式 subagent_id 重发，后端按显式 @ 委派（绕过再路由/消歧） */
-      subagentId?: string;
-      /** 显式委托目标名称，只用于用户气泡/历史回放标签，不参与路由。 */
-      subagentName?: string;
-      /** 消歧重发复用原轮一次性上下文（skill + 上传附件）——原轮发送时两者都已消费清空 */
-      reuseTurnContext?: boolean;
       /** 编辑重发只覆盖 Skill：精确复用被编辑消息的快照，不消费 composer 当前 Skill。 */
       skillOverride?: SkillItem[];
       /** 本轮使用 Plan Profile。 */
@@ -2492,11 +2456,10 @@ export function useCenterChat(options: UseCenterChatOptions) {
       if (idleMs < 45000) return;
       updateAssistant((target) => {
         if (target.content && String(target.content).trim()) return;
-        // 已有真实工具/子智能体动作时不抢开场白
+        // 已有真实工具动作时不抢开场白
         const acted = Boolean(
-          target.agentSteps?.some((s) => s.kind === 'tool' || s.kind === 'subagent')
-          || target.toolSteps?.length
-          || target.subagentCalls?.length,
+          target.agentSteps?.some((s) => s.kind === 'tool')
+          || target.toolSteps?.length,
         );
         if (acted) return;
         // 45s 轻提示；3min 明确可停止（P2.10 防长空屏）
@@ -2608,10 +2571,10 @@ export function useCenterChat(options: UseCenterChatOptions) {
     };
 
     // Skill / 文件 / 知识库 / 对话引用都是一次性：本轮请求带上，随后取消选中，
-    // 气泡上留下对应图标。重新生成/消歧重发沿用上一轮快照。
+    // 气泡上留下对应图标。重新生成沿用上一轮快照。
     // 队列派发轮（审计项 1）：一律用入队时刻的快照（contextOverride），不读/不消费当前选择。
     const ctxOverride = opts?.contextOverride;
-    const reuseTurn = opts?.regenerate || opts?.reuseTurnContext;
+    const reuseTurn = Boolean(opts?.regenerate);
     const turnSkills = presentationTurn
       ? []
       : reuseTurn
@@ -2646,11 +2609,9 @@ export function useCenterChat(options: UseCenterChatOptions) {
     }
     const turnWebSearch = ctxOverride ? Boolean(ctxOverride.webSearch) : webSearchOn.value;
     const turnModel = (ctxOverride?.model || activeModel.value);
-    // 上传附件同理按轮记录：重新生成/消歧重发都沿用原轮附件——附件文本只进当轮模型输入、
+    // 上传附件同理按轮记录：重新生成沿用原轮附件——附件文本只进当轮模型输入、
     // 不落线程，重新生成不重传的话模型会**完全丢失附件内容**（审查 P1，2026-07-15 修复：
     // 原「普通重新生成不重传附件」的语义就是这个丢失路径）
-    const turnSubagentName = opts?.subagentName || (reuseTurn ? lastTurnSubagentName : '');
-    if (!reuseTurn) lastTurnSubagentName = opts?.subagentName || '';
     const turnAttachments = (reuseTurn ? lastTurnAttachments : opts?.attachments || [])
       .filter((item) => !isComposerReferenceKind(item.kind));
     if (!reuseTurn) {
@@ -2660,7 +2621,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     const referenceCards = buildComposerBubbleAttachments({
       skills: turnSkills,
       knowledge: turnKnowledge,
-      subagent: turnSubagentName ? { name: turnSubagentName } : null,
       webSearch: turnWebSearch,
     });
     const outgoingAttachments: TurnAttachment[] = [
@@ -2680,7 +2640,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
       content,
       regenerate: Boolean(opts?.regenerate),
       truncateFromMessageId: opts?.truncateFromMessageId || null,
-      subagentId: presentationTurn ? null : opts?.subagentId || null,
       assistantPreset: turnAssistantPreset || null,
       workspaceFolderId: turnWorkFolderId || null,
       ...(opts?.interviewInput ? { interviewInput: opts.interviewInput } : {}),
@@ -2787,9 +2746,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
         thread_ids: campusTurn || !turnThreads.length
           ? undefined
           : turnThreads.map((t) => t.id),
-        // @ 选中的智能体与 R5 消歧都走同一条显式委托链路：主对话携带 subagent_id，
-        // agent-api 在执行前实时复核发布态和用户权限。
-        subagent_id: presentationTurn ? undefined : opts?.subagentId,
         web_search: campusTurn ? false : turnWebSearch,
         attachments: requestAttachments.length ? requestAttachments : undefined,
         truncate_from_message_id: opts?.truncateFromMessageId,
@@ -2911,19 +2867,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
             target.citations = sources;
           });
         },
-        onRouteSelected: (route) => {
-          updateAssistant((target) => {
-            target.routedAgent = route.name || '智能体';
-          });
-        },
-        onClarification: (payload) => {
-          updateAssistant((target) => {
-            target.clarification = payload.options;
-            // 原轮一次性上下文（skill/上传附件）快照挂到卡片消息上：出卡后用户可能又发了
-            // 别的消息（lastTurn* 被覆盖），点选旧卡时按快照精确复用该轮的，而非“最近一轮”的
-            target.clarificationContext = { skills: turnSkills, attachments: turnAttachments || [] };
-          });
-        },
         onApproval: (payload) => {
           // 审批挂起与 input.required 同语义（对齐）：本轮以审批卡收尾，正文可以为空，
           // 不套「模型未返回内容」兜底，也不当真正终态派发队列。
@@ -2976,9 +2919,8 @@ export function useCenterChat(options: UseCenterChatOptions) {
             const delivered = Boolean(
               (!isSoftBody && softBody)
               || target.generatedFiles?.length
-              || target.agentSteps?.some((s) => s.kind === 'tool' || s.kind === 'subagent')
+              || target.agentSteps?.some((s) => s.kind === 'tool')
               || target.toolSteps?.length
-              || target.subagentCalls?.length
             );
             // 无实质交付时清掉乐观/机械过程语，避免与错误横幅叠成双气泡。
             if (!delivered) {
@@ -3033,7 +2975,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
             updateAssistant((target) => applyToolEvent(target, ev));
           }
         },
-        onSubagentStep: (ev) => updateAssistant((target) => applySubagentStep(target, ev)),
         onAttachmentsStatus: (items) => {
           updateAssistant((target) => applyAttachmentsStatus(target, items));
         },
@@ -3183,7 +3124,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
             currentSeg?.executionSegmentIndex
             && currentSeg.executionSegmentIndex > 0
             && !String(currentSeg.content || '').trim()
-            && !currentSeg.agentSteps?.some((s) => s.kind === 'tool' || s.kind === 'subagent')
+            && !currentSeg.agentSteps?.some((s) => s.kind === 'tool')
             && !currentSeg.toolSteps?.length
           )
         );
@@ -3222,13 +3163,13 @@ export function useCenterChat(options: UseCenterChatOptions) {
         // 用户停止/打断：就地冻结在当前可见位置并截断，绝不把已缓冲的后续内容再吐出来
         // ——否则模型快、整段早已缓冲时，观感就是“照常输出到完、根本没被打断”（对齐 Claude 的截断式停止）。
         typewriter.stop();
-        // 空壳判定收窄（审计项 14）：只有「什么都没产出」的消息才删——思考/工具步骤/子智能体
-        // chip/卡片都算实质内容，删了会出现「停止后执行过程当场消失、重进又恢复」的闪失。
+        // 空壳判定收窄（审计项 14）：只有「什么都没产出」的消息才删——思考/工具步骤/
+        // 卡片都算实质内容，删了会出现「停止后执行过程当场消失、重进又恢复」的闪失。
         const current = chatMessages.value.find((item) => item.id === assistantTargetId);
         const hasSubstance = Boolean(current && (
           current.content || current.preamble || current.planReport
           || current.agentSteps?.length || current.toolSteps?.length
-          || current.generatedFiles?.length || current.subagentCalls?.length
+          || current.generatedFiles?.length
           || current.interactive
         ));
         if (current && !hasSubstance) {
@@ -3237,7 +3178,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
       } else if (runId && runThreadId) {
         // 传输层断流但 Run 已在后端创建（N-01）：与裸 EOF 走同一交接——原消息原地续写、
         // 按已收游标续订（afterSequence + 正文播种 + 复用同一条消息）。不删除重建、不从 0
-        // 全量回放：半截回答不闪空，tool/subagent 事件也不会重复灌进执行时间线。
+        // 全量回放：半截回答不闪空，tool 事件也不会重复灌进执行时间线。
         typewriter.stop();
         handedOff = true;
         // 本条流已断（见上），交接前注销自己的控制器——注销在 finally、晚于此处，而
@@ -3346,7 +3287,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     const forceSteer = Boolean(opts?.forceSteer);
     const sendPolicy = getBuiltinUiPolicy(assistantPreset.value);
     if (sendPolicy?.hideSkillSelector) selectedSkills.value = [];
-    if (sendPolicy?.hideSubagent) selectedSubagent.value = undefined;
     if (sendPolicy?.hideKnowledge) selectedKnowledgeList.value = [];
     if (sendPolicy?.hideFiles) {
       selectedFileList.value = [];
@@ -3405,12 +3345,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     }
     // 显式取「排队」意图（跟进行为=排队，或 ⇧⌘Enter 单条取反）优先于关键词猜测：
     // 用户按了明确的键，就不该再让「新任务/顺便」这类词表来改判。
-    // 显式选了委托目标时不能降格为普通“引导”：活动 Run 的工具目录已经冻结，
-    // instruct 接口也没有 subagent_id。排入下一轮，才能让 /chat 做实时权限校验并明确委托。
-    if (!forceSteer && active?.id && isGeneratingRunStatus(activeStatus) && selectedSubagent.value) {
-      await queueCurrentMessage();
-      return;
-    }
     if (!forceSteer && active?.id && isGeneratingRunStatus(activeStatus) && followUpIntent === 'queue') {
       await queueCurrentMessage();
       return;
@@ -3515,7 +3449,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     // attachments_json 落库供历史回放；文档只带解析文本；status/note（解析置信度）随附件
     // 回传——后端据此下发降级提示并持久化附件元数据
     const queuedAttachments = [...pendingAttachments.value];
-    const delegatedSubagent = sendPolicy?.hideSubagent ? undefined : selectedSubagent.value;
     const atts: TurnAttachment[] = queuedAttachments.map((a) => ({
       filename: a.filename,
       text: a.text,
@@ -3549,7 +3482,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     const sentDraftStoreKey = draftStoreKey();
     // 先清空输入与选中资源，让输入框即时腾空；选中项已经快照进气泡与本轮请求。
     pendingAttachments.value = [];
-    selectedSubagent.value = undefined;
     selectedFileList.value = [];
     selectedKnowledgeList.value = [];
     selectedSkills.value = [];
@@ -3579,7 +3511,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
         if (!selectedKnowledgeList.value.length && sentKnowledge.length) selectedKnowledgeList.value = sentKnowledge;
         if (!selectedSkills.value.length && sentSkills.length) selectedSkills.value = sentSkills;
         if (!selectedThreadList.value.length && sentThreads.length) selectedThreadList.value = sentThreads;
-        if (!selectedSubagent.value && delegatedSubagent) selectedSubagent.value = delegatedSubagent;
         return;
       }
       refreshRunUi(false);
@@ -3627,7 +3558,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
       threads: sentThreads,
       knowledge: sentKnowledge,
       skills: sentSkills,
-      subagent: delegatedSubagent,
       webSearch: webSearchOn.value,
     });
     const userMessage: ChatMessage = {
@@ -3641,8 +3571,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     const accepted = await runAssistantTurn(content, {
       interviewInput: interviewInput || undefined,
       attachments: atts.length ? atts : undefined,
-      subagentId: delegatedSubagent?.id,
-      subagentName: delegatedSubagent?.name,
       planMode: submittedPlanMode,
       researchProfile: submittedResearchProfile,
       resumeSourceRunId: unfinishedResearchRunId,
@@ -3662,7 +3590,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
       // 用户气泡，会把页面退回欢迎页；用户只能猜测消息是否丢失。两者都不入库，
       // 后续重试仍会创建正式消息，草稿与幂等键照旧恢复。
       if (!chatInput.value) chatInput.value = content;
-      if (!selectedSubagent.value && delegatedSubagent) selectedSubagent.value = delegatedSubagent;
       const existing = new Set(pendingAttachments.value.map((attachment) => attachment.uid));
       const restore = queuedAttachments.filter((attachment) => !existing.has(attachment.uid));
       if (restore.length) pendingAttachments.value = [...restore, ...pendingAttachments.value];
@@ -4464,21 +4391,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
             if (note && note !== 'Context compacted') target.compactedNote = note;
           });
         },
-        onSubagentStep: (ev) => {
-          // 挂起时 started chip 落在原消息上（「执行中…」）；续接轮的终态事件优先收尾它，
-          // 找不到才落续接消息——避免原 chip 永远转圈 + 两条消息各挂一个重复 chip
-          if (ev.phase !== 'started' && paused?.subagentCalls) {
-            const name = ev.name || '子智能体';
-            const item = [...paused.subagentCalls]
-              .reverse()
-              .find((s) => s.status === 'running' && (!ev.name || s.name === name));
-            if (item) {
-              item.status = ev.phase === 'failed' ? 'failed' : 'completed';
-              return;
-            }
-          }
-          updateContinuation((target) => applySubagentStep(target, ev));
-        },
         onError: (message) => {
           // 主动停止的 cancel 回推不标红（同 runAssistantTurn）
           if (controller.signal.aborted) return;
@@ -4544,7 +4456,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
         const hasSubstance = Boolean(current && (
           current.content || current.preamble || current.planReport
           || current.agentSteps?.length || current.toolSteps?.length
-          || current.generatedFiles?.length || current.subagentCalls?.length
+          || current.generatedFiles?.length
           || current.interactive
         ));
         if (current && !hasSubstance) {
@@ -4985,7 +4897,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
     // 新的 answer delta 继续平滑追加，不因断线交接闪空或从头重打。
     let segmentContentOffset = Math.max(0, Number(resume?.contentOffset) || 0);
     // Run 级订阅游标（第二轮评审 P1）：重连必须 after=lastSeq 续传而非全量回放——
-    // 正文靠整段覆盖近似幂等，但 tool.started/completed、subagent 事件重放会重复
+    // 正文靠整段覆盖近似幂等，但 tool.started/completed 事件重放会重复
     // 灌进 reducer（时间线/工作卡重复）。lastContent 同步持有已收正文，续传时播种
     // 解析器累积器（message.delta 只发增量）。POST 流交接进来时以交接现场播种。
     let lastSeq = resume?.afterSequence || 0;
@@ -5174,19 +5086,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
             target.citations = sources;
           });
         },
-        onRouteSelected: (route) => {
-          updateTarget((target) => {
-            target.routedAgent = route.name || '智能体';
-          });
-        },
-        onClarification: (payload) => {
-          updateTarget((target) => {
-            target.clarification = payload.options;
-            // 重订阅路径本地无原轮快照，从事件回放重建原轮上下文（P2a）：点选重发才能带上
-            // 原轮技能/附件。附件为文本 ref（无 image_url），重发到子智能体走文本注入，够用。
-            target.clarificationContext = clarificationContextFromEvent(payload);
-          });
-        },
         onApproval: (payload) => {
           // 审批挂起与 input.required 同语义（对齐）：置等待态，收尾时回写 waiting_user
           // 而非清 activeRun——审批卡等用户点头，不是终态
@@ -5262,7 +5161,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
             updateTarget((target) => applyToolEvent(target, ev));
           }
         },
-        onSubagentStep: (ev) => updateTarget((target) => applySubagentStep(target, ev)),
         onAttachmentsStatus: (items) => {
           updateTarget((target) => applyAttachmentsStatus(target, items));
         },
@@ -5681,7 +5579,7 @@ export function useCenterChat(options: UseCenterChatOptions) {
   function clearConversationSelections() {
     selectedSkills.value = [];
     lastTurnSkills = []; // 不清会让 B 会话的「重新生成」沿用 A 会话上一轮的 skill
-    lastTurnAttachments = []; // 同理：重新生成/消歧重发不能沿用别的会话的附件
+    lastTurnAttachments = []; // 同理：重新生成不能沿用别的会话的附件
     lastTurnHadAttachments.value = false;
     lastTurnThreads = []; // 同理：会话引用不能跨会话沿用
     lastTurnFiles = [];
@@ -5689,8 +5587,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     selectedKnowledgeList.value = [];
     selectedFileList.value = [];
     selectedThreadList.value = [];
-    selectedSubagent.value = undefined;
-    openSubagents.value = [];
     pendingAttachments.value = [];
     webSearchOn.value = false;
     // 任务模式开关先归零，随后 loadThread 会按该会话的活动 Run 决定是否恢复（§A）；
@@ -5890,51 +5786,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     selectedKnowledgeList.value = selectedKnowledgeList.value.filter((k) => k.id !== id);
   }
 
-  async function loadSubagents(keyword?: string) {
-    try {
-      subagents.value = await getSubagents(keyword);
-      subagentsLoaded = true;
-    } catch (error) {
-      console.warn('Failed to load subagents:', error);
-      subagents.value = [];
-    }
-  }
-
-  function ensureSubagentsLoaded() {
-    if (getBuiltinUiPolicy(assistantPreset.value)?.hideSubagent) return;
-    if (!subagentsLoaded) loadSubagents();
-  }
-
-  function selectSubagent(item: SubagentItem) {
-    if (getBuiltinUiPolicy(assistantPreset.value)?.hideSubagent) return;
-    selectedSubagent.value = item;
-  }
-
-  function removeSelectedSubagent() {
-    selectedSubagent.value = undefined;
-  }
-
-  function openSubagent(item: SubagentItem, runKey?: string) {
-    const existing = openSubagents.value.find((entry) => entry.id === item.id);
-    if (existing) {
-      existing.name = item.name || existing.name;
-      existing.description = item.description || existing.description;
-      existing.icon = item.icon || existing.icon;
-      existing.runKey = runKey || existing.runKey;
-      openSubagents.value = [...openSubagents.value];
-      return;
-    }
-    if (openSubagents.value.length >= 3) {
-      options.showNotice('最多同时打开 3 个子智能体过程窗口，请先关闭一个');
-      return;
-    }
-    openSubagents.value = [...openSubagents.value, { ...item, runKey }];
-  }
-
-  function closeSubagent(id: string) {
-    openSubagents.value = openSubagents.value.filter((item) => item.id !== id);
-  }
-
   // @ 面板的 Skill 候选目录：与广场同源（agent-api /agent-api/skill/list，enabled 的系统技能 + 自己的技能），首次 @ 时懒加载
   async function loadMentionSkills() {
     try {
@@ -5958,89 +5809,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     if (!selectedSkills.value.some((item) => item.id === skill.id)) {
       selectedSkills.value = [...selectedSkills.value, skill];
     }
-  }
-
-  /** 从 clarification 事件回放重建原轮一次性上下文（P2a）：技能 id 映射回 @ 面板已加载的
-   *  完整技能对象（未加载则退回 id 桩，后端按 id 重校验，名称无所谓）；附件为文本 ref。 */
-  function clarificationContextFromEvent(payload: Clarification): {
-    skills: SkillItem[];
-    attachments: Array<{ filename: string; text: string; kind?: string }>;
-  } {
-    const skills = (payload.skill_ids || []).map(
-      (id) => mentionSkills.value.find((s) => s.id === id) || ({ id, name: '' } as SkillItem),
-    );
-    const attachments = (payload.attachments || []).map((a) => ({
-      filename: a.filename,
-      text: a.text,
-      kind: a.kind,
-    }));
-    return { skills, attachments };
-  }
-
-  /** R5 消歧：用户在澄清卡里选定某智能体 → 以原问题带显式 subagent_id 重发主对话，
-   *  后端把它当作显式 @ 委派该智能体。注意 R0 守卫对显式 subagent_id **不再豁免**（三轮
-   *  评审：豁免会允许同一 Thread 并发第二个 Run）——但 waiting_clarification 不在活动集，
-   *  消歧本轮已终态，重发不会被自己挡住，也不会再出第二张消歧卡。回答留在主对话，不开独立窗。 */
-  async function chooseClarifiedAgent(messageId: number, option: { id: string; name: string }) {
-    if (chatLoading.value) return;
-    // 打断互斥（2026-07-26 并发审计）：stopChat 是「先同步 clearActiveRun（chatLoading 立刻
-    // 变 false）、再 await cancelChatRun」，所以点停止后的那一两秒里 chatLoading 已是 false
-    // 但取消还没收敛——此时本入口会与 cancel 并发发起新 Run，撞后端 R0。sendChat 早有这道
-    // 等待环（见 stopInFlight 的排队循环），这三个入口漏了。
-    if (stopInFlight) await stopInFlight;
-    if (chatLoading.value || stopInFlight) return;
-
-    const idx = chatMessages.value.findIndex((m) => m.id === messageId);
-    if (idx < 0) return;
-    let userText = '';
-    for (let i = idx - 1; i >= 0; i -= 1) {
-      if (chatMessages.value[i].role === 'user') {
-        userText = String(chatMessages.value[i].content || '');
-        break;
-      }
-    }
-    const target = chatMessages.value[idx];
-    // 原轮一次性上下文优先取卡片消息上的快照（出卡后又发过别的消息时 lastTurn* 已被覆盖）；
-    // 快照缺失（后台重订阅收卡/刷新恢复）退回 lastTurn* 尽力而为
-    const ctx = target?.clarificationContext;
-    if (ctx) {
-      lastTurnSkills = ctx.skills;
-      lastTurnAttachments = ctx.attachments;
-    }
-    if (target) {
-      target.clarification = undefined; // 选定后收起澄清卡
-      target.clarificationContext = null;
-    }
-    if (!userText) return;
-    const clarifiedBubble = composerBubbleAttachments({
-      uploads: lastTurnAttachments.map((a) => ({
-        filename: a.filename,
-        kind: a.kind,
-        previewUrl: a.preview_url || a.image_url,
-        status: a.status,
-        note: a.note,
-        file_id: a.file_id,
-      })),
-      files: lastTurnFiles,
-      threads: lastTurnThreads,
-      knowledge: lastTurnKnowledge,
-      skills: lastTurnSkills,
-      subagent: option,
-    });
-    const clarifiedUserMessage: ChatMessage = {
-      id: nextLocalId(),
-      role: 'user',
-      content: userText,
-      attachments: clarifiedBubble.length ? clarifiedBubble : undefined,
-    };
-    chatMessages.value.push(clarifiedUserMessage);
-    // reuseTurnContext：原轮的一次性 skill 与上传附件在首发时已消费清空，重发必须显式沿用
-    void runAssistantTurn(userText, {
-      subagentId: option.id,
-      subagentName: option.name,
-      reuseTurnContext: true,
-      userMessageLocalId: clarifiedUserMessage.id,
-    });
   }
 
   /** 审批敏感工具（§11）：通过/拒绝后收起卡片；通过后提示用户可让助手继续（同幂等键重试即执行） */
@@ -6144,9 +5912,6 @@ export function useCenterChat(options: UseCenterChatOptions) {
     selectedKnowledgeList,
     selectedFileList,
     selectedThreadList,
-    selectedSubagent,
-    openSubagents,
-    subagents,
     mentionSkills,
     webSearchOn,
     pendingAttachments,
@@ -6225,15 +5990,8 @@ export function useCenterChat(options: UseCenterChatOptions) {
     updateSelectedFiles,
     updateSelectedThreads,
     setMessageFeedback,
-    loadSubagents,
-    ensureSubagentsLoaded,
-    selectSubagent,
-    removeSelectedSubagent,
-    openSubagent,
-    closeSubagent,
     ensureMentionSkillsLoaded,
     selectSkillFromMention,
-    chooseClarifiedAgent,
     submitApproval,
     toggleWebSearch,
     uploadFile,

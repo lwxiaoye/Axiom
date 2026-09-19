@@ -35,7 +35,6 @@ export function executionIconKind(step: ExecutionIconStep): ExecutionActionIconK
   // 一律先按工具名判（2026-07-27 重排）：一个工具就是一个确定的行为，比 operation 更准；
   // 且 operation 只随完成态 meta 到达——靠它的话运行中会先闪一下兜底图标再换图。
   const name = step.name;
-  if (name === 'call_subagent') return 'subagent';
   if (name === 'bash') return 'bash';
   if (name === 'glob') return 'files';
   if (name === 'read_file') return 'read';

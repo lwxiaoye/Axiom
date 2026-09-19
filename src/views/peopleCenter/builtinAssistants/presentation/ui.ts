@@ -8,7 +8,6 @@ export const PRESENTATION_UI_FLAGS: BuiltinUiFlags = {
   hideComposerMascot: false,
   hideMention: true,
   hideSkillSelector: true,
-  hideSubagent: true,
   hideRecommendGrid: true,
   hidePlusMenu: false,
   hideModelSelector: false,

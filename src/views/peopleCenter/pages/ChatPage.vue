@@ -11,8 +11,6 @@
     :selected-knowledge-list="selectedKnowledgeList"
     :selected-file-list="selectedFileList"
     :selected-thread-list="selectedThreadList"
-    :selected-subagent="selectedSubagent"
-    :subagents="subagents"
     :skills="mentionSkills"
     :web-search="webSearchOn"
     :attachments="pendingAttachments"
@@ -31,17 +29,12 @@
     @feedback="setMessageFeedback"
     @resume="submitResume"
     @edit="resendEditedMessage"
-    @clarify="chooseClarifiedAgent"
     @approve="submitApproval"
     @remove-skill="removeSelectedSkill"
     @remove-knowledge="removeSelectedKnowledge"
     @update-knowledge="updateSelectedKnowledge"
     @update-files="updateSelectedFiles"
     @update-threads="updateSelectedThreads"
-    @select-subagent="selectSubagent"
-    @open-subagent-chat="onOpenSubagentChat"
-    @remove-subagent="removeSelectedSubagent"
-    @ensure-subagents="ensureSubagentsLoaded"
     @select-skill="selectSkillFromMention"
     @ensure-skills="ensureMentionSkillsLoaded"
     @toggle-web="toggleWebSearch"
@@ -52,25 +45,14 @@
     @start-agent="onStartRecommendedAgent"
     @open-agent="openAgentFromChat"
   />
-  <SubagentChatPanel
-    v-for="(sa, i) in openSubagents"
-    :key="sa.id"
-    :subagent="sa"
-    :index="i"
-    :parent-thread-id="currentThreadId"
-    :delegation-run="findDelegationRun(sa.runKey)"
-    @close="closeSubagent(sa.id)"
-  />
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
 import { message } from 'ant-design-vue';
 import ChatTab from '../tabs/ChatTab.vue';
-import SubagentChatPanel from '../components/SubagentChatPanel.vue';
 import { useCenterContext } from '../centerContext';
 import type { AgentItem } from '../agentApi';
-import type { SubagentRun } from '../composables/executionTimeline';
 import { pickPinnedRecommendedAgents } from '../utils/pinnedRecommendedAgents';
 
 defineOptions({ name: 'CenterChatPage' });
@@ -99,9 +81,6 @@ const {
   selectedKnowledgeList,
   selectedFileList,
   selectedThreadList,
-  selectedSubagent,
-  openSubagents,
-  subagents,
   mentionSkills,
   webSearchOn,
   pendingAttachments,
@@ -113,18 +92,12 @@ const {
   setMessageFeedback,
   submitResume,
   resendEditedMessage,
-  chooseClarifiedAgent,
   submitApproval,
   removeSelectedSkill,
   removeSelectedKnowledge,
   updateSelectedKnowledge,
   updateSelectedFiles,
   updateSelectedThreads,
-  selectSubagent,
-  removeSelectedSubagent,
-  openSubagent,
-  closeSubagent,
-  ensureSubagentsLoaded,
   selectSkillFromMention,
   ensureMentionSkillsLoaded,
   toggleWebSearch,
@@ -132,19 +105,6 @@ const {
   removeAttachment,
   retryAttachment,
 } = ctx.centerChat;
-
-function findDelegationRun(runKey?: string): SubagentRun | undefined {
-  if (!runKey) return undefined;
-  for (let index = chatMessages.value.length - 1; index >= 0; index -= 1) {
-    const match = chatMessages.value[index].subagentRuns?.find((run) => run.runKey === runKey);
-    if (match) return match;
-  }
-  return undefined;
-}
-
-function onOpenSubagentChat(item: Parameters<typeof openSubagent>[0], run: SubagentRun) {
-  openSubagent(item, run.runKey);
-}
 
 // 保存在途：重复点「保存修改」不重复落库、不重复发重编译消息
 let savingSlides = false;

@@ -5,7 +5,6 @@ import type {
   PlanUpdateEvent,
   ResearchProgressPayload,
   ModelConnectionPayload,
-  SubagentStepEvent,
   TaskPlanEvent,
   ToolStepEvent,
 } from '../agentApi';
@@ -13,8 +12,8 @@ import { isCompanionFile, isDeliverableFile } from './deliverable';
 import { mergeResearchTeam, parseResearchTeam } from '../utils/researchTeam';
 
 /**
- * 统一执行时间线（纯 TS，无 Vue/组件依赖）：公开进度、工具调用、沙箱任务、联网搜索、
- * 子智能体共用一条按到达时序交错的步骤流水。useCenterChat 的三个流入口
+ * 统一执行时间线（纯 TS，无 Vue/组件依赖）：公开进度、工具调用、沙箱任务、联网搜索
+ * 共用一条按到达时序交错的步骤流水。useCenterChat 的三个流入口
  * （发送 / HITL 续接 / 后台 Run 重订阅）与历史消息还原共用这里的 reducer，
  * 事件乱序、重复、计时与轨迹重建因此可以在 node 单测里直接验证。
  */
@@ -88,8 +87,6 @@ type AgentStepBase =
       /** 终态定格用时（服务端起止时间差） */
       durationMs?: number;
       operation?: string;
-      /** 子智能体工作流当前节点行所属的运行档；同一运行档只保留一个当前节点行。 */
-      runKey?: string;
       target?: string;
       fileId?: string;
       added?: number;
@@ -104,24 +101,8 @@ type AgentStepBase =
       error?: string;
     }
   | { kind: 'read'; pages: Array<{ title: string; url: string }>; showAll?: boolean }
-  | {
-      kind: 'subagent';
-      name: string;
-      label: string;
-      status: StepStatus;
-      task?: string;
-      preview?: string;
-      runKey?: string;
-    }
-  /** 仅用于 MessageList 的多子智能体聚合展示，不会由后端事件或历史轨迹直接生成。 */
-  | {
-      kind: 'subagentGroup';
-      count: number;
-      running: boolean;
-      expanded: boolean;
-    }
   /** 仅用于 MessageList 的同类步骤归拢展示（2026-07-24 拍板）：连续、同族、已完成、
-   *  无失败的步骤折成一组；同 subagentGroup，不会由事件/轨迹直接生成。
+   *  无失败的步骤折成一组；不会由事件/轨迹直接生成。
    *  2026-07-27 从「只收沙箱执行」泛化到读取/下载/浏览/搜索等族——真机一次仓库
    *  分析吐出连续 14 行「读取 xxx」+ 12 行「获取 xxx」，不折就是一屏流水账。 */
   | {
@@ -160,73 +141,6 @@ type AgentStepBase =
       status: StepStatus;
       reviewStatus?: string;
     };
-
-/** 把 Markdown 正文压成一行纯文本摘要（执行团队行/卡的副标题用）。
- *  子智能体的交付常是整篇带标题、强调与列表语法的报告，原样塞进一行会露出满屏符号。
- *  只做展示层降噪：去标题井号、强调星号、列表符号、链接语法与多余空白，取首个有内容的段落。 */
-export function plainSummary(text: string | undefined | null, limit = 120): string {
-  const raw = String(text || '').trim();
-  if (!raw) return '';
-  const flat = raw
-    .replace(/```[\s\S]*?```/g, ' ') // 代码块整段丢弃
-    .replace(/^\s{0,3}#{1,6}\s*/gm, '') // 标题井号
-    .replace(/^\s{0,3}[-*+]\s+/gm, '') // 无序列表符
-    .replace(/^\s{0,3}\d+[.)]\s+/gm, '') // 有序列表序号
-    .replace(/^\s{0,3}>\s?/gm, '') // 引用
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // 图片
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // 链接留文字
-    .replace(/(\*\*|__|\*|_|`|~~)/g, '') // 强调/行内代码
-    .replace(/\s+/g, ' ')
-    .trim();
-  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
-}
-
-/** 交付验收单（执行团队一期，subagent.review 帧）：逐条裁定 + 计数。
-    页面口径：成员卡只显示 passedCount/total 正向计数，逐条明细供 @ 窗与总结 */
-export interface SubagentReview {
-  verdicts: Array<{ criterion: string; passed: boolean | null; evidence?: string }>;
-  passedCount: number;
-  total: number;
-}
-
-/** 子智能体一次调用的公开运行档：委派任务 + 逐节点执行 + 输出 */
-export interface SubagentRun {
-  id: string; // subagent id
-  runKey: string; // 每次调用唯一（id + 序号）
-  name: string;
-  /** 委派帧携带的真实工作台头像；随运行档持久化，避免依赖当前 @ 候选目录。 */
-  icon?: string;
-  task?: string; // 主对话委派给它的自包含任务
-  status: StepStatus;
-  nodes: Array<{ label: string; status: string }>; // 工作流逐节点执行
-  output: string; // 节点输出累积
-  /** 子智能体当前连接的思考流；不进历史回放 */
-  reasoning?: string;
-  preview?: string; // 最终结果摘要
-  error?: string;
-  /** 历史回放归一出的「已中断」：status 仍归 failed（复用失败态视觉/收尾逻辑），
-      但消费方文案不该写「失败」——中断≠任务失败 */
-  interrupted?: boolean;
-  // ---- 执行团队一期（2026-07-27）：委派扩展与验收，全部可缺省 ----
-  /** 模型按场景生成的岗位名（委派时冻结，如「数据分析师」）；缺省回退 name */
-  roleName?: string;
-  /** AXIOM Agent 在本次任务里的场景化身份（如「审阅协调人」）；缺省回退 AXIOM Agent。
-      跟着委派帧走：同一轮的多次委派携带同一个值 */
-  managerRole?: string;
-  /** 委派任务书里的子任务清单（该成员的工作拆解，展示用，不造假进度） */
-  subtasks?: string[];
-  /** 委派时的验收标准（3–5 条） */
-  acceptanceCriteria?: string[];
-  /** 验收单（逐条裁定；completed 后才有） */
-  review?: SubagentReview;
-  /** 验收摘要（completed 帧带的 passed_count/total，与 review 同源冗余） */
-  acceptance?: { passedCount: number; total: number };
-  /** 子智能体本次委派产生的持久化文件，用于实时/历史工作窗口下载卡 */
-  files?: GeneratedFile[];
-  /** 同一身份被委派了几次（mergeTeamMembers 合并出来的展示字段，>1 才有意义）。
-      注意它不是「团队规模」——团队规模是**去重后的成员数**。 */
-  callCount?: number;
-}
 
 /** reducer 触碰到的消息字段最小集：MessageList 的 ChatMessage 结构性满足它 */
 export interface ExecutionMessage {
@@ -304,8 +218,6 @@ export interface ExecutionMessage {
   toolSteps?: Array<{ name: string; callId?: string; status: StepStatus }>;
   /** 活跃流中的逐页产物预览；不持久化，终稿卡使用真实产物。 */
   artifactPages?: ArtifactPageView[];
-  subagentCalls?: Array<{ name: string; status: StepStatus }>;
-  subagentRuns?: SubagentRun[];
   /** 任务级服务端计时（run.started/run.completed 的信封时间）；断线重连不重置 */
   runStartedAt?: number;
   runCompletedAt?: number;
@@ -316,7 +228,7 @@ export interface ExecutionMessage {
   runPartial?: boolean;
   /** 整轮终态（任务模式设计稿 §14）：只在 run 真正以失败收尾时置位——由 markRunFailed
    *  （run.failed/error 终态事件）或历史回放 execution_trace.status==='failed' 写入，
-   *  与期间某次工具/子智能体重试失败无关。同一逻辑步骤先 failed 后 succeeded、且整轮最终
+   *  与期间某次工具重试失败无关。同一逻辑步骤先 failed 后 succeeded、且整轮最终
    *  以 markRunCompleted 收尾时，本字段保持 false——不被历史失败 attempt 污染整轮判定。 */
   runFailed?: boolean;
   /** Shared public failure reason, preserved when reopening the transcript. */
@@ -333,7 +245,6 @@ export interface ExecutionMessage {
   attachmentIssues?: AttachmentIssue[];
   /** HITL 恢复桥（复用 submitResume 通道）：任务卡事件写入 run_id/resume_id/type */
   interactive?: { run_id?: string; resume_id?: string; type?: string; params?: any; ask_user?: boolean } | null;
-  routedAgent?: string;
   externalRecs?: Array<{ id: string; name: string; description?: string; url?: string }>;
 }
 
@@ -376,8 +287,6 @@ export type ExecutionTracePayload = {
   plan_version?: number | null;
   diverged?: boolean;
   steps?: unknown[];
-  /** 子智能体协作档：委派任务、节点状态与终态摘要（不含 token 级思考原文） */
-  subagents?: unknown[];
   files?: GeneratedFile[];
   /** 附件读取降级回放（attachments.status 事件） */
   attachments_status?: AttachmentIssue[] | null;
@@ -391,7 +300,6 @@ export type ExecutionTracePayload = {
   /** 常驻标记回放（2026-07-29）：上下文压缩提示 / 路由到的智能体 / 外部推荐 / 内部推荐 id。
    *  这四样在实时侧一旦出现就常驻在那条助手消息上，刷新后没了就是真缺口。 */
   compacted_note?: string | null;
-  routed_agent?: { id?: string; name?: string } | null;
   recommendations?: any[] | null;
   recommended_agent_ids?: string[] | null;
   recommendation_meta?: {
@@ -438,7 +346,6 @@ export const TIMELINE_TOOL_LABELS: Record<string, { running: string; completed: 
   browser_open: { running: '正在打开网页…', completed: '已打开网页', failed: '网页打开失败' },
   browser_act: { running: '正在操作页面…', completed: '已操作页面', failed: '页面操作失败' },
   browser_close: { running: '正在关闭网页…', completed: '已关闭网页', failed: '网页关闭失败' },
-  call_subagent: { running: '正在委派子智能体…', completed: '已委派子智能体', failed: '子智能体委派失败' },
   ask_user_choice: { running: '正在请求补充信息…', completed: '已请求补充信息', failed: '请求补充信息失败' },
   fetch_tool_result: { running: '正在读取完整结果…', completed: '已读取完整结果', failed: '读取完整结果失败' },
   use_skill: { running: '正在读取技能…', completed: '已读取技能', failed: '读取技能失败' },
@@ -693,7 +600,7 @@ export function isLiveRunningAction(steps: AgentStep[] | undefined, stepIndex: n
     ) {
       return false;
     }
-    if ((later.kind === 'tool' || later.kind === 'subagent') && later.status !== 'running') {
+    if (later.kind === 'tool' && later.status !== 'running') {
       return false;
     }
   }
@@ -843,148 +750,6 @@ const TAIL_PLAN_KEY = '__fallback_tail__';
     全收尾（无归属）则挂尾部哨兵；计划从未出现过则维持 undefined（真正的「计划出现前」）。 */
 function currentPlanKey(target: ExecutionMessage): string | undefined {
   return target.taskPlanActiveKey ?? (target.taskPlanEverStarted ? TAIL_PLAN_KEY : undefined);
-}
-
-/** call_subagent 编排 chip（ADR-046）：started 入列、completed/failed 收尾——三个流入口共用。
-    同时把协作过程插入 agentSteps 时间线（委派任务→结果摘要，与思考片段按时序交错）。 */
-export function applySubagentStep(target: ExecutionMessage, ev: SubagentStepEvent) {
-  if (!target.subagentCalls) target.subagentCalls = [];
-  if (!target.agentSteps) target.agentSteps = [];
-  if (!target.subagentRuns) target.subagentRuns = [];
-  const name = ev.name || '子智能体';
-  // 当前运行档：同 subagent id 的最后一个 running——node/delta/reasoning/收尾都归到它
-  const currentRun = () =>
-    [...target.subagentRuns!].reverse().find((r) => r.status === 'running' && (!ev.id || r.id === ev.id));
-
-  if (ev.phase === 'preparing') {
-    target.executionCollapsed = false;
-    target.agentSteps.push({
-      kind: 'tool', name: 'call_subagent', operation: 'subagent_prepare',
-      label: `正在打开「${name}」并准备委派`, status: 'running',
-      planKey: currentPlanKey(target),
-    });
-    return;
-  }
-
-  if (ev.phase === 'started') {
-    parkTransientReasoning(target);
-    target.executionCollapsed = false;
-    updatePlanItem(target, 'call_subagent', ['pending'], 'running');
-    const preparingStep = [...target.agentSteps].reverse().find(
-      (step) => step.kind === 'tool' && step.name === 'call_subagent'
-        && step.operation === 'subagent_prepare' && step.status === 'running',
-    );
-    if (preparingStep && preparingStep.kind === 'tool') {
-      preparingStep.status = 'completed';
-      preparingStep.label = `已打开「${name}」，任务已交给它处理`;
-    }
-    const runKey = `${ev.id || 'sub'}-${target.subagentRuns.length}`;
-    target.subagentRuns.push({
-      id: ev.id || '', runKey, name, task: ev.task, status: 'running',
-      nodes: [], output: '', reasoning: '',
-      ...(ev.icon ? { icon: ev.icon } : {}),
-      // 执行团队一期：岗位名/子任务清单/验收标准随派发帧入档（缺省不占位）
-      ...(ev.roleName ? { roleName: ev.roleName } : {}),
-      ...(ev.managerRole ? { managerRole: ev.managerRole } : {}),
-      ...(ev.subtasks?.length ? { subtasks: ev.subtasks } : {}),
-      ...(ev.acceptanceCriteria?.length ? { acceptanceCriteria: ev.acceptanceCriteria } : {}),
-    });
-    target.subagentCalls.push({ name, status: 'running' });
-    target.agentSteps.push({
-      kind: 'subagent', name, status: 'running',
-      label: name, task: ev.task, runKey,
-      planKey: currentPlanKey(target),
-    });
-    return;
-  }
-  // 内部干活流程（供「子智能体工作窗口」实时展示）
-  if (ev.phase === 'node') {
-    const run = currentRun();
-    if (run && ev.label) {
-      run.nodes.push({ label: ev.label, status: ev.status || '' });
-      const status: StepStatus = ev.status === 'failed'
-        ? 'failed'
-        : /^(success|succeeded|completed|done)$/i.test(ev.status || '')
-          ? 'completed'
-          : 'running';
-      const currentNodeStep = [...target.agentSteps].reverse().find(
-        (step) => step.kind === 'tool' && step.name === 'call_subagent'
-          && step.operation === 'subagent_node' && step.runKey === run.runKey,
-      );
-      const nodeLabel = status === 'failed'
-        ? `「${run.name || '子智能体'}」执行“${ev.label}”失败`
-        : status === 'completed'
-          ? `「${run.name || '子智能体'}」已完成${ev.label}`
-          : `「${run.name || '子智能体'}」正在${ev.label}`;
-      if (currentNodeStep && currentNodeStep.kind === 'tool') {
-        // Codex 的协作项以事件更新原位状态；子智能体内部完整节点留在 run.nodes，
-        // 主时间线只显示当前节点，避免多个瞬时 node 在同一帧一起堆出来。
-        currentNodeStep.label = nodeLabel;
-        currentNodeStep.status = status;
-      } else {
-        target.agentSteps.push({
-          kind: 'tool', name: 'call_subagent', operation: 'subagent_node', runKey: run.runKey,
-          label: nodeLabel,
-          status, planKey: currentPlanKey(target),
-        });
-      }
-    }
-    return;
-  }
-  if (ev.phase === 'delta') {
-    const run = currentRun();
-    if (run) run.output += ev.text || '';
-    return;
-  }
-  if (ev.phase === 'reasoning') {
-    const run = currentRun();
-    if (run && ev.text) run.reasoning = `${run.reasoning || ''}${ev.text}`.slice(-6000);
-    return;
-  }
-  if (ev.phase === 'review') {
-    // 执行团队一期：验收单帧（先于 completed 到达）——挂到当前运行档
-    const run = currentRun();
-    if (run && ev.review) run.review = ev.review;
-    return;
-  }
-  // completed / failed 收尾
-  const status = ev.phase === 'failed' ? 'failed' : 'completed';
-  updatePlanItem(target, 'call_subagent', ['running', 'pending'], status);
-  const run = currentRun();
-  if (run) {
-    run.status = status;
-    // 6000 上限与后端帧一致：结果报告卡（max-height+滚动）可查看完整内容，不再 300 字截断
-    run.preview = String(ev.preview || '').slice(0, 6000) || undefined;
-    run.error = ev.error ? String(ev.error).slice(0, 300) : undefined;
-    // 执行团队一期：收尾帧附带的验收摘要/岗位名
-    if (ev.acceptance) run.acceptance = ev.acceptance;
-    if (ev.roleName && !run.roleName) run.roleName = ev.roleName;
-    if (ev.files?.length) run.files = ev.files;
-  }
-  const item = [...target.subagentCalls]
-    .reverse()
-    .find((s) => s.status === 'running' && (!ev.name || s.name === name));
-  if (item) item.status = status;
-  else target.subagentCalls.push({ name, status });
-  const step = [...target.agentSteps]
-    .reverse()
-    .find((s) => s.kind === 'subagent' && s.status === 'running' && s.name === name);
-  if (step && step.kind === 'subagent') {
-    step.status = status;
-    if (status === 'failed') {
-      step.preview = String(ev.preview || ev.error || '').slice(0, 6000) || undefined;
-    }
-  }
-  const nodeStep = [...target.agentSteps].reverse().find(
-    (candidate) => candidate.kind === 'tool' && candidate.name === 'call_subagent'
-      && candidate.operation === 'subagent_node' && (!run || candidate.runKey === run.runKey),
-  );
-  if (nodeStep && nodeStep.kind === 'tool' && nodeStep.status === 'running') {
-    nodeStep.status = status;
-    nodeStep.label = status === 'failed'
-      ? `${nodeStep.label.replace('正在', '执行')}失败`
-      : nodeStep.label.replace('正在', '已完成');
-  }
 }
 
 /** 供应商 reasoning_content 的活流：时间线 thinking 行始终累积；顶部尾窗仅在无公开正文时驻留。 */
@@ -1402,12 +1167,11 @@ export function applyCommentary(target: ExecutionMessage, text: string, kind = '
   }
   target.executionCollapsed = false;
   const acted =
-    (target.agentSteps || []).some((s) => s.kind === 'tool' || s.kind === 'subagent') ||
+    (target.agentSteps || []).some((s) => s.kind === 'tool') ||
     (target.agentSteps || []).some(
       (s) => s.kind === 'note' && /^已加载能力[：:]/u.test(String(s.text || '').trim()),
     ) ||
-    Boolean(target.toolSteps?.length) ||
-    Boolean(target.subagentCalls?.length);
+    Boolean(target.toolSteps?.length);
   // ：覆盖前端乐观开场/系统占位；相同文案直接去重，避免「我先按…」双行
   const prevPreamble = String(target.preamble || '').trim();
   if (prevPreamble && prevPreamble === clean) return;
@@ -1523,7 +1287,6 @@ export function settleHitlToolSteps(target: ExecutionMessage) {
 
 /** 将已提交的工具事件投影为用户可见的事实时间线。 */
 export function applyTimelineTool(target: ExecutionMessage, ev: ToolStepEvent) {
-  if (ev.name === 'call_subagent') return;
   if (!target.agentSteps) target.agentSteps = [];
   if (ev.name && !HITL_TOOL_NAMES.has(ev.name)) settleHitlToolSteps(target);
   const labels = toolLabels(ev.name);
@@ -1829,7 +1592,7 @@ function closeRunningSteps(target: ExecutionMessage, status: StepStatus, suffix 
       kept.push(step);
       continue;
     }
-    if ((step.kind === 'tool' || step.kind === 'subagent') && step.status === 'running') {
+    if (step.kind === 'tool' && step.status === 'running') {
       step.status = status;
       if (suffix) step.label = `${step.label}${suffix}`;
     }
@@ -1837,9 +1600,6 @@ function closeRunningSteps(target: ExecutionMessage, status: StepStatus, suffix 
   }
   if (target.agentSteps) target.agentSteps = kept;
   for (const chip of target.toolSteps || []) {
-    if (chip.status === 'running') chip.status = status;
-  }
-  for (const chip of target.subagentCalls || []) {
     if (chip.status === 'running') chip.status = status;
   }
   for (const item of target.executionPlan?.items || []) {
@@ -2008,39 +1768,6 @@ function restoreStep(raw: any, preserveRunning: boolean): AgentStep | null {
       : [];
     return pages.length ? { kind: 'read', pages, planKey } : null;
   }
-  if (raw.kind === 'subagent') {
-    const name = String(raw.name || '子智能体');
-    // running 残留＝历史孤儿：Run 在收到 subagent.completed/failed 前异常终止，历史回放没有
-    // 实时流再推它离开——归一成失败态视觉（复用既有失败态样式），但用「中断」措辞和 preview
-    // 提示区分于真失败，既不永远转圈也不假装完成
-    const interrupted = raw.status === 'running' && !preserveRunning;
-    const status: StepStatus =
-      raw.status === 'running' && preserveRunning
-        ? 'running'
-        : interrupted || raw.status === 'failed'
-          ? 'failed'
-          : 'completed';
-    return {
-      kind: 'subagent', name, status,
-      label: raw.label
-        ? String(raw.label)
-        : interrupted
-          ? `「${name}」的委派记录已中断（未完成）`
-          : status === 'running'
-            ? `「${name}」正在处理`
-            : status === 'failed'
-              ? `「${name}」的委派任务失败`
-              : `「${name}」已返回处理结果`,
-      task: raw.task ? String(raw.task) : undefined,
-      preview: raw.preview
-        ? String(raw.preview)
-        : interrupted
-          ? '这次委派没有等到结果就中断了（进程异常终止或连接中断，并非任务失败）'
-          : undefined,
-      runKey: raw.runKey ? String(raw.runKey) : undefined,
-      planKey,
-    };
-  }
   if (raw.kind === 'tool') {
     const name = String(raw.name || '');
     // running 残留同上一分支：不能悄悄归一成 completed（假成功），也复用失败态视觉收尾
@@ -2073,11 +1800,7 @@ function restoreStep(raw: any, preserveRunning: boolean): AgentStep | null {
     return {
       kind: 'tool', name, status,
       callId: raw.callId ? String(raw.callId) : undefined,
-      label: interrupted
-        ? '执行记录已中断（未完成）'
-        : operation === 'subagent_prepare' || operation === 'subagent_node'
-          ? String(raw.label || display.label)
-          : display.label,
+      label: interrupted ? '执行记录已中断（未完成）' : display.label,
       // 模型现写的调用意图：回放同实时，行标题优先用它（restoreExecutionTrace 已还原）
       intent: raw.intent ? String(raw.intent).slice(0, 80) : undefined,
       urls: Array.isArray(raw.urls) && raw.urls.length ? raw.urls.map(String) : undefined,
@@ -2099,7 +1822,6 @@ function restoreStep(raw: any, preserveRunning: boolean): AgentStep | null {
         : undefined,
       durationMs: raw.durationMs > 0 ? Number(raw.durationMs) : undefined,
       operation: operation || undefined,
-      runKey: raw.runKey ? String(raw.runKey) : undefined,
       target: display.target,
       // 统一经过 toolStepDisplay：文件区扫描不展示内部文件数，其他工具 detail 仍会回放。
       detail: display.detail,
@@ -2164,127 +1886,6 @@ function restoreStep(raw: any, preserveRunning: boolean): AgentStep | null {
     };
   }
   return null;
-}
-
-function restoreSubagentRun(raw: any, index: number, preserveRunning: boolean): SubagentRun | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const name = String(raw.name || '子智能体');
-  // running 残留：与上面 agentSteps 的 subagent 分支同一归一规则（两处保持一致）——
-  // 「工作窗口」卡片同样不能永远显示进行中
-  const interrupted = raw.status === 'running' && !preserveRunning;
-  const status: StepStatus =
-    raw.status === 'running' && preserveRunning
-      ? 'running'
-      : interrupted || raw.status === 'failed'
-        ? 'failed'
-        : 'completed';
-  const nodes = Array.isArray(raw.nodes)
-    ? raw.nodes
-        .filter((node: any) => node && node.label)
-        .map((node: any) => ({ label: String(node.label), status: String(node.status || '') }))
-    : [];
-  return {
-    id: String(raw.id || ''),
-    runKey: String(raw.runKey || `history-subagent-${index}`),
-    name,
-    ...(raw.icon ? { icon: String(raw.icon) } : {}),
-    task: raw.task ? String(raw.task) : undefined,
-    status,
-    interrupted: interrupted || undefined,
-    nodes,
-    output: raw.output ? String(raw.output) : '',
-    preview: raw.preview ? String(raw.preview) : undefined,
-    error: raw.error
-      ? String(raw.error)
-      : interrupted
-        ? '子智能体委派记录已中断（未完成，并非任务失败）'
-        : undefined,
-    // 执行团队一期：委派扩展与验收随历史回放（服务端轨迹构建同名字段）
-    ...(raw.roleName ? { roleName: String(raw.roleName) } : {}),
-    ...(raw.managerRole ? { managerRole: String(raw.managerRole) } : {}),
-    ...(Array.isArray(raw.subtasks) && raw.subtasks.length
-      ? { subtasks: raw.subtasks.map((s: any) => String(s)) }
-      : {}),
-    ...(Array.isArray(raw.acceptanceCriteria) && raw.acceptanceCriteria.length
-      ? { acceptanceCriteria: raw.acceptanceCriteria.map((s: any) => String(s)) }
-      : {}),
-    ...(raw.review && Array.isArray(raw.review.verdicts)
-      ? {
-          review: {
-            verdicts: raw.review.verdicts.map((v: any) => ({
-              criterion: String(v?.criterion || ''),
-              passed: typeof v?.passed === 'boolean' ? v.passed : null,
-              evidence: v?.evidence ? String(v.evidence) : undefined,
-            })),
-            passedCount: Number(raw.review.passedCount || 0),
-            total: Number(raw.review.total || 0),
-          },
-        }
-      : {}),
-    ...(raw.acceptance && typeof raw.acceptance === 'object'
-      ? {
-          acceptance: {
-            passedCount: Number(raw.acceptance.passed_count ?? raw.acceptance.passedCount ?? 0),
-            total: Number(raw.acceptance.total || 0),
-          },
-        }
-      : {}),
-    ...(Array.isArray(raw.files)
-      ? {
-          files: raw.files
-            .filter((file: any) => file?.id && file?.filename)
-            .map((file: any) => ({
-              id: String(file.id),
-              filename: String(file.filename),
-              size: Math.max(0, Number(file.size) || 0),
-              mime: file.mime ? String(file.mime) : undefined,
-              source: ['uploaded', 'generated', 'material', 'research'].includes(String(file.source))
-                ? file.source
-                : 'generated',
-              review: file.review && typeof file.review === 'object' ? file.review : undefined,
-              origin: file.origin && typeof file.origin === 'object' ? file.origin : undefined,
-              versionNo: file.versionNo ? Number(file.versionNo) : undefined,
-              draft: file.draft === true || undefined,
-              deliverable: file.deliverable !== false,
-            })),
-        }
-      : {}),
-  };
-}
-
-/** 成员卡按**身份**去重（2026-07-28）。
- *
- *  subagentRuns 是「每次委派一条」的运行档，node/delta/验收都靠它归属，必须保持一条一次。
- *  但展示层不能照搬：同一个子智能体在 max_calls 内被调用 3 次（「确认 → 提交」这种多步
- *  业务本来就该这样），执行团队面板就画出 3 张同名成员卡、「任务协作」的角标也显示 3 ——
- *  角标名义上是团队规模，实际读出来是调用次数。
- *
- *  这里按 id（缺 id 退回 name）合并：保留**最新一次**的状态与验收（成员当前是什么样），
- *  callCount 记下被委派过几次，runKey 用最新一次的（面板聚焦/下钻仍指向最近一次运行档）。 */
-export function mergeTeamMembers(runs: SubagentRun[] | undefined): SubagentRun[] {
-  const order: string[] = [];
-  const byIdentity = new Map<string, SubagentRun>();
-  for (const run of runs || []) {
-    const key = run.id || run.name || run.runKey;
-    const prev = byIdentity.get(key);
-    if (!prev) {
-      order.push(key);
-      byIdentity.set(key, { ...run, callCount: 1 });
-      continue;
-    }
-    // 后到的那条即当前状态；roleName/managerRole/subtasks 等派发期字段若后一次没带，
-    // 沿用先前记下的（模型只在首次委派时起名的场景很常见）
-    byIdentity.set(key, {
-      ...prev,
-      ...run,
-      roleName: run.roleName || prev.roleName,
-      managerRole: run.managerRole || prev.managerRole,
-      subtasks: run.subtasks?.length ? run.subtasks : prev.subtasks,
-      acceptanceCriteria: run.acceptanceCriteria?.length ? run.acceptanceCriteria : prev.acceptanceCriteria,
-      callCount: (prev.callCount || 1) + 1,
-    });
-  }
-  return order.map((key) => byIdentity.get(key)!).filter(Boolean);
 }
 
 /** 历史消息的执行轨迹还原：结构化步骤 + 状态 + 耗时 + 文件卡；思考回放可展开正文 */
@@ -2381,9 +1982,6 @@ export function restoreExecutionTrace(
           : undefined,
       }
     : undefined;
-  const subagentRuns = (Array.isArray(trace.subagents) ? trace.subagents : [])
-    .map((raw, index) => restoreSubagentRun(raw, index, preserveRunning))
-    .filter((run): run is SubagentRun => run !== null);
   // generatedFiles 保留全量（.slides.json 配对、后续轮次认亲都要用），只有**展示**口径筛过
   const restoredFiles = trace.files?.length ? trace.files : undefined;
   const restoredDelivered = (restoredFiles || []).filter((file) => isDeliverableFile(file) && !isCompanionFile(file.filename));
@@ -2426,7 +2024,6 @@ export function restoreExecutionTrace(
     taskGoalContract: restoredContract,
     agentSteps: folded.length ? folded : undefined,
     executionPlan: planItems.length ? { items: planItems } : undefined,
-    subagentRuns: subagentRuns.length ? subagentRuns : undefined,
     generatedFiles: restoredFiles,
     agentMode: trace.agent_mode ? String(trace.agent_mode) : undefined,
     researchProgress: trace.research_progress
@@ -2441,7 +2038,7 @@ export function restoreExecutionTrace(
       const raw = String(trace.preamble || '').trim();
       if (!raw) return undefined;
       if (!isSystemInitialProgressPreamble(raw)) return raw;
-      const acted = folded.some((step) => step.kind === 'tool' || step.kind === 'subagent');
+      const acted = folded.some((step) => step.kind === 'tool');
       if (acted || trace.completedAt || trace.status === 'completed' || trace.status === 'partial' || trace.status === 'failed' || trace.status === 'cancelled') {
         return undefined;
       }
@@ -2458,7 +2055,6 @@ export function restoreExecutionTrace(
     // recommendedAgents 只存 id 让上层现场匹配（后端投影 recommended_agent_ids 而非整卡）：
     // 存快照的话智能体改名/下架后卡面与真实应用对不上。
     compactedNote: trace.compacted_note || undefined,
-    routedAgent: trace.routed_agent?.name || undefined,
     externalRecs: trace.recommendations?.length ? trace.recommendations : undefined,
     recommendedAgentIds: trace.recommended_agent_ids?.length
       ? trace.recommended_agent_ids
@@ -2667,7 +2263,7 @@ export function buildExecutionRows(
  *
  * 为什么需要：生成期间 `nowTick` 每 250ms 跳一次，MessageList 的渲染函数因此每秒重跑 4 次；
  * 而 `executionRows` 是普通函数（模板里 `v-if` 和 `v-for` 各调一次），于是
- * `buildExecutionRows → collapseSubagentRows → dedupeRepeatedNotes → collapseSandboxRuns`
+ * `buildExecutionRows → dedupeRepeatedNotes → collapseSandboxRuns`
  * 这条链对**全部历史消息**每秒各跑 8 遍——历史消息的行一个字都不会变。
  *
  * 指纹只收「会改变**行结构**」的字段，故意不收 label / preview / 耗时 / favicon 这些：
@@ -2682,8 +2278,6 @@ export function execRowsSignature(
   message: {
     taskPlan?: ExecutionMessage['taskPlan'];
     agentSteps?: AgentStep[];
-    /** 多子智能体聚合头的展开态（收起时成员行整批不渲染）；字段挂在 ChatMessage 上 */
-    subCollabExpanded?: boolean;
   },
   running: boolean,
   /** 本消息名下当前处于展开态的归拢组键（展开/收起会改变成员行是否渲染） */
@@ -2691,7 +2285,7 @@ export function execRowsSignature(
 ): string {
   // 字段之间必须有分隔符（\u0001 分字段、\u0002 分条目）：直接拼串时相邻字段会粘连，
   // name='a'+status='' 与 name=''+status='a' 会撞出同一个指纹，缓存于是吐出过期的行。
-  const parts: string[] = [running ? 'r1' : 'r0', `c${message.subCollabExpanded ? 1 : 0}`];
+  const parts: string[] = [running ? 'r1' : 'r0'];
   for (const item of message.taskPlan || []) {
     parts.push(['p', item.key, item.title, item.status].join('\u0001'));
   }
@@ -2709,7 +2303,7 @@ export function execRowsSignature(
 }
 
 // ===== 顶栏「任务运行面板」统一派生（P0：单一状态源） =====
-// 顶栏面板不再自行聚合另一套 taskPlan/subagentRuns 视图，而是与消息内执行卡共用
+// 顶栏面板不再自行聚合另一套 taskPlan 视图，而是与消息内执行卡共用
 // 当前执行分段的同一份时间线数据——本函数是两者唯一的派生入口。
 
 export interface RunPanelModel {
@@ -2722,10 +2316,8 @@ export interface RunPanelModel {
   planDiverged?: boolean;
   /** 本轮目标契约（与计划同源，可缺省） */
   goalContract?: ExecutionMessage['taskGoalContract'];
-  /** 统一时间线步骤（工具/子智能体/产物/检查/说明），与消息执行卡同一数组引用 */
+  /** 统一时间线步骤（工具/产物/检查/说明），与消息执行卡同一数组引用 */
   steps: AgentStep[];
-  /** 本轮子智能体运行档（点击可打开独立对话窗） */
-  subagentRuns: SubagentRun[];
   /** 是否有仍在运行的步骤/计划项 */
   running: boolean;
   /** Run 已到达终态；计划快照仍保留在历史里，但顶栏不应再把它作为活动任务展示。 */
@@ -2771,7 +2363,7 @@ export function deriveRunPanel(messages: RunPanelMessage[]): RunPanelModel {
           && Boolean(message.taskPlan?.length),
       ) || latest
     : latest;
-  // 面板其余数据仍读取最新分段：用户追加要求后新产生的工具、团队和文件要实时出现；
+  // 面板其余数据仍读取最新分段：用户追加要求后新产生的工具和文件要实时出现；
   // 只有“计划”跨分段继承，不能为了保计划把整个面板冻结在旧分段。
   // ：只认语义计划（update_plan / provisional）。禁止把每次 search/bash 的 intent
   // 摊成「当前进度」列表——那是执行时间线的事，不是任务协作整体步骤。
@@ -2779,7 +2371,6 @@ export function deriveRunPanel(messages: RunPanelMessage[]): RunPanelModel {
     (item) => item && !String(item.key || '').startsWith('activity-'),
   ));
   const steps = latest?.agentSteps || [];
-  const subagentRuns = latest?.subagentRuns || [];
   // Run 终态只决定面板是否继续跳动；Plan 状态仍原样展示服务端快照。
   const runSettled = Boolean(
     latest?.runCompletedAt
@@ -2798,8 +2389,7 @@ export function deriveRunPanel(messages: RunPanelMessage[]): RunPanelModel {
       const st = String(item.status || '').toLowerCase();
       return st === 'running' || st === 'in_progress' || st === 'active';
     }) ||
-    steps.some((s) => 'status' in s && s.status === 'running') ||
-    subagentRuns.some((r) => r.status === 'running')
+    steps.some((s) => 'status' in s && s.status === 'running')
   );
   return {
     message: latest,
@@ -2810,7 +2400,6 @@ export function deriveRunPanel(messages: RunPanelMessage[]): RunPanelModel {
     planDiverged: Boolean(planSource?.taskPlanDiverged),
     goalContract: planSource?.taskGoalContract,
     steps,
-    subagentRuns,
     running,
     settled: runSettled,
     files: latest?.generatedFiles || [],

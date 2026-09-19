@@ -17,13 +17,12 @@ describe('主对话智能体推荐卡契约', () => {
     expect(chatSource).toContain('recommendReason: reasons?.[String(app.id)]');
   });
 
-  it('推荐卡从智能体广场目录回源，不被 @ 可委派列表限制', () => {
+  it('推荐卡从智能体广场目录回源', () => {
     const resolverStart = chatSource.indexOf('function findAppsByIds');
     const resolverEnd = chatSource.indexOf('/** 历史轨迹回放', resolverStart);
     const resolver = chatSource.slice(resolverStart, resolverEnd);
     expect(resolver).toContain('options.appList.value');
-    expect(resolver).not.toContain('subagents.value');
-    expect(chatSource).toContain('外部智能体可以被推荐并新窗口打开');
+    expect(chatSource).toContain('推荐卡只用于跳转打开，不进入 @ 链路');
   });
 
   it('卡片放在本轮输出底部，隐式与明确推荐使用克制文案', () => {

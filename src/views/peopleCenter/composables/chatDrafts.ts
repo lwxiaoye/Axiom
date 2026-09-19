@@ -13,7 +13,7 @@
  *
  * 刻意不用 localStorage：草稿含缩略图，单键字符串会既胀又慢；IndexedDB 是正解。
  */
-import type { AssistantPreset, KnowledgeSelection, SkillItem, SubagentItem } from '../agentApi';
+import type { AssistantPreset, KnowledgeSelection, SkillItem } from '../agentApi';
 import type { WorkFolderSelection } from '../myfiles.api';
 
 /** 历史抽屉「本地草稿」最多展示条数；超出时保留最新，旧的从列表与存储清理。 */
@@ -38,7 +38,6 @@ export type PersistedChatDraft = {
   attachments: DraftAttachmentMeta[];
   skills: SkillItem[];
   /** @ 选中的一次性委托目标；刷新后恢复，发送成功后清空。 */
-  subagent?: SubagentItem;
   knowledge: KnowledgeSelection[];
   files: Array<{ id: string; filename: string }>;
   /** 「最近的对话」引用（2026-07-28）。可选：老草稿记录没有这个字段，读回来当作没选。 */

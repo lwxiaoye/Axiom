@@ -1,4 +1,4 @@
-<!-- eslint-disable vue/no-v-html --><!-- 回答内容经 xss(md.render()) 白名单过滤，与 SubagentChatPanel 同一处理 -->
+<!-- eslint-disable vue/no-v-html --><!-- 回答内容经 xss(md.render()) 白名单过滤，与 MessageList 同一处理 -->
 <template>
   <!-- 旁路会话（Codex composer.queuedMessage.openInSideChat 对齐 2026-07-27）
        主线任务正在跑，用户又冒出一个不相干的问题——既不该打断主线（引导），也不该排到

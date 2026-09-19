@@ -1,5 +1,5 @@
 import { formatSessionTime, groupRunSessions } from './sessionGroups';
-import type { RunSession } from './agentRun.api';
+import type { RunSession } from './runSession';
 
 function session(partial: Partial<RunSession> & Pick<RunSession, 'id'>): RunSession {
   return { appId: 'app', title: partial.title || partial.id, ...partial };
