@@ -8,10 +8,7 @@ import { AppTypeEnum } from '../core/constants';
  */
 export type AiAppKind = 'simple' | 'chatAgent' | 'workflow' | 'workflowTool' | 'httpToolSet' | 'mcpToolSet';
 
-/** 「我的智能体」列表展示的类型（simple 仅旧数据兼容；工具类型在「我的工具」中管理） */
-export const AGENT_KINDS: AiAppKind[] = ['simple', 'chatAgent', 'workflow'];
-
-/** 「我的工具」列表展示的类型（顺序与蓝本一致：工作流工具/HTTP 工具/MCP 工具） */
+/** 工具类型（顺序与蓝本一致：工作流工具/HTTP 工具/MCP 工具） */
 export const TOOL_KINDS: AiAppKind[] = ['workflowTool', 'httpToolSet', 'mcpToolSet'];
 
 export type AppOpenType = 'iframe' | '_blank';
@@ -101,22 +98,4 @@ export function getAiAppKindLabel(record?: AiAppRecord | null) {
 
 export function getAiAppKindLabelByKind(kind: AiAppKind) {
   return KIND_LABEL_MAP[kind];
-}
-
-export function isToolKind(record?: AiAppRecord | null) {
-  return TOOL_KINDS.includes(getAiAppKind(record));
-}
-
-export function getAiAppPrimaryAction(record?: AiAppRecord | null) {
-  const kind = getAiAppKind(record);
-  return kind === 'workflow' || kind === 'workflowTool' ? '编排' : '配置';
-}
-
-export function getAiAppRoute(record: AiAppRecord) {
-  const workflowAppId = String(record.workflowAppId || record.id || '');
-  const kind = getAiAppKind(record);
-  if (kind === 'workflow' || kind === 'workflowTool') {
-    return { path: '/workflow/editor', query: { workflowAppId } };
-  }
-  return { path: '/workflow/agent', query: { workflowAppId } };
 }

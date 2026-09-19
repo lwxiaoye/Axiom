@@ -20,17 +20,11 @@ export function getAiAppRunHref(record: RuntimeRouteRecord) {
   return `/agent/run/${String(record.workflowAppId || record.appId || record.id || '')}`;
 }
 
-export function getAiAppRunRoute(record: RuntimeRouteRecord, from?: 'agent' | 'my-agent') {
-  const path = getAiAppRunHref(record);
-  if (!from) return { path };
-  return { path, query: { from } };
-}
-
 export function getAiAppDraftPreviewRoute(workflowAppId: string) {
   return { path: `/agent/run/${workflowAppId}`, query: { previewDraft: '1' } };
 }
 
-/** 广场 pcUrl / 我的智能体记录 → 新标签地址。同源运行页去掉 from/user/timestamp 等残留 query。 */
+/** 广场 pcUrl / 应用记录 → 新标签地址。同源运行页去掉 from/user/timestamp 等残留 query。 */
 export function resolveAgentRunHref(target: string | RuntimeRouteRecord, origin = currentOrigin()): string {
   if (typeof target !== 'string') return getAiAppRunHref(target);
   const raw = String(target || '').trim();
@@ -61,7 +55,7 @@ export function setRuntimeNavigator(fn: NavigateFn | null) {
 }
 
 /**
- * 广场、「我的智能体」等入口共用的「打开智能体运行页」。
+ * 广场、主对话推荐位、我的文件等入口共用的「打开智能体运行页」。
  *
  * 同源地址走站内路由跳转，不再新开标签页：新标签页没有历史，运行页里的「返回」
  * 无处可回，浏览器后退键也是灰的——用户只能手动关标签页，这不是合理的交互。

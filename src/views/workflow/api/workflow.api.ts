@@ -1,11 +1,4 @@
 import { defHttp } from '/@/utils/http/axios';
-import { getToken } from '/@/utils/auth';
-import { agentAuthHeaders } from '../../peopleCenter/utils/agentAuthHeaders';
-import { buildWorkflowAppUploadHeaders } from '../shared/appPackage';
-import {
-  buildHttpToolTestFormData,
-  type HttpToolSetConfig,
-} from '../../peopleCenter/workbench/httpToolConfig';
 
 export type AiWorkflowApp = {
   id: string;
@@ -23,7 +16,6 @@ export type AiWorkflowApp = {
   publishedAt?: string;
   publishedBy?: string;
   hasUnpublishedChanges?: boolean;
-  reviewSummary?: WorkflowReviewSummary;
 };
 
 export type AiWorkflowDefinition = {
@@ -181,16 +173,6 @@ export type NodeTemplateSummary = {
 
 export type NodeTemplateTag = { id: string; label: string };
 
-export type WorkflowAclItem = {
-  id?: string;
-  tenantId?: string;
-  appId?: string;
-  subjectType: 'USER' | 'ROLE' | 'DEPARTMENT';
-  subjectId: string;
-  permission: 'VIEWER' | 'EDITOR';
-  createTime?: string;
-};
-
 export type WorkflowPageResult<T> = {
   records: T[];
   total: number;
@@ -198,82 +180,6 @@ export type WorkflowPageResult<T> = {
   current: number;
   pages?: number;
 };
-
-export type MetricRange =
-  | 'today'
-  | 'last_7_days'
-  | 'last_4_weeks'
-  | 'last_3_months'
-  | 'last_12_months'
-  | 'month_to_date'
-  | 'quarter_to_date'
-  | 'year_to_date'
-  | 'all_time';
-
-export type WorkflowAppMetricsDaily = {
-  date: string;
-  sessions: number;
-  activeUsers: number;
-  newUsers: number;
-  returningUsers: number;
-  interactions: number;
-  messages: number;
-};
-
-export type WorkflowAppMetrics = {
-  range: MetricRange;
-  startDate: string;
-  endDate: string;
-  isConversational: boolean;
-  totals: {
-    sessions: number;
-    activeUsers: number;
-    newUsers: number;
-    returningUsers: number;
-    averageMessages: number;
-    messages: number;
-  };
-  daily: WorkflowAppMetricsDaily[];
-};
-
-export type ConversationLogStatus = 'completed' | 'partial' | 'failed' | 'cancelled' | 'interrupted' | 'unknown';
-export type ConversationLogRecord = {
-  id: string;
-  threadId: string;
-  title: string;
-  userId: string;
-  username: string;
-  status: ConversationLogStatus;
-  messageCount: number;
-  lastMessageAt?: string | null;
-  upvotes: number;
-  downvotes: number;
-};
-export type ConversationLogMessage = {
-  id: number;
-  role: 'user' | 'assistant';
-  content: string;
-  status?: ConversationLogStatus | null;
-  feedback: 'up' | 'down' | null;
-  createdAt?: string | null;
-};
-export type ConversationLogDetail = {
-  threadId: string;
-  title: string;
-  userId: string;
-  username: string;
-  messages: ConversationLogMessage[];
-};
-export type ConversationLogQuery = {
-  range?: MetricRange;
-  startAt?: string;
-  endAt?: string;
-  status?: ConversationLogStatus;
-  keyword?: string;
-  pageNo?: number;
-  pageSize?: number;
-};
-export type ConversationLogPage = { records: ConversationLogRecord[]; total: number };
 
 export type WorkflowModelOption = {
   label: string;
@@ -291,24 +197,11 @@ export type WorkflowModelOption = {
 enum Api {
   pageApp = '/agent-api/workflow/app/page',
   marketplaceApps = '/agent-api/workflow/app/marketplace',
-  marketplaceCreators = '/agent-api/workflow/app/marketplace-creators',
   queryAppById = '/agent-api/workflow/app/queryById',
-  addApp = '/agent-api/workflow/app/add',
-  editApp = '/agent-api/workflow/app/edit',
-  deleteApp = '/agent-api/workflow/app/delete',
-  cancelPublishApp = '/agent-api/workflow/app/cancelPublish',
-  exportApp = '/agent-api/workflow/app/export',
-  importApp = '/agent-api/workflow/app/import',
-  copyApp = '/agent-api/workflow/app/copy',
-  appAclList = '/agent-api/workflow/app/acl/list',
-  appAclSave = '/agent-api/workflow/app/acl/save',
   queryApp = '/agent-api/workflow/app/queryByAppInfoId',
-  saveAppConfig = '/agent-api/workflow/app/saveConfig',
   queryDefinition = '/agent-api/workflow/definition/queryByAppInfoId',
   saveDefinition = '/agent-api/workflow/definition/save',
-  publishDefinition = '/agent-api/workflow/definition/publish',
   debugDefinition = '/agent-api/workflow/definition/debug',
-  executeDefinition = '/agent-api/workflow/definition/execute',
   builtinTools = '/agent-api/workflow/tool/builtin',
   modelOptions = '/agent-api/workflow/model/options',
 }
@@ -325,452 +218,21 @@ export const queryWorkflowAppPage = (params: {
   aiAppType?: string;
 }) => defHttp.get<WorkflowPageResult<AiWorkflowApp>>({ url: Api.pageApp, params }, { ...RAW, errorMessageMode: 'none' });
 
-export type MarketplaceCreator = {
-  appId: string;
-  creatorName: string;
-  creatorAvatar: string;
-};
-
 /** 广场：当前用户可运行的自建已发布智能体（结构对齐 app_info 目录行，可与内置智能体直接合并） */
 export const queryMarketplaceWorkflowApps = () =>
   defHttp.get<Record<string, unknown>[]>({ url: Api.marketplaceApps }, { ...RAW, errorMessageMode: 'none' });
 
-export const queryMarketplaceCreators = (appIds: Array<string | number>) =>
-  defHttp.post<{ records: MarketplaceCreator[] }>(
-    { url: Api.marketplaceCreators, data: { appIds: appIds.map(String) } },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
 export const queryWorkflowAppById = (id: string) =>
   defHttp.get<AiWorkflowApp>({ url: Api.queryAppById, params: { id } }, { ...RAW, errorMessageMode: 'none' });
 
-export const queryWorkflowAppMetrics = (appId: string, range: MetricRange) =>
-  defHttp.get<WorkflowAppMetrics>(
-    { url: `/agent-api/workflow/app/${encodeURIComponent(appId)}/metrics`, params: { range } },
-    { ...RAW, errorMessageMode: 'none' }
-  );
-
-export const queryAdminConversationLogs = (appId: string, params: ConversationLogQuery) =>
-  defHttp.get<ConversationLogPage>(
-    { url: `/agent-api/workflow/admin/app/${encodeURIComponent(appId)}/conversation-logs`, params },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const queryOwnerConversationLogs = (appId: string, params: ConversationLogQuery) =>
-  defHttp.get<ConversationLogPage>(
-    { url: `/agent-api/workflow/app/${encodeURIComponent(appId)}/conversation-logs`, params },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const queryAdminConversationLogDetail = (appId: string, threadId: string) =>
-  defHttp.get<ConversationLogDetail>(
-    { url: `/agent-api/workflow/admin/app/${encodeURIComponent(appId)}/conversation-logs/${encodeURIComponent(threadId)}` },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const queryOwnerConversationLogDetail = (appId: string, threadId: string) =>
-  defHttp.get<ConversationLogDetail>(
-    { url: `/agent-api/workflow/app/${encodeURIComponent(appId)}/conversation-logs/${encodeURIComponent(threadId)}` },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-function buildConversationLogExportParams(query: ConversationLogQuery) {
-  const { pageNo: _pageNo, pageSize: _pageSize, ...filters } = query;
-  return new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '') as [string, string][]);
-}
-
-async function downloadConversationLogs(path: string, query: ConversationLogQuery) {
-  const response = await fetch(`${path}?${buildConversationLogExportParams(query).toString()}`, {
-    headers: agentAuthHeaders({ Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-  });
-  if (!response.ok) {
-    let detail = `导出失败：${response.status}`;
-    try { detail = String((await response.json())?.detail || detail); } catch { /* keep fallback */ }
-    throw new Error(detail);
-  }
-  const blob = await response.blob();
-  const filename = response.headers.get('content-disposition')?.match(/filename="([^\"]+)"/i)?.[1] || 'agent-conversation-logs.xlsx';
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename.replace(/[\\/:*?"<>|]/g, '_');
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-export const downloadAdminConversationLogs = (appId: string, query: ConversationLogQuery) =>
-  downloadConversationLogs(`/agent-api/workflow/admin/app/${encodeURIComponent(appId)}/conversation-logs/export`, query);
-
-export const downloadOwnerConversationLogs = (appId: string, query: ConversationLogQuery) =>
-  downloadConversationLogs(`/agent-api/workflow/app/${encodeURIComponent(appId)}/conversation-logs/export`, query);
-
-export const createWorkflowApp = (data: Partial<AiWorkflowApp>) =>
-  defHttp.post<AiWorkflowApp>({ url: Api.addApp, data }, RAW);
-
-export const updateWorkflowApp = (data: Partial<AiWorkflowApp>) =>
-  defHttp.put<AiWorkflowApp>({ url: Api.editApp, data }, RAW);
-
-export const deleteWorkflowApp = (id: string) =>
-  defHttp.delete({ url: Api.deleteApp, params: { id } }, { ...RAW, joinParamsToUrl: true });
-
-export const cancelPublishWorkflowApp = (id: string) =>
-  defHttp.post<AiWorkflowApp>({ url: Api.cancelPublishApp, params: { id } }, { ...RAW, joinParamsToUrl: true });
-
-export type WorkflowAppExportPackage = {
-  format: 'axiom.agent-app';
-  version: number;
-  app: {
-    aiAppType: AiWorkflowApp['aiAppType'];
-    name: string;
-    description?: string;
-    appCategory?: string;
-    appIcon?: string;
-    configJson?: string;
-  };
-  definition?: {
-    draftJson?: string | null;
-    publishedJson?: string | null;
-    publishedVersion?: number;
-  };
-};
-
-export const exportWorkflowAppPackage = (id: string) =>
-  defHttp.get<WorkflowAppExportPackage>({ url: Api.exportApp, params: { id } }, RAW);
-
-export const importWorkflowAppPackage = (file: File) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  return fetch(Api.importApp, {
-    method: 'POST',
-    headers: buildWorkflowAppUploadHeaders(getToken()),
-    body: formData,
-  }).then(async (response) => {
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      const detail = typeof data?.detail === 'string' ? data.detail : `导入失败：${response.status}`;
-      throw new Error(detail);
-    }
-    return data as AiWorkflowApp;
-  });
-};
-
-export const copyWorkflowApp = (id: string) =>
-  defHttp.post<AiWorkflowApp>({ url: Api.copyApp, params: { id } }, { ...RAW, joinParamsToUrl: true });
-
-export const queryWorkflowAppAcl = (appId: string) =>
-  defHttp.get<WorkflowAclItem[]>({ url: Api.appAclList, params: { appId } }, { ...RAW, errorMessageMode: 'none' });
-
-export const saveWorkflowAppAcl = (appId: string, items: WorkflowAclItem[]) =>
-  defHttp.put({ url: Api.appAclSave, data: { appId, items } }, RAW);
-
 export const queryWorkflowApp = (params: { appInfoId: string; aiAppType?: string }) =>
   defHttp.get<AiWorkflowApp>({ url: Api.queryApp, params }, { ...RAW, errorMessageMode: 'none' });
-
-export const saveWorkflowAppConfig = (data: Partial<AiWorkflowApp>) =>
-  defHttp.post<AiWorkflowApp>({ url: Api.saveAppConfig, data }, RAW);
 
 export const queryWorkflowDefinition = (params: { appInfoId?: string; appId?: string }) =>
   defHttp.get<AiWorkflowDefinition>({ url: Api.queryDefinition, params }, { ...RAW, errorMessageMode: 'none' });
 
 export const saveWorkflowDefinition = (data: { appId?: string; appInfoId?: string; workflowJson: string }) =>
   defHttp.post<AiWorkflowDefinition>({ url: Api.saveDefinition, data }, RAW);
-
-// 发布失败（含 400 校验拒绝）由编辑器展示结构化 problems，不走全局错误提示
-export const publishWorkflowDefinition = (data: { appId?: string; appInfoId?: string; workflowJson: string }) =>
-  defHttp.post<AiWorkflowDefinition>({ url: Api.publishDefinition, data }, { ...RAW, errorMessageMode: 'none' });
-
-// ---------- 发布审批 + 版本历史 + 后台管理（WS2/WS3/WS4） ----------
-
-export type WorkflowVersionItem = {
-  id: string;
-  appId: string;
-  versionNo: number;
-  aiAppType: string;
-  status: 'pending_review' | 'approved' | 'rejected' | 'cancelled' | 'archived' | string;
-  changeNote: string;
-  visibleRoleIds?: string[] | string;
-  visibleDeptIds?: string[] | string;
-  submittedBy?: string;
-  submittedByName: string;
-  submittedAt?: string;
-  reviewedBy?: string;
-  reviewedByName: string;
-  reviewedAt?: string;
-  reviewComment: string;
-  publishedAt?: string;
-  isLive?: boolean;
-  appName?: string;
-  ownerUserId?: string;
-  ownerUsername?: string;
-  definitionJson?: string;
-  configJson?: string;
-  routeMetadata?: RouteMetadata | null;
-};
-
-export type WorkflowReviewSummary = {
-  versionId: string;
-  versionNo: number;
-  status: 'pending_review' | 'rejected';
-  submittedAt?: string | null;
-  reviewedAt?: string | null;
-  reviewedByName?: string;
-  reviewComment?: string;
-};
-
-/** 发布弹窗可选路由元数据（语义发现升级）：随版本冻结，审核通过后进入主对话候选召回 */
-export type RouteMetadata = {
-  routeDescription?: string;
-  triggerExamples?: string[];
-  negativeExamples?: string[];
-  tags?: string[];
-};
-
-export type SubmitReviewResult = {
-  version: WorkflowVersionItem;
-  approvalRequired: boolean;
-  /** 审批开启但提交者本人就是审核员：后端直接上线，不进待审队列 */
-  autoApproved?: boolean;
-  message: string;
-};
-export type MyCapabilities = {
-  isReviewer: boolean;
-  isPlatformAdmin: boolean;
-  approvalRequired: boolean;
-  /** 当前用户提交发布会被自动通过（审核员本人） */
-  selfPublishAutoApproved?: boolean;
-};
-export type AdminAppItem = Omit<AiWorkflowApp, 'aiAppType'> & {
-  aiAppType: AiWorkflowApp['aiAppType'] | 'builtin';
-  ownerUsername?: string;
-  catalogAppId?: string;
-  builtinPreset?: string;
-  entryPath?: string;
-  createdAt?: string;
-};
-export type WorkflowAdminAuditItem = {
-  id: string;
-  action: string;
-  actorUsername: string;
-  targetUserId?: string;
-  reason?: string;
-  createdAt?: string;
-};
-export type AdminAppDetail = {
-  app: AdminAppItem;
-  summary: {
-    model: string;
-    nodeTypes: string[];
-    dependencyIds: string[];
-    publishedVersion: number;
-    liveVersion?: { versionNo: number; status: string; changeNote: string } | null;
-  };
-  audits: WorkflowAdminAuditItem[];
-  versions?: WorkflowVersionItem[];
-};
-export type WorkflowVersionDiff = {
-  baseVersionNo: number;
-  targetVersionNo: number;
-  changedFields: string[];
-  base: Record<string, unknown>;
-  target: Record<string, unknown>;
-};
-
-/** 提交发布审核（强制审批：进入待审队列，不即时上线）。400 + problems 由编辑器阻断展示 */
-export const submitWorkflowReview = (data: {
-  appId?: string;
-  appInfoId?: string;
-  workflowJson: string;
-  changeNote?: string;
-  visibleRoleIds?: string[] | string;
-  visibleDeptIds?: string[] | string;
-  routeMetadata?: RouteMetadata;
-}) =>
-  defHttp.post<SubmitReviewResult>({ url: '/agent-api/workflow/definition/submitReview', data }, { ...RAW, errorMessageMode: 'none' });
-
-export type AgentApiKeyItem = {
-  id: string;
-  name: string;
-  prefix: string;
-  /** Returned only by the publisher-authenticated key management endpoints. */
-  secret?: string | null;
-  status: string;
-  expiresAt?: string | null;
-  lastUsedAt?: string | null;
-  revokedAt?: string | null;
-  createdAt?: string | null;
-};
-
-export type AgentApiKeyCreated = Pick<AgentApiKeyItem, 'id' | 'name' | 'prefix' | 'expiresAt'> & { secret: string };
-export type AgentEmbedKeyItem = AgentApiKeyItem & { origin: string };
-export type AgentEmbedKeyCreated = Pick<AgentEmbedKeyItem, 'id' | 'name' | 'prefix' | 'origin'> & { secret: string };
-export type AgentPublicConfiguration = { apiEnabled: boolean; iframeEnabled: boolean };
-
-export type AgentApiUsageItem = {
-  id: string;
-  versionId: string;
-  keyId: string;
-  source: 'openai' | 'embed' | string;
-  status: string;
-  httpStatus?: number | null;
-  durationMs?: number | null;
-  inputTokens?: number | null;
-  outputTokens?: number | null;
-  reasoningTokens?: number | null;
-  usageKnown: boolean;
-  providerAmountRaw?: string | null;
-  providerAmountUnit?: string | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-  errorCode?: string | null;
-};
-
-export const listAgentApiKeys = (appId: string) =>
-  defHttp.get<{ items: AgentApiKeyItem[] }>(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/api-keys` },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const createAgentApiKey = (appId: string, name: string) =>
-  defHttp.post<AgentApiKeyCreated>(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/api-keys`, data: { name } },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const updateAgentApiKeyStatus = (appId: string, keyId: string, enabled: boolean) =>
-  defHttp.patch(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/api-keys/${encodeURIComponent(keyId)}/status`, data: { enabled } },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const deleteAgentApiKey = (appId: string, keyId: string) =>
-  defHttp.delete(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/api-keys/${encodeURIComponent(keyId)}` },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const listAgentEmbedKeys = (appId: string) =>
-  defHttp.get<{ items: AgentEmbedKeyItem[] }>(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/embed-keys` },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const createAgentEmbedKey = (appId: string, name: string, origin: string) =>
-  defHttp.post<AgentEmbedKeyCreated>(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/embed-keys`, data: { name, origin } },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const updateAgentEmbedKeyStatus = (appId: string, keyId: string, enabled: boolean) =>
-  defHttp.patch(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/embed-keys/${encodeURIComponent(keyId)}/status`, data: { enabled } },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const deleteAgentEmbedKey = (appId: string, keyId: string) =>
-  defHttp.delete(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/embed-keys/${encodeURIComponent(keyId)}` },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const getAgentPublicConfiguration = (appId: string) =>
-  defHttp.get<AgentPublicConfiguration>(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/public-config` },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const updateAgentPublicConfiguration = (appId: string, data: AgentPublicConfiguration) =>
-  defHttp.put<AgentPublicConfiguration>(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/public-config`, data },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const queryAgentApiUsage = (appId: string, params?: { pageNo?: number; pageSize?: number }) =>
-  defHttp.get<{ total: number; records: AgentApiUsageItem[] }>(
-    { url: `/agent-api/workflow/apps/${encodeURIComponent(appId)}/api-usage`, params },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const queryWorkflowVersionPage = (params: { appId: string; pageNo?: number; pageSize?: number }) =>
-  defHttp.get<WorkflowPageResult<WorkflowVersionItem> & { liveVersion: number }>(
-    { url: '/agent-api/workflow/version/page', params },
-    { ...RAW, errorMessageMode: 'none' }
-  );
-
-export const queryWorkflowVersionDetail = (id: string) =>
-  defHttp.get<WorkflowVersionItem>({ url: '/agent-api/workflow/version/detail', params: { id } }, { ...RAW, errorMessageMode: 'none' });
-
-/** 所有者恢复一个已通过历史版本；服务端会创建新的线上版本号并保留回滚审计。 */
-export const rollbackWorkflowVersion = (appId: string, versionNo: number) =>
-  defHttp.post<{ message: string; liveVersion: number }>(
-    { url: '/agent-api/workflow/version/rollback', data: { appId, versionNo } },
-    { ...RAW, errorMessageMode: 'none' }
-  );
-
-export const queryMyCapabilities = () =>
-  defHttp.get<MyCapabilities>({ url: '/agent-api/workflow/me/capabilities' }, { ...RAW, errorMessageMode: 'none' });
-
-// 审核台（审核员）
-export const queryReviewPage = (params: { pageNo?: number; pageSize?: number; status?: string; aiAppType?: string; keyword?: string }) =>
-  defHttp.get<WorkflowPageResult<WorkflowVersionItem>>({ url: '/agent-api/workflow/review/page', params }, { ...RAW, errorMessageMode: 'none' });
-
-export const approveReview = (versionId: string, comment?: string) =>
-  defHttp.post({ url: '/agent-api/workflow/review/approve', data: { versionId, comment } }, { ...RAW, errorMessageMode: 'none' });
-
-export const rejectReview = (versionId: string, comment: string) =>
-  defHttp.post({ url: '/agent-api/workflow/review/reject', data: { versionId, comment } }, { ...RAW, errorMessageMode: 'none' });
-
-export const cancelReview = (versionId: string) =>
-  defHttp.post({ url: '/agent-api/workflow/review/cancel', data: { versionId } }, { ...RAW, errorMessageMode: 'none' });
-
-// 后台跨用户管理（平台管理员）
-export const queryAdminAppPage = (params: {
-  pageNo?: number;
-  pageSize?: number;
-  keyword?: string;
-  aiAppType?: string;
-  aiAppTypes?: string;
-  status?: string;
-  ownerUserId?: string;
-}) => defHttp.get<WorkflowPageResult<AdminAppItem>>({ url: '/agent-api/workflow/admin/app/page', params }, { ...RAW, errorMessageMode: 'none' });
-
-export const adminUnpublishApp = (id: string) =>
-  defHttp.post<AdminAppItem>({ url: '/agent-api/workflow/admin/app/unpublish', params: { id } }, { ...RAW, joinParamsToUrl: true });
-
-export const adminDeleteApp = (id: string) =>
-  defHttp.delete({ url: '/agent-api/workflow/admin/app/delete', params: { id } }, { ...RAW, joinParamsToUrl: true });
-
-export const adminRollbackApp = (appId: string, versionNo: number) =>
-  defHttp.post({ url: '/agent-api/workflow/admin/app/rollback', data: { appId, versionNo } }, { ...RAW, errorMessageMode: 'none' });
-
-export const queryAdminAppDetail = (appId: string) =>
-  defHttp.get<AdminAppDetail>(
-    { url: `/agent-api/workflow/admin/app/${encodeURIComponent(appId)}/detail` },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const queryAdminAppMetrics = (appId: string, range: MetricRange) =>
-  defHttp.get<WorkflowAppMetrics>(
-    { url: `/agent-api/workflow/admin/app/${encodeURIComponent(appId)}/metrics`, params: { range } },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const queryAdminVersionDiff = (appId: string, baseVersionNo: number, targetVersionNo: number) =>
-  defHttp.get<WorkflowVersionDiff>(
-    { url: `/agent-api/workflow/admin/app/${encodeURIComponent(appId)}/version-diff`, params: { baseVersionNo, targetVersionNo } },
-    { ...RAW, errorMessageMode: 'none' },
-  );
-
-export const adminRestoreApp = (appId: string, reason?: string) =>
-  defHttp.post({ url: '/agent-api/workflow/admin/app/restore', data: { appId, reason } }, { ...RAW, errorMessageMode: 'none' });
-
-export const adminTransferAppOwner = (data: {
-  appId: string;
-  targetUserId: string;
-  retainPreviousOwnerAsEditor: boolean;
-  reason?: string;
-}) => defHttp.post({ url: '/agent-api/workflow/admin/app/transfer-owner', data }, { ...RAW, errorMessageMode: 'none' });
 
 export const debugWorkflowDefinition = (data: {
   appId?: string;
@@ -858,13 +320,6 @@ export const generateWorkflowPrompt = (data: {
   { ...RAW, errorMessageMode: 'none' },
 );
 
-export const executeWorkflowDefinition = (data: {
-  appId?: string;
-  appInfoId?: string;
-  input?: string;
-  variables?: Recordable;
-}) => defHttp.post<WorkflowRunResponse>({ url: Api.executeDefinition, data }, RAW);
-
 /** 恢复交互挂起的运行（userSelect 传选项 value，formInput 传对象） */
 export const resumeWorkflowDefinition = (data: {
   appId?: string;
@@ -875,42 +330,6 @@ export const resumeWorkflowDefinition = (data: {
   resumeId: string;
   value: string | Recordable;
 }) => defHttp.post<WorkflowRunResponse>({ url: '/agent-api/workflow/definition/resume', data }, RAW);
-
-export type McpDiscoveredTool = { name: string; description: string; inputSchema: Recordable };
-
-/** 服务端连接外部 MCP Server 并解析工具清单（含 SSRF 防护） */
-export const discoverMcpTools = (data: { url: string; headers?: Record<string, string> }) =>
-  defHttp.post<{ tools: McpDiscoveredTool[] }>(
-    { url: '/agent-api/workflow/tool/mcp/discover', data },
-    { ...RAW, errorMessageMode: 'none' }
-  );
-
-export type HttpToolTestResult = {
-  ok: boolean;
-  statusCode: number;
-  durationMs: number;
-  headers: Record<string, string>;
-  body: string;
-  truncated: boolean;
-};
-
-export async function testHttpToolRequest(data: {
-  config: HttpToolSetConfig;
-  toolName: string;
-  values: Record<string, unknown>;
-  files: Record<string, File>;
-}): Promise<HttpToolTestResult> {
-  const response = await fetch('/agent-api/workflow/tool/http/test', {
-    method: 'POST',
-    headers: buildWorkflowAppUploadHeaders(getToken()),
-    body: buildHttpToolTestFormData(data.config, data.toolName, data.values, data.files),
-  });
-  const result = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(typeof result?.detail === 'string' ? result.detail : `测试请求失败（HTTP ${response.status}）`);
-  }
-  return result as HttpToolTestResult;
-}
 
 // ---------- 四 Tab 节点模板目录（蓝本两阶段协议：摘要列表 + previewNode） ----------
 
