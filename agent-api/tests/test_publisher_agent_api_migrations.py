@@ -75,8 +75,15 @@ def test_publisher_api_orm_exposes_release_key_invocation_and_attribution_contra
     )
     from app.runtime_models import AgentModelAttemptAudit, AgentModelLogicalCall
 
-    assert MYSQL_SCHEMA_HEAD == "mysql_0021_external_session_fix"
-    assert RUNTIME_SCHEMA_HEAD == "runtime_0023_eval_runs"
+    # 两条链的 head 常量与迁移文件是否一致由 tests/test_schema_head_sync.py 统一守，
+    # 这里不再钉具体 revision（每加一条迁移就得改一次）；只确认本测试关心的两条迁移
+    # 仍在链上、且 head 不落后于它们。
+    mysql_versions = Path(__file__).resolve().parents[1] / "migrations" / "versions" / "mysql"
+    chain = "\n".join(p.read_text(encoding="utf-8") for p in mysql_versions.glob("*.py"))
+    assert 'revision = "mysql_0021_external_session_fix"' in chain
+    assert f'down_revision = "{MYSQL_SCHEMA_HEAD}"' not in chain, "head 常量落后于迁移文件"
+    assert MYSQL_SCHEMA_HEAD.startswith("mysql_")
+    assert RUNTIME_SCHEMA_HEAD.startswith("runtime_")
     assert AgentApiAccessKey.__tablename__ == "agent_api_access_key"
     assert AgentApiInvocation.__tablename__ == "agent_api_invocation"
     assert "secret_ciphertext" in AgentApiAccessKey.__table__.c

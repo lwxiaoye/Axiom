@@ -76,17 +76,23 @@ async def test_no_usage_frame_without_context_window():
     assert not [f for f in _frames(payloads) if f.get("type") == "context.usage"]
 
 
-def test_agent_loop_emits_usage_only_on_tool_rounds():
-    """纯问答不多发帧：正文当场就在流，且会动到 c12b2f51 修过的那条路径。
+def test_agent_loop_emits_usage_every_round_not_only_tool_rounds():
+    """每轮 LLM 结束都发 actual usage，**不再**限定「有 tool_frags 的轮次」。
 
-    用源码断言这条约束（真跑一轮要整套 LLM 桩，成本远高于收益）：发用量的条件里
-    必须同时带上 tool_frags。
+    旧条件（只在工具轮发）会让多步任务的首轮规划/长思考期一直停在「0 tokens · 正在思考…」
+    ——首轮往往没有 tool_frags，一帧 actual 也发不出去。现役实现的主循环 usage 帧只看
+    usage_prompt_tokens > 0。用源码断言（真跑一轮要整套 LLM 桩，成本远高于收益）：
+    主循环那一处 yield 的直接守卫里不得再出现 tool_frags。
     """
     import inspect
 
     from app.services.agent_harness import model_driver
 
     src = inspect.getsource(model_driver)
-    idx = src.index('yield {"type": "usage"')
-    guard = src[max(0, idx - 400):idx]
-    assert "tool_frags" in guard, "发用量必须限定在有工具调用的轮次"
+    marker = "每轮 LLM 结束都发 actual usage"
+    assert marker in src, "主循环逐轮上报 usage 的注释锚点丢了——请同步更新本用例"
+    site = src.index('yield {"type": "usage"', src.index(marker))
+    guard_start = src.rfind("\n", 0, src.rfind("if ", 0, site))
+    guard = src[guard_start:site]
+    assert "usage_prompt_tokens > 0" in guard
+    assert "tool_frags" not in guard, "usage 帧不得再限定在有工具调用的轮次（首轮规划期会显示 0 tokens）"

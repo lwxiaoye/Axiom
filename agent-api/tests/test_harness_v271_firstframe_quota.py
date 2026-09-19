@@ -18,16 +18,21 @@ def test_accept_seeds_product_plan_not_lookup():
     assert accept.find("message_commentary") < accept.find("enqueue_job")
 
 
-def test_quota_failfast_no_plain_fallback():
+def test_plain_fallback_is_governed_by_runtime_policy_not_error_text():
+    # 旧版按「额度不足」错误文案决定不回退普通问答；现役由 RuntimePolicy.allow_plain_fallback
+    # 与 convert_loop_failure（内置助手把耗尽重试的失败改判为可读终态）统一裁定。
     src = _src("app/services/chat/main_tool_turn.py")
-    assert "模型额度不足，工具循环直接失败（不回退普通问答）" in src
-    assert "free quota exhausted" in src
+    assert "模型额度不足，工具循环直接失败（不回退普通问答）" not in src
+    assert "free quota exhausted" not in src
+    assert "if runtime_policy and not runtime_policy.allow_plain_fallback:" in src
+    assert "converted = await convert_loop_failure(runtime_policy, env, e)" in src
 
 
-def test_lookup_nudge_in_tool_loop():
+def test_lookup_nudge_retired_from_tool_loop():
+    # 「这是实时信息查询，先 search_web」关键词 nudge 已退役：检索与否由模型决定
     src = _src("app/services/agent_harness/model_driver.py")
-    assert "net_lookup_first_nudge" in src
-    assert "这是实时信息查询" in src
+    assert "net_lookup_first_nudge" not in src
+    assert "这是实时信息查询" not in src
 
 
 def test_weather_next_action():

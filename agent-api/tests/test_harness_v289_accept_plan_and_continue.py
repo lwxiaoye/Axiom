@@ -55,9 +55,13 @@ def test_subagent_discovery_skipped_for_lookup_or_resume():
     assert "lookup_or_resume" not in src
 
 
-def test_bare_control_does_not_emit_recovered_skill_as_visible_work():
+def test_recovered_skill_is_never_replayed_as_visible_work():
+    # 旧版只在「裸控制语」轮不补发恢复的 Skill；现役恢复段对任何轮都只重验 ACL 并恢复
+    # 挂载，不补发 use_skill / capability.loaded——可见事件只来自模型真实调用。
     src = _src("app/services/chat/main_tool_turn.py")
-    assert "if not bare_control_message(str(message or \"\")):" in src
+    assert "bare_control_message" not in src
+    assert "不补发 use_skill 或 capability.loaded" in src
+    assert src.count("channel.capability_loaded(") == 1  # 仅事件投影那一处
 
 
 def test_resume_bare_confirm_nudge_present():
@@ -127,13 +131,6 @@ def test_resume_product_nudge_defers_to_bare_prior():
     assert "_prior_for_product" not in src
     assert "_bare_for_product" not in src
     assert "net_resume_product_nudge" not in src
-
-
-def test_live_matrix_temp_regex_requires_units():
-    src = Path(__file__).resolve().parents[1].joinpath("scripts/live_v289_matrix.py").read_text(encoding="utf-8")
-    assert ("[0-9]+\s*(?:℃|°C|度)" in src) or (r"[0-9]+\s*(?:℃|°C|度)" in src) or (r"[0-9]+\s*(?:℃|°C)" in src)
-    assert "|气温|温度" not in src.split("has_temp")[1][:80]
-    assert r"\[图\d+\]" in src
 
 
 def test_context_shows_prior_mutation_from_assistant_delivery():

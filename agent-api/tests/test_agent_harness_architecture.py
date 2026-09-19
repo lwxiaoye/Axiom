@@ -14,6 +14,18 @@ _RETIRED_TERMS = {
     "runtime_v2_service", "task_graph", "run_code",
 }
 
+# 退役词在全仓扫描中的**唯一**合法落点。
+# `run_code` 退役的是主对话那条「run_code 工具/执行路径」；`code_runner.run_code()` 是沙箱
+# 执行内核（工作流「代码节点」经 workflow_engine 调它），与 test_legacy_tools_gone.py 里
+# 「execute_in_sandbox 内核函数 ≠ 暴露给模型的工具名」是同一个区分。除这两处外任何
+# 地方（尤其 services/chat、services/agent_harness）出现都视为回流。
+_RETIRED_TERM_ALLOWED_PATHS = {
+    "run_code": {
+        "services/sandbox/code_runner.py",
+        "services/workflows/workflow_engine.py",
+    },
+}
+
 
 def _python_sources():
     return [path for path in APP_ROOT.rglob("*.py") if "__pycache__" not in path.parts]
@@ -23,10 +35,14 @@ def test_retired_architecture_vocabulary_is_absent():
     sources = _python_sources()
     for term in _RETIRED_TERMS:
         matches = {}
+        allowed = _RETIRED_TERM_ALLOWED_PATHS.get(term, set())
         for path in sources:
+            rel = path.relative_to(APP_ROOT).as_posix()
+            if rel in allowed:
+                continue
             count = path.read_text(encoding="utf-8").count(term)
             if count:
-                matches[str(path.relative_to(APP_ROOT))] = count
+                matches[rel] = count
         assert not matches, f"retired term {term} returned: {matches}"
 
 

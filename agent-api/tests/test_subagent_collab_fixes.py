@@ -74,7 +74,12 @@ class _Client:
 
     def stream(self, *args, **kwargs):
         payload = kwargs.get("json") or {}
-        type(self).requests.append(payload.get("messages") or [])
+        # 未知模型缺省走 Responses 协议：工具回执在 payload["input"] 里是
+        # {"type": "function_call_output", "output": ...}；Chat Completions 才是
+        # messages 里的 role=tool。两种形状都收，断言只看回灌内容。
+        type(self).requests.append(
+            list(payload.get("messages") or []) + list(payload.get("input") or [])
+        )
         # 脚本耗尽时重放最后一条：主循环的收尾自查等额外往返对用例透明
         if not type(self).responses:
             return _Stream(type(self).last_response or [])
@@ -95,9 +100,13 @@ def _tool_messages() -> list:
         for m in messages:
             if m.get("role") == "tool":
                 content = str(m.get("content") or "")
-                if content not in seen:
-                    seen.add(content)
-                    out.append(content)
+            elif m.get("type") == "function_call_output":
+                content = str(m.get("output") or "")
+            else:
+                continue
+            if content not in seen:
+                seen.add(content)
+                out.append(content)
     return out
 
 
@@ -394,8 +403,9 @@ async def test_guard_rejected_call_emits_no_subagent_frames():
 
 @pytest.mark.asyncio
 async def test_repeated_guard_rejection_is_still_accounted():
-    """守卫短路不得绕开止损记账：同一个被拒调用反复来，必须逐次计数并最终给出
-    「不要再原样重试」的硬提示（否则模型可以对护栏无限重试到轮次熔断）。"""
+    """守卫短路每次都如实回执、逐次记账，但**不再升级成「不要再原样重试」的硬提示**：
+    Harness 规范下同错重试只记指标、不收窄模型的策略空间（精确 precheck 才是唯一的闸）。
+    这里钉住：每次被拒都拿到同一句护栏回执、一帧 tool_started 都不发、模型自己停手后正常收尾。"""
     async def _stream(sid, task, fids, extras):
         yield {"type": "result", "status": "succeeded", "text": "ok"}
 
@@ -413,13 +423,19 @@ async def test_repeated_guard_rejection_is_still_accounted():
             model="m", api_key="k", user_input="换个人", tools=[tool])]
 
     fed = "\n".join(_tool_messages())
-    assert "不要再原样重试" in fed, "护栏连拒多次却没有升级提示，模型会一直撞同一堵墙"
+    assert "一次任务只能使用一个子智能体" in fed
+    assert "不要再原样重试" not in fed, "同错重试是 observation 不是闸，不得再注入升级提示"
     assert "tool_started" not in [e.get("type") for e in events]
+    # 每一轮被拒都真的走到了模型（没有被熔断提前收尾）：被拒轮数 + 最后的收尾轮
+    assert len(_Client.requests) == model_driver.LoopState.SAME_ERROR_MAX + 2
+    final = next(e for e in events if e.get("type") == "final")
+    assert final["answer"] == "只能用一个子智能体。"
 
 
 @pytest.mark.asyncio
-async def test_repeated_guard_rejection_hard_disables_tool():
-    """护栏连拒达到硬上限后必须物理停用工具，不能只继续劝模型换参数。"""
+async def test_repeated_guard_rejection_does_not_hard_disable_tool():
+    """护栏连拒即便超过旧的硬上限也**不物理停用**工具：停用会让「换一个合法参数再调」也失效，
+    而 precheck 本身已经保证非法调用零副作用。模型拿到的始终是那句护栏回执。"""
     async def _stream(sid, task, fids, extras):
         yield {"type": "result", "status": "succeeded", "text": "ok"}
 
@@ -439,9 +455,11 @@ async def test_repeated_guard_rejection_hard_disables_tool():
             model="m", api_key="k", user_input="换人", tools=[tool])]
 
     fed = "\n".join(_tool_messages())
-    assert "本轮已停用" in fed
-    assert "已在本轮停用" in fed
+    assert "本轮已停用" not in fed
+    assert "已在本轮停用" not in fed
+    assert "一次任务只能使用一个子智能体" in fed
     assert "tool_started" not in [e.get("type") for e in events]
+    assert len(_Client.requests) == model_driver.LoopState.SAME_ERROR_HARD_MAX + 2
 
 
 @pytest.mark.asyncio

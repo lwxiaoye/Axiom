@@ -65,6 +65,26 @@ def test_srcset_images_are_all_embedded():
     assert text.count("data:image/webp;base64,") == 2
 
 
+def test_image_mime_does_not_depend_on_system_mimetypes_table(monkeypatch):
+    """容器里没有 /etc/mime.types、Python 3.11 也不内置 .webp/.apng/.jfif：不能把图片内嵌成
+    application/octet-stream（<source>/srcset 不会对 octet-stream 做图片嗅探）。"""
+    import mimetypes
+
+    from app.services.files import html_artifact_service
+
+    monkeypatch.setattr(mimetypes, "guess_type", lambda *_a, **_k: (None, None))
+    html = (
+        '<img src="a.webp"><img src="b.apng"><img src="c.jfif"><img src="d.svg">'
+        '<img src="e.png?v=1#x">'
+    )
+    files = {"a.webp": b"1", "b.apng": b"2", "c.jfif": b"3", "d.svg": b"4", "e.png": b"5"}
+    text = html_artifact_service.bundle_html_images(html, files).data.decode("utf-8")
+
+    assert "application/octet-stream" not in text
+    for mime in ("image/webp", "image/apng", "image/jpeg", "image/svg+xml", "image/png"):
+        assert f"data:{mime};base64," in text
+
+
 def test_handles_unquoted_img_src_but_does_not_rewrite_script_text():
     html = """<img src=photo.jpg>
     <div style="background:url(photo.jpg)"></div>

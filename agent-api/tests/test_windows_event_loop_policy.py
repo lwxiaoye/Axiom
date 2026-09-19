@@ -17,7 +17,10 @@ class WindowsEventLoopPolicyTest(unittest.TestCase):
                 str(run.ROOT / "data" / ".connector_key"),
             )
 
-    def test_run_script_derives_isolated_local_runtime_database(self):
+    def test_run_script_derives_runtime_database_from_checkpoint_url(self):
+        """RUNTIME_DATABASE_URL 未显式设置时从 checkpoint 地址派生**同实例**的 `agent_runtime`
+        库（README / migrations/README / 本地热更新开发工作流 同一口径）；不再派生 `_local`
+        后缀——「本机运行不意味着使用本机数据库」，库名不该暗示隔离。"""
         import dotenv
         import run
 
@@ -38,8 +41,9 @@ class WindowsEventLoopPolicyTest(unittest.TestCase):
 
             self.assertEqual(
                 os.environ.get("RUNTIME_DATABASE_URL"),
-                "postgresql+psycopg://langgraph:test@127.0.0.1:5432/agent_runtime_local",
+                f"postgresql+psycopg://langgraph:test@127.0.0.1:5432/{run.LOCAL_RUNTIME_DB_NAME}",
             )
+            self.assertEqual(run.LOCAL_RUNTIME_DB_NAME, "agent_runtime")
 
     def test_run_script_starts_and_stops_local_worker_with_api(self):
         import run

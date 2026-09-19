@@ -378,12 +378,20 @@ async def test_accept_delivery_followup_inherits_ppt_profile_and_skill_ids(monke
     ppt_skill_id = "extract_34dbff5e54c84a2e89e6bb13cb8dcd1e"
     service = HarnessOrchestrator()
 
-    async def _ensure_thread(_thread_id, _user_id, *, origin=None):
-        _ = origin
+    async def _ensure_thread(_thread_id, _user_id, *, origin=None, workspace_folder_id=None):
+        _ = (origin, workspace_folder_id)
         return "thread-ppt"
 
     async def _prepare_chat(_user_id, model):
         return "key", model or "model"
+
+    async def _thread_models(_user_id, _thread_id):
+        # accept_harness_run 在 _ensure_thread 之后还会读线程的粘性模型/预设/工作文件夹（走库）
+        return {}
+
+    async def _record_thread_model(_user_id, _thread_id, _model, *, update_setting):
+        # 受理成功后把本次 Run 模型记回线程（走库），本用例不关心
+        _ = update_setting
 
     async def _load_profile(**kwargs):
         captured["profile_lookup"] = kwargs
@@ -429,6 +437,8 @@ async def test_accept_delivery_followup_inherits_ppt_profile_and_skill_ids(monke
 
     monkeypatch.setattr(runtime_db, "runtime_enabled", lambda: True)
     monkeypatch.setattr(service, "_ensure_thread", _ensure_thread)
+    monkeypatch.setattr(service, "get_thread_model_setting", _thread_models)
+    monkeypatch.setattr(service, "_record_thread_run_model", _record_thread_model)
     monkeypatch.setattr(service, "prepare_chat", _prepare_chat)
     monkeypatch.setattr(run_store, "load_latest_finalized_execution_profile_source", _load_profile)
     monkeypatch.setattr(run_store, "initialize_run_state", _true)

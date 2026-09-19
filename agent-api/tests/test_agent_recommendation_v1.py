@@ -73,7 +73,9 @@ def test_negative_example_veto_is_not_embedded_as_a_positive_signal():
     assert "negative_penalty" not in signals
 
 
-def test_visibility_uses_database_tenant_acl_and_owner_semantics():
+def test_visibility_uses_database_tenant_acl_and_owner_semantics(monkeypatch):
+    from app.services.agents import published_visibility
+
     user = _user()
     base = dict(
         user=user, tenant_id="1000", owner_user_id="other",
@@ -87,9 +89,13 @@ def test_visibility_uses_database_tenant_acl_and_owner_semantics():
     assert index._visibility_allows(
         **{**base, "role_ids": ["r1"], "user_roles": {"r1"}}, internal_workflow=True,
     ) is True
-    assert index._visibility_allows(
-        **{**base, "tenant_id": "2000", "owner_user_id": "u1"}, internal_workflow=True,
-    ) is False
+    # 跨租户：AGENT_WORKFLOW_TENANT_ISOLATION_ENABLED 缺省 False（临时允许跨租户命中发布 ACL），
+    # 此时 owner 本人跨租户仍可见；开关打开后回到严格隔离。两种语义都钉住。
+    cross_tenant = {**base, "tenant_id": "2000", "owner_user_id": "u1"}
+    monkeypatch.setattr(published_visibility.settings, "AGENT_WORKFLOW_TENANT_ISOLATION_ENABLED", False)
+    assert index._visibility_allows(**cross_tenant, internal_workflow=True) is True
+    monkeypatch.setattr(published_visibility.settings, "AGENT_WORKFLOW_TENANT_ISOLATION_ENABLED", True)
+    assert index._visibility_allows(**cross_tenant, internal_workflow=True) is False
 
 
 @pytest.mark.asyncio

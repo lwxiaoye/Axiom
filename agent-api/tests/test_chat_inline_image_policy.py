@@ -11,11 +11,14 @@ import app.services.chat.turn_context_builder as tcb
 
 
 def test_system_prompt_separates_chat_images_from_file_artifacts():
+    """基础提示词只区分「对话内容」与「文件产物」两种交付面，不再按中文关键词硬性规定
+    附图形式（旧的「普通问答不得自行配图 / 仅当本轮在做演示文稿」硬规则已随 Harness
+    规范退役）。附图与 download_url 的分工现在由工具描述和 search_web 回执承担，
+    见本文件其余用例。"""
     src = Path(tcb.__file__).read_text(encoding="utf-8")
-    assert "对话附图 vs 文件产物" in src
-    assert "普通问答不得自行配图" in src
-    assert "仅当本轮在做演示文稿" in src
-    assert "产物素材不进对话附图" in src
+    assert "对话内容与文件产物" in src
+    assert "平台不按中文关键词强制下载、检索顺序、文件工具或附图形式" in src
+    assert "普通问答不得自行配图" not in src, "关键词硬规则已退役，不要加回基础提示词"
 
 
 def test_delivery_summary_is_natural_instead_of_fixed_three_sections():

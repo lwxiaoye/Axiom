@@ -597,7 +597,7 @@ async def test_connect_store_and_mount_roundtrip(monkeypatch):
     """
     from sqlalchemy import delete
 
-    from app.core.database import async_session
+    from app.core.database import async_session, engine
     from app.models import ConnectorBinding
 
     user_id = "test-connector-user"
@@ -662,6 +662,10 @@ async def test_connect_store_and_mount_roundtrip(monkeypatch):
         assert await connector_tools.build_connector_tools(user_id=user_id) == []
     finally:
         await _cleanup()
+        # pytest-asyncio 每个用例一个事件循环，aiomysql 连接不能跨循环复用：不 dispose 的话
+        # 池里绑定在本循环的连接会被后续用例（如 test_skill_ownership）拿到，报
+        # 「Future attached to a different loop」。与 test_skill_ownership 同款收尾。
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

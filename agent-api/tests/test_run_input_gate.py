@@ -17,7 +17,17 @@ def _user() -> UserContext:
 
 @pytest.fixture(autouse=True)
 def _isolate_storage(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api import router as api
     from app.services.agent_harness import plan_store, run_store
+
+    # 端点先校验「该 Run 所属线程归当前用户、且不是面试线程」（走库）；本文件只测输入闸，
+    # 线程访问按普通主对话线程打桩。
+    async def thread_access(_user, _thread_id, **_kwargs):
+        return SimpleNamespace(origin=None, user_id="u1", app_id=None)
+
+    monkeypatch.setattr(api.builtin_app_access, "require_thread_access", thread_access)
 
     async def get_state(_run_id):
         return {"version": 3, "state": {"goal_revision": 0}}

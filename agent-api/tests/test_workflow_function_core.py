@@ -622,9 +622,14 @@ def test_runtime_migration_has_exclusive_owner_not_fake_run():
     sql = str(CreateTable(AgentToolResultBlob.__table__).compile(dialect=postgresql.dialect()))
     assert "workflow_execution_id" in sql and "ck_tool_result_execution_owner" in sql
     assert "fk_agent_tool_result_blob_run" in sql
-    assert RUNTIME_SCHEMA_HEAD == "runtime_0020_workflow_results"
-    migration = Path(__file__).resolve().parents[1] / "migrations/versions/runtime/0020_workflow_tool_results.py"
+    # head 常量与迁移文件的一致性由 tests/test_schema_head_sync.py 统一守；这里不钉具体
+    # revision（每加一条迁移就红一次），只确认本测试关心的迁移仍在链上、head 不落后于它。
+    runtime_versions = Path(__file__).resolve().parents[1] / "migrations/versions/runtime"
+    chain = "\n".join(p.read_text(encoding="utf-8") for p in runtime_versions.glob("*.py"))
+    assert f'down_revision = "{RUNTIME_SCHEMA_HEAD}"' not in chain, "head 常量落后于迁移文件"
+    migration = runtime_versions / "0020_workflow_tool_results.py"
     source = migration.read_text()
+    assert 'revision = "runtime_0020_workflow_results"' in source
     assert 'down_revision = "runtime_0019_prompt_history"' in source
     assert "CREATE TABLE" not in source
 

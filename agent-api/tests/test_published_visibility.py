@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
@@ -12,7 +11,7 @@ from sqlalchemy.ext.compiler import compiles
 
 from app.core.auth import UserContext
 from app.core.database import Base
-from app.models import WorkflowApp, WorkflowDefinition, WorkflowVersion
+from app.models import SysUserRole, WorkflowApp, WorkflowDefinition, WorkflowVersion
 from app.services.agents import published_visibility, subagent_service
 from app.services.agents.published_visibility import publish_visibility_allows_user
 
@@ -153,9 +152,9 @@ def _user(uid="u1", roles=None, depts=None, tenant="0"):
 async def sf(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
+        # sys_user_role / sys_user_depart 已是 ORM 模型（SysUserRole/SysUserDepart），
+        # create_all 一并建表，不再手写 CREATE TABLE。
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("CREATE TABLE sys_user_role (user_id TEXT, role_id TEXT)"))
-        await conn.execute(text("CREATE TABLE sys_user_depart (user_id TEXT, dep_id TEXT)"))
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(subagent_service, "async_session", factory)
     yield factory
@@ -342,9 +341,7 @@ async def test_db_relation_ids_merge_into_matching(sf):
     """UserContext 里没有、但 sys_user_role/sys_user_depart 里有的关系也参与匹配。"""
     await _seed(sf, "rel-app", roles=["r-db"])
     async with sf() as s:
-        await s.execute(text(
-            "INSERT INTO sys_user_role (user_id, role_id) VALUES ('u1', 'r-db')"
-        ))
+        s.add(SysUserRole(id="ur-1", user_id="u1", role_id="r-db"))
         await s.commit()
     assert "rel-app" in await subagent_service.list_callable_subagent_ids(_user("u1"))
 

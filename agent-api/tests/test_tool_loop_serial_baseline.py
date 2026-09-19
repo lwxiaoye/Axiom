@@ -117,20 +117,11 @@ class ToolLoopSerialBaselineTests(unittest.IsolatedAsyncioTestCase):
         for event in (e for e in events if e["type"] == "tool_result"):
             self.assertNotIn("model_content", event["observation"])
             ToolObservation.model_validate(event["observation"])
-        commentaries = [
-            (i, e["text"]) for i, e in enumerate(events) if e["type"] == "commentary"
-        ]
-        # 首轮模型静默时才根据已提交动作补一句开场。下一轮直接给最终回答时，
-        # 最终回答本身已经承接工具结果，不再额外插固定“阶段说明”。
-        self.assertEqual(len(commentaries), 1)
-        self.assertTrue(commentaries[0][1].strip())
-        last_result_index = max(
-            i for i, e in enumerate(events) if e["type"] == "tool_result"
-        )
-        self.assertFalse(
-            any(e["type"] == "commentary" for e in events[last_result_index + 1:]),
-            "模型直接回答时不应再插平台固定播报",
-        )
+        # 主循环不再替静默的首轮合成开场白：开场由编排层的公开首句（generate_public_commentary）
+        # 在进入循环前给出；循环内的 commentary 只投影模型自己说的话。模型这里全程静默、
+        # 下一轮直接给最终回答，所以一条 commentary 都不该有（尤其不能在工具结果之后
+        # 再插平台固定播报）。
+        self.assertEqual([e for e in events if e["type"] == "commentary"], [])
         final = next(e for e in events if e["type"] == "final")
         self.assertEqual(final["answer"], "综合三个来源，结论如下。")
         self.assertEqual([t["status"] for t in final["trace"]], ["completed"] * 3)

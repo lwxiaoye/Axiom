@@ -37,7 +37,7 @@ def test_fill_xlsx_template_fills_placeholder_and_adjacent_blank_cell():
     source.save(source_stream)
 
     result, applied = _fill_xlsx_template(
-        source_stream.getvalue(), {"项目名称": "智能填表", "负责人": "王小明"}
+        source_stream.getvalue(), {"项目名称": "智能填表", "负责人": "王小明"}, {}
     )
 
     filled = load_workbook(BytesIO(result))

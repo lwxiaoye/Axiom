@@ -29,9 +29,9 @@ def test_accept_does_not_seed_lookup_plan():
 
 
 def test_loop_lookup_no_plan_seed():
+    # 主循环里 product / lookup 两条关键词分支（含「短事实检索只 nudge search_web」）整体
+    # 退役：不再按领域关键词 seed 任务板或 nudge 工具，计划投影只来自模型的 update_plan。
     src = _src("app/services/agent_harness/model_driver.py")
-    assert "短事实检索只 nudge search_web，不投影任务协作计划" in src
-    # product / lookup 分支并存；检索不走任务板 seed
-    assert "_needs_product" in src
-    assert "_needs_lookup" in src
-    assert "if _needs_product:" in src
+    assert "短事实检索只 nudge search_web，不投影任务协作计划" not in src
+    assert "_needs_product" not in src
+    assert "_needs_lookup" not in src
