@@ -10,6 +10,7 @@ import {
   isComposerReferenceKind,
 } from '../utils/composerBubbleAttachments';
 import { chatUploadFileError, isChatImageFile } from '../utils/chatUploadTypes';
+import { readUserScoped, writeUserScoped } from '../utils/userScopedStorage';
 import { limitFileSelection } from './filePicker';
 import {
   currentDraftUserId,
@@ -121,11 +122,12 @@ const PAUSE_INTENT_RE = /^(先)?(暂停|停一下|等一下|稍等|先别做|先
 const REPLACE_INTENT_RE = /(停止|结束|取消).{0,8}(重新|重来|新任务)|(推翻|从头).{0,5}(重做|开始)/;
 const NEW_TASK_INTENT_RE = /(另一个|另外一个|全新|无关).{0,8}(任务|问题|项目)/;
 
+// 「新对话默认模型」按登录用户作用域存（公用机换账号不能继承别人的模型选择）；
+// 键名与 ModelSelector.vue 的 STORAGE_KEY 一致，两处读写同一份。
 const DEFAULT_MODEL_STORAGE_KEY = 'agent-active-model';
 
 function readDefaultModel(): string {
-  if (typeof localStorage === 'undefined') return '';
-  return String(localStorage.getItem(DEFAULT_MODEL_STORAGE_KEY) || '');
+  return String(readUserScoped(DEFAULT_MODEL_STORAGE_KEY) || '');
 }
 
 
@@ -1182,9 +1184,8 @@ export function useCenterChat(options: UseCenterChatOptions) {
     activeModel.value = nextModel;
 
     if (!threadId) {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(DEFAULT_MODEL_STORAGE_KEY, nextModel);
-      }
+      // 未登录时 writeUserScoped 静默不写：默认模型只跟着账号走
+      writeUserScoped(DEFAULT_MODEL_STORAGE_KEY, nextModel);
       return;
     }
 

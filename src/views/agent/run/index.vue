@@ -325,6 +325,7 @@ import AttachmentCard from '../../peopleCenter/components/AttachmentCard.vue';
 import ImageLightbox from '../../peopleCenter/components/ImageLightbox.vue';
 import InteractiveFormFields from '../../peopleCenter/components/InteractiveFormFields.vue';
 import { stopProtocolLinkAtCjkPunctuation } from '../../peopleCenter/utils/markdownLinkify';
+import { readUserScoped, writeUserScoped } from '../../peopleCenter/utils/userScopedStorage';
 import EChartsOutputPreview from '../../workflow/editor/components/EChartsOutputPreview.vue';
 import { VariableInputEnum } from '../../workflow/core/constants';
 import { extractChartOutputs } from '../../workflow/shared/chartOutput';
@@ -674,6 +675,16 @@ function syncRuntimeVariableValues() {
   });
 }
 
+// 运行变量按登录用户作用域写 sessionStorage（见 peopleCenter/utils/userScopedStorage）：
+// 同一标签页换账号不能把别人填过的变量回填出来；退出登录随作用域一起清。
+function sessionStore(): Storage | null {
+  try {
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 function runtimeStorageKey(sessionId = activeSessionId.value) {
   return `agent-run:variables:${appId}:${sessionId || 'new'}`;
 }
@@ -686,7 +697,7 @@ function serializableRuntimeVariables() {
 
 function restoreRuntimeVariables() {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(runtimeStorageKey()) || '{}');
+    const saved = JSON.parse(readUserScoped(runtimeStorageKey(), sessionStore()) || '{}');
     runtimeVariableItems.value.forEach((variable) => {
       if (variable.type !== VariableInputEnum.password && Object.prototype.hasOwnProperty.call(saved, variable.key)) {
         runtimeVariableValues[variable.key] = saved[variable.key];
@@ -699,7 +710,7 @@ function restoreRuntimeVariables() {
 
 watch(runtimeVariableValues, () => {
   if (!appMeta.value) return;
-  try { sessionStorage.setItem(runtimeStorageKey(), JSON.stringify(serializableRuntimeVariables())); } catch { /* 可选缓存 */ }
+  writeUserScoped(runtimeStorageKey(), JSON.stringify(serializableRuntimeVariables()), sessionStore());
 }, { deep: true });
 
 function isMissingVariableValue(value: any) {
@@ -900,7 +911,7 @@ async function ensureSession(firstText: string, viewAtStart: number, sessionAtSt
   }
   if (sessionAtStart) return sessionAtStart;
   const s = await createRunSession(appId, firstText.slice(0, 30) || '新对话');
-  try { sessionStorage.setItem(runtimeStorageKey(s.id), JSON.stringify(serializableRuntimeVariables())); } catch { /* 可选缓存 */ }
+  writeUserScoped(runtimeStorageKey(s.id), JSON.stringify(serializableRuntimeVariables()), sessionStore());
   sessions.value.unshift(s);
   if (live.view.value === viewAtStart && !activeSessionId.value) {
     activeSessionId.value = s.id;

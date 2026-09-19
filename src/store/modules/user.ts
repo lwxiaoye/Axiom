@@ -19,6 +19,7 @@ import { isOAuth2AppEnv } from "/@/views/sys/login/useLogin";
 import { recordAuditEvent } from '/@/api/audit/audit.api';
 import { getUrlParam } from "@/utils";
 import { loginRedirectQuery, resolvePostLoginPath } from '/@/router/postLoginRedirect';
+import { clearUserScopedStorage, registerStorageUserIdGetter } from '/@/views/peopleCenter/utils/userScopedStorage';
 interface dictType {
   [key: string]: any;
 }
@@ -281,8 +282,13 @@ export const useUserStore = defineStore({
     },
     /**
      * 退出登录
+     * @param goLogin 是否跳到登录页
+     * @param userInitiated 是否用户主动点「退出登录」。主动退出不带 redirect 回登录页：
+     *   校园公用机上下一个登录的往往是别人，把 A 最后停留的会话/助手页带给 B 会让 B 被
+     *   自动拽进 A 的会话（然后 404）。token 失效被踢（userInitiated=false）仍带回跳路径，
+     *   但只保留 pathname——query 里可能有别人的 thread id。
      */
-    async logout(goLogin = false) {
+    async logout(goLogin = false, userInitiated = false) {
       if (this.getToken) {
         try {
           await doLogout();
@@ -291,10 +297,10 @@ export const useUserStore = defineStore({
         }
       }
 
-      // let username:any = this.userInfo && this.userInfo.username;
-      // if(username){
-      //   removeAuthCache(username)
-      // }
+      // 客户端会话隔离（2026-09-19）：在 userInfo 被置空之前取 id，把这个账号写在
+      // localStorage / sessionStorage / IndexedDB 里的业务数据（默认模型、面试冲突提示、
+      // 子智能体运行变量、工作流本地备份、输入草稿）一并清掉。token 失效走的也是这里。
+      clearUserScopedStorage(resolveStorageUserId(this.getUserInfo));
 
       this.setToken('');
       setAuthCache(TOKEN_KEY, null);
@@ -324,7 +330,8 @@ export const useUserStore = defineStore({
         if (goLogin && router.currentRoute.value.path !== PageEnum.BASE_LOGIN) {
           await router.push({
             path: PageEnum.BASE_LOGIN,
-            query: loginRedirectQuery(router.currentRoute.value.fullPath),
+            // 主动退出不带 redirect；被踢只带 pathname（见 logout 注释）
+            query: userInitiated ? {} : loginRedirectQuery(router.currentRoute.value.path),
           });
         }
 
@@ -363,7 +370,7 @@ export const useUserStore = defineStore({
         title: t('sys.app.logoutTip'),
         content: t('sys.app.logoutMessage'),
         onOk: async () => {
-          await this.logout(true);
+          await this.logout(true, true);
         },
       });
     },
@@ -374,3 +381,19 @@ export const useUserStore = defineStore({
 export function useUserStoreWithOut() {
   return useUserStore(store);
 }
+
+/** 本机存储作用域用的用户 id：与 chatDrafts.currentDraftUserId 同口径（id → username），未登录为空串。 */
+function resolveStorageUserId(info: Partial<UserInfo> | null | undefined): string {
+  const anyInfo = (info || {}) as { id?: unknown; username?: unknown };
+  return String(anyInfo.id || anyInfo.username || '').trim();
+}
+
+// 把「当前用户 id」注入 userScopedStorage（该工具刻意不 import Pinia/路由，见其文件头）。
+// 本模块在路由守卫初始化时就已加载，早于任何业务页读写存储。
+registerStorageUserIdGetter(() => {
+  try {
+    return resolveStorageUserId(useUserStoreWithOut().getUserInfo);
+  } catch {
+    return ''; // Pinia 尚未安装（极早期）：按未登录处理，不读不写
+  }
+});
