@@ -363,10 +363,18 @@ async def edit_skill(payload: SkillUpsertRequest, user: UserContext = Depends(cu
 
 
 @router.delete("/delete")
-async def delete_skill(id: str, user: UserContext = Depends(current_user)):
+async def delete_skill(
+    id: Optional[str] = None,
+    skillId: Optional[str] = None,
+    user: UserContext = Depends(current_user),
+):
+    # 老调用方传 id，Skill 广场按目录契约传 skillId——两个都认，缺了才 422
+    target = (skillId or id or "").strip()
+    if not target:
+        raise HTTPException(422, "缺少 skillId")
     async with async_session() as session:
         # 不存在与不可见同为 404（不再对不存在的 id 返回 success：那会让「删别人的」看起来像成功了）
-        skill = await _get_visible_skill(session, id, user.user_id)
+        skill = await _get_visible_skill(session, target, user.user_id)
         if not skill_catalog.can_delete(skill, user.user_id):
             raise HTTPException(403, "内置技能不可删除" if skill_catalog.is_builtin(skill) else "只能删除自己创建的技能")
         versions = (
