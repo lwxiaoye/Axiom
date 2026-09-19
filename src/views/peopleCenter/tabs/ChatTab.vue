@@ -641,6 +641,7 @@
       :agents="recommendedAgents"
       :loading="agentsLoading || restoringHistory"
       @start-chat="(agent) => emit('startAgent', agent)"
+      @view-all="emit('openAgentMarket')"
     />
 
     <ImageLightbox :src="lightboxSrc" @close="lightboxSrc = null" />
@@ -1081,6 +1082,8 @@ const emit = defineEmits<{
   (e: 'approve', messageId: number, approved: boolean): void;
   (e: 'startAgent', agent: AgentItem): void;
   (e: 'openAgent', app: any): void;
+  /** 推荐区「查看全部」→ 智能体板块 */
+  (e: 'openAgentMarket'): void;
 }>();
 
 const mentionOpen = ref(false);
@@ -1666,24 +1669,24 @@ function pickSkillFromMenu(item: SkillItem) {
 }
 
 .chat-intro .work-welcome-description {
-  max-width: 660px;
-  margin: 20px auto 0;
+  max-width: 640px;
+  margin: 14px auto 0;
   font-size: 14px;
-  line-height: 1.85;
+  line-height: 1.8;
   text-wrap: balance;
 }
 
 .work-welcome-description > span { display: block; }
-.work-welcome-primary { color: #707682; }
-.work-welcome-secondary { margin-top: 3px; color: #90949d; }
+.work-welcome-primary { color: var(--muted); }
+.work-welcome-secondary { margin-top: 2px; color: var(--faint); }
 
 .chat-home.work-welcome .chat-intro-hint {
-  margin-top: 14px;
+  margin-top: 10px;
   font-size: 12px;
-  color: #969aa3;
+  color: var(--faint);
 }
 
-.chat-home.work-welcome.empty-state .composer-dock { margin-top: 36px; }
+.chat-home.work-welcome.empty-state .composer-dock { margin-top: 32px; }
 
 @media (max-width: 600px) {
   .chat-home.work-welcome > .chat-intro { padding-inline: 8px; }

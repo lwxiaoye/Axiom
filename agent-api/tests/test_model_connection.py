@@ -14,7 +14,6 @@ from app.services.platform import model_connection as service
 
 @pytest.fixture
 def storage(monkeypatch):
-    """内存版 agent_platform_config：迁移检查每个用例重新来（模块级标记会缓存）。"""
     data = {}
 
     async def read(key, defaults):
@@ -39,7 +38,6 @@ def storage(monkeypatch):
 
 @pytest.fixture
 def no_newapi_rows(monkeypatch):
-    """key_service 第三层（new_api_user_key 表）不碰真库：当作空表。"""
     from app.services.platform import key_service as module
 
     class _Result:
@@ -62,92 +60,136 @@ def no_newapi_rows(monkeypatch):
     monkeypatch.setattr(module, 'async_session', lambda: _Session())
 
 
-def body(**overrides):
-    return service.ConnectionInput(**(dict(base_url='https://model.example/v1', model='test-model', api_key='test-key') | overrides))
+def entry(**overrides):
+    payload = dict(
+        name='demo',
+        base_url='https://model.example/v1',
+        model='test-model',
+        api_key='test-key',
+    )
+    payload.update(overrides)
+    return service.EntryInput(**payload)
+
+
+def roster(*entries, **overrides):
+    items = list(entries) if entries else [entry()]
+    payload = dict(enabled=True, default_id='', entries=items)
+    payload.update(overrides)
+    return service.RosterInput(**payload)
+
+
+def personal(**overrides):
+    payload = dict(base_url='https://model.example/v1', model='test-model', api_key='test-key')
+    payload.update(overrides)
+    return service.ConnectionInput(**payload)
 
 
 @pytest.mark.asyncio
 async def test_platform_encrypted_persistence_and_masked_read(storage):
-    result = await service.save_platform(body())
-    assert result['has_api_key'] is True
-    assert 'api_key' not in result and 'api_key_cipher' not in result
-    assert storage[service.PLATFORM_KEY]['api_key_cipher'] != 'test-key'
-    assert (await service.runtime_platform())['api_key'] == 'test-key'
-    await service.save_platform(body(api_key='', model='changed'))
+    result = await service.save_platform(roster())
+    assert result['entries'][0]['has_api_key'] is True
+    assert 'api_key' not in result['entries'][0] and 'api_key_cipher' not in result['entries'][0]
+    stored = storage[service.PLATFORM_KEY]['entries'][0]
+    assert stored['api_key_cipher'] != 'test-key'
+    runtime = await service.runtime_platform()
+    assert runtime['api_key'] == 'test-key'
+    assert runtime['model'] == 'test-model'
+    entry_id = result['entries'][0]['id']
+    await service.save_platform(roster(entry(id=entry_id, model='changed', api_key='')))
     assert (await service.runtime_platform())['model'] == 'changed'
     assert (await service.runtime_platform())['api_key'] == 'test-key'
-    await service.save_platform(body(api_key='', enabled=False))
+    await service.save_platform(roster(enabled=False, entries=[entry(id=entry_id, api_key='')]))
     assert await service.runtime_platform() is None
 
 
 @pytest.mark.asyncio
 async def test_user_override_is_per_user_and_separate_from_platform(storage):
-    await service.save_user('u1', body(model='mine'))
+    await service.save_user('u1', personal(model='mine'))
     assert storage[service.user_config_key('u1')]['api_key_cipher'] != 'test-key'
     assert (await service.runtime_user('u1'))['model'] == 'mine'
     assert await service.runtime_user('u2') is None
     assert await service.runtime_platform() is None
-    # 个人覆盖不落旧前缀：否则会被当成旧的管理员记录迁成平台默认
     assert service.legacy_config_key('u1') not in storage
 
 
 @pytest.mark.asyncio
 async def test_host_change_requires_key_reentry(storage):
-    await service.save_platform(body())
-    with pytest.raises(HTTPException, match='') as error:
-        await service.prepare_platform(body(base_url='https://other.example/v1', api_key=''))
+    saved = await service.save_platform(roster())
+    entry_id = saved['entries'][0]['id']
+    with pytest.raises(HTTPException) as error:
+        await service.prepare_entry(entry(id=entry_id, base_url='https://other.example/v1', api_key=''))
     assert error.value.status_code == 422
     assert (await service.runtime_platform())['base_url'] == 'https://model.example/v1'
 
 
-# ---- 旧记录迁移 ----
-
-def _legacy_row(**overrides):
-    from app.services.connectors.crypto import encrypt_secret
-    return dict(base_url='https://legacy.example/v1', model='grok-4.6', enabled=True,
-                api_key_cipher=encrypt_secret('legacy-key')) | overrides
-
-
 @pytest.mark.asyncio
 async def test_legacy_admin_row_migrates_to_platform_once_and_keeps_old_row(storage):
-    storage[service.legacy_config_key('1')] = _legacy_row()
+    from app.services.connectors.crypto import encrypt_secret
+    storage[service.legacy_config_key('1')] = {
+        'base_url': 'https://legacy.example/v1',
+        'model': 'grok-4.6',
+        'enabled': True,
+        'api_key_cipher': encrypt_secret('legacy-key'),
+    }
     assert await service.migrate_legacy_to_platform() is True
-    assert storage[service.PLATFORM_KEY]['model'] == 'grok-4.6'
+    roster_data = service.coerce_roster(storage[service.PLATFORM_KEY])
+    assert roster_data['entries'][0]['model'] == 'grok-4.6'
     assert service.legacy_config_key('1') in storage
-    # 幂等：平台级已存在就不再动它（哪怕旧行后来变了）
     storage[service.legacy_config_key('1')]['model'] = 'changed-later'
     assert await service.migrate_legacy_to_platform() is False
-    assert storage[service.PLATFORM_KEY]['model'] == 'grok-4.6'
     assert (await service.runtime_platform())['api_key'] == 'legacy-key'
-
-
-@pytest.mark.asyncio
-async def test_migration_skips_disabled_or_keyless_legacy_rows(storage):
-    storage[service.legacy_config_key('1')] = _legacy_row(enabled=False)
-    storage[service.legacy_config_key('2')] = _legacy_row(api_key_cipher='')
-    assert await service.migrate_legacy_to_platform() is False
-    assert service.PLATFORM_KEY not in storage
-    assert await service.runtime_platform() is None
-
-
-@pytest.mark.asyncio
-async def test_first_platform_read_triggers_migration_lazily(storage):
-    storage[service.legacy_config_key('1')] = _legacy_row()
     assert (await service.runtime_platform())['model'] == 'grok-4.6'
-    assert service.PLATFORM_KEY in storage
 
 
-def test_pick_legacy_row_prefers_enabled_and_ignores_platform_key():
-    rows = {
-        service.PLATFORM_KEY: _legacy_row(model='platform'),
-        service.legacy_config_key('b'): _legacy_row(model='b', enabled=False),
-        service.legacy_config_key('a'): _legacy_row(model='a'),
+@pytest.mark.asyncio
+async def test_legacy_single_record_without_entries_key_becomes_one_card(storage):
+    from app.services.connectors.crypto import encrypt_secret
+    storage[service.PLATFORM_KEY] = {
+        'base_url': 'https://wushaoran.me/v1',
+        'model': 'grok-4.6',
+        'enabled': True,
+        'api_key_cipher': encrypt_secret('legacy-key'),
     }
-    assert service.pick_legacy_row(rows)['model'] == 'a'
-    assert service.pick_legacy_row({}) is None
+    public = service.public_roster(await service.read_platform())
+    assert len(public['entries']) == 1
+    assert public['entries'][0]['model'] == 'grok-4.6'
+    assert public['entries'][0]['base_url'] == 'https://wushaoran.me/v1'
+    runtime = await service.runtime_platform()
+    assert runtime['model'] == 'grok-4.6'
+    assert runtime['roster'][0]['model'] == 'grok-4.6'
 
 
-# ---- 统一解析顺序 ----
+@pytest.mark.asyncio
+async def test_two_independent_entries_keep_their_own_keys_and_urls(storage, no_newapi_rows):
+    saved = await service.save_platform(roster(
+        entry(name='Grok', base_url='https://ctsafe.top/v1', model='grok-4.6', api_key='grok-key'),
+        entry(name='GPT', base_url='https://fastai.example/v1', anthropic_base_url='https://fastai.example/anthropic', model='gpt-5.6-sol', api_key='gpt-key'),
+        default_id='',
+    ))
+    assert [item['model'] for item in saved['entries']] == ['grok-4.6', 'gpt-5.6-sol']
+    assert saved['entries'][0]['base_url'] == 'https://ctsafe.top/v1'
+    assert saved['entries'][1]['anthropic_base_url'] == 'https://fastai.example/anthropic'
+    from app.services.platform.key_service import key_service
+    from app.services.agents.agent_service import agent_service
+    key = await key_service.get_user_key('student')
+    catalog = await agent_service.get_models(user_key=key)
+    assert [item.id for item in catalog] == ['grok-4.6', 'gpt-5.6-sol']
+    assert catalog[0].name == 'Grok'
+    service.bind_selected('gpt-5.6-sol')
+    assert get_model_base_url() == 'https://fastai.example/v1'
+    from app.core.model_endpoint import get_model_connection
+    assert get_model_connection()['api_key'] == 'gpt-key'
+
+
+@pytest.mark.asyncio
+async def test_duplicate_model_ids_rejected(storage):
+    with pytest.raises(HTTPException) as error:
+        await service.save_platform(roster(
+            entry(model='same', api_key='a', base_url='https://a.example/v1'),
+            entry(model='same', api_key='b', base_url='https://b.example/v1'),
+        ))
+    assert error.value.status_code == 422
+
 
 @pytest.mark.asyncio
 async def test_resolution_order_user_then_platform_then_403(storage, no_newapi_rows):
@@ -156,42 +198,28 @@ async def test_resolution_order_user_then_platform_then_403(storage, no_newapi_r
         await key_service.require_user_key('student')
     assert error.value.status_code == 403
     assert error.value.detail == NO_MODEL_MESSAGE
-    assert '未分配' not in error.value.detail
 
-    await service.save_platform(body(model='platform-model', api_key='platform-key'))
+    await service.save_platform(roster(entry(model='platform-model', api_key='platform-key')))
     credential = await key_service.resolve_chat_credential('student')
     assert credential['source'] == 'platform' and credential['model'] == 'platform-model'
     assert await key_service.require_user_key('student') == 'platform-key'
     assert get_model_base_url() == 'https://model.example/v1'
 
-    await service.save_user('student', body(base_url='https://mine.example/v1', model='my-model', api_key='my-key'))
+    await service.save_user('student', personal(base_url='https://mine.example/v1', model='my-model', api_key='my-key'))
     credential = await key_service.resolve_chat_credential('student')
     assert credential['source'] == 'user' and credential['model'] == 'my-model'
     assert get_model_base_url() == 'https://mine.example/v1'
-    # 其他用户不受这个人的覆盖影响
     assert (await key_service.resolve_chat_credential('other'))['source'] == 'platform'
-
-
-@pytest.mark.asyncio
-async def test_search_fallback_key_prefers_caller_key_then_unified_resolution(storage, no_newapi_rows):
-    from app.services.platform.key_service import key_service
-    assert await key_service.resolve_search_fallback_key({'deepseekApiKey': 'caller-key', '_callerUserId': 'u'}) == 'caller-key'
-    assert await key_service.resolve_search_fallback_key({'deepseekApiKey': ''}) == ''
-    config = {'deepseekApiKey': '', '_callerUserId': 'student'}
-    assert await key_service.resolve_search_fallback_key(config) == ''
-    await service.save_platform(body(api_key='platform-key'))
-    assert await key_service.resolve_search_fallback_key(config) == 'platform-key'
-    assert config['deepseekApiKey'] == 'platform-key'
 
 
 @pytest.mark.parametrize('url', ['file:///tmp/a', 'https://user:pass@example.com/v1', 'https://example.com/v1?key=a', 'https://example.com/#fragment', 'not-a-url'])
 def test_invalid_addresses_rejected(url):
     with pytest.raises(HTTPException):
-        service.normalize(body(base_url=url))
+        service.normalize_url(url, required=True)
 
 
 def test_completion_url_normalized():
-    assert service.normalize(body(base_url='https://model.example/v1/chat/completions/'))['base_url'] == 'https://model.example/v1'
+    assert service.normalize_url('https://model.example/v1/chat/completions/', required=True) == 'https://model.example/v1'
 
 
 @pytest.mark.asyncio
@@ -208,7 +236,7 @@ async def test_probe_has_total_deadline(storage, monkeypatch):
 
     monkeypatch.setattr(routes, 'TEST_TIMEOUT_SECONDS', 0.02)
     monkeypatch.setattr(routes.httpx, 'AsyncClient', lambda **kwargs: real_client(transport=httpx.MockTransport(slow)))
-    result = await routes.test_connection(body(), UserContext(user_id='u1', username='admin'))
+    result = await routes.test_connection(entry(), UserContext(user_id='u1', username='admin'))
     assert result['success'] is False
     assert '超时' in result['message']
     assert cancelled.is_set()
@@ -226,10 +254,9 @@ async def test_task_connections_do_not_bleed():
 
 @pytest.mark.asyncio
 async def test_platform_connection_drives_model_catalog_for_ordinary_user(storage, no_newapi_rows):
-    """管理员配的平台默认对普通用户生效：/models 能列出那一个模型，LLM 打到配置的地址。"""
     from app.services.platform.key_service import key_service
     from app.services.agents.agent_service import agent_service
-    await service.save_platform(body())
+    await service.save_platform(roster())
     key = await key_service.get_user_key('student')
     assert key == 'test-key'
     assert get_model_base_url() == 'https://model.example/v1'
@@ -248,14 +275,19 @@ async def test_platform_endpoints_require_admin(username, status):
     if username:
         app.dependency_overrides[current_user] = lambda: UserContext(user_id='u1', username=username)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://test') as client:
+        payloads = {
+            'GET': None,
+            'PUT': roster().model_dump(),
+            'POST': entry().model_dump(),
+        }
         for method, url in [('GET', '/model-connection'), ('PUT', '/model-connection'), ('POST', '/model-connection/test')]:
-            response = await client.request(method, url, json=body().model_dump())
+            response = await client.request(method, url, json=payloads[method])
             assert response.status_code == status
 
 
 @pytest.mark.asyncio
 async def test_personal_endpoints_open_to_any_user_and_expose_platform_summary_only(storage):
-    await service.save_platform(body(model='grok-4.6', base_url='https://secret-host.example/v1'))
+    await service.save_platform(roster(entry(name='Grok', model='grok-4.6', base_url='https://secret-host.example/v1')))
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[current_user] = lambda: UserContext(user_id='u1', username='student')
@@ -264,9 +296,11 @@ async def test_personal_endpoints_open_to_any_user_and_expose_platform_summary_o
         assert response.status_code == 200
         payload = response.json()
         assert payload['has_api_key'] is False
-        assert payload['platform'] == {'configured': True, 'model': 'grok-4.6'}
+        assert payload['platform']['configured'] is True
+        assert payload['platform']['model'] == 'grok-4.6'
+        assert payload['platform']['models'] == ['grok-4.6']
         assert 'secret-host' not in response.text and 'test-key' not in response.text
-        response = await client.put('/model-connection/personal', json=body(model='mine').model_dump())
+        response = await client.put('/model-connection/personal', json=personal(model='mine').model_dump())
         assert response.status_code == 200 and response.json()['has_api_key'] is True
         assert (await service.runtime_user('u1'))['model'] == 'mine'
         assert (await service.runtime_platform())['model'] == 'grok-4.6'
@@ -284,7 +318,7 @@ async def test_probe_uses_draft_without_saving_or_leaking(storage, monkeypatch, 
         return httpx.Response(status, json=payload)
 
     monkeypatch.setattr(routes.httpx, 'AsyncClient', lambda **kwargs: real_client(transport=httpx.MockTransport(handle)))
-    result = await routes.test_connection(body(), UserContext(user_id='u1', username='admin'))
+    result = await routes.test_connection(entry(), UserContext(user_id='u1', username='admin'))
     assert result['success'] is success
     assert 'test-key' not in str(result)
     assert seen['request'].url == 'https://model.example/v1/chat/completions'

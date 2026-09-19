@@ -39,7 +39,9 @@
       </button>
       <strong v-if="activeSection !== 'chat'" class="compact-header-title">{{ compactHeaderTitle }}</strong>
       <div v-if="activeSection === 'chat'" class="chat-header-actions">
+        <!-- 桌面端「对话历史 / 记忆」已随方案 A 进入侧栏「我的」分组；顶栏入口只给手机/iPad 保留。 -->
         <button
+          v-if="isCompactShell"
           class="history-trigger"
           type="button"
           :aria-expanded="historyOpen"
@@ -51,6 +53,7 @@
           <span class="history-trigger-label">对话历史</span>
         </button>
         <button
+          v-if="isCompactShell"
           class="history-trigger"
           type="button"
           :aria-expanded="memoryOpen"
@@ -342,17 +345,26 @@
         </button>
       </div>
 
+      <!-- 方案 A（2026-09-19 拍板）：导航按「开始 / 发现 / 我的 / 设置」分组，对话历史与记忆
+           从顶栏搬进「我的」；模型配置沉到侧栏底部，与主导航拉开层级。 -->
       <nav class="nav-stack" aria-label="主导航">
-        <template v-for="group in visibleNavGroups" :key="group.key">
-          <span v-if="group.label" class="compact-nav-group-label">{{ group.label }}</span>
+        <div
+          v-for="group in visibleNavGroups"
+          :key="group.key"
+          :class="['nav-group', { 'nav-group-tail': group.tail }]"
+          role="group"
+          :aria-label="group.label || undefined"
+        >
+          <span v-if="group.label" class="nav-group-label">{{ group.label }}</span>
           <button
             v-for="item in group.items"
             :key="item.key"
-            :class="['nav-item', { active: item.key !== 'chat' && activeSection === item.key }]"
+            :class="['nav-item', { active: navItemActive(item) }]"
             type="button"
             :aria-label="navItemLabel(item)"
-            :title="modelPanelCollapsed && !isCompactShell ? item.label : ''"
-            @click="onNavItem(item.key)"
+            :aria-expanded="navItemExpanded(item)"
+            :title="modelPanelCollapsed && !isCompactShell ? navItemLabel(item) : ''"
+            @click="onNavEntry(item.key)"
           >
             <span class="nav-icon-shell">
               <svg
@@ -373,7 +385,7 @@
             </span>
             <span class="nav-label">{{ navItemLabel(item) }}</span>
           </button>
-        </template>
+        </div>
       </nav>
       <div
         v-show="!modelPanelCollapsed"
@@ -608,18 +620,44 @@ onClickOutside(userMenuRef, () => { userMenuOpen.value = false; }, { ignore: [us
 
 // 产品定位（2026-09-19 拍板）：智能体全部由我们定制并预置在广场里，用户不自建。
 // 「我的智能体」（自建 / 发布 / 审核）因此不再进导航；路由与代码保留待后续清理。
+// 标签去掉「广场 / 我的」前缀：分组标题（发现 / 我的）已经表达了这层含义，item 只留名词。
+// label 同时用作手机端各板块的顶栏标题（compactHeaderTitle）。
 const navItems = [
   { key: 'chat' as const, label: '主对话', icon: MessageOutlined },
-  { key: 'agent' as const, label: '智能体广场', icon: AppstoreOutlined },
-  { key: 'knowledge' as const, label: '我的知识库', icon: ReadOutlined },
-  { key: 'skill' as const, label: 'Skill广场', icon: ToolOutlined },
-  { key: 'files' as const, label: '我的文件', icon: FolderOutlined },
+  { key: 'agent' as const, label: '智能体', icon: AppstoreOutlined },
+  { key: 'knowledge' as const, label: '知识库', icon: ReadOutlined },
+  { key: 'skill' as const, label: 'Skill', icon: ToolOutlined },
+  { key: 'files' as const, label: '文件', icon: FolderOutlined },
   { key: 'models' as const, label: '模型配置', icon: SettingOutlined },
 ];
+// 侧栏里的两个「工具」项：不是板块（无路由），点击开抽屉；active 跟随抽屉开合。
+const navTools = [
+  { key: 'history' as const, label: '对话历史', icon: HistoryOutlined },
+  { key: 'memory' as const, label: '记忆', icon: BulbOutlined },
+];
 
-type CenterNavItem = (typeof navItems)[number];
-const desktopNavGroups = [{ key: 'desktop', label: '', items: navItems }];
-const compactNavGroups = [
+type CenterNavItem = (typeof navItems)[number] | (typeof navTools)[number];
+type CenterNavKey = CenterNavItem['key'];
+interface CenterNavGroup {
+  key: string;
+  label: string;
+  items: CenterNavItem[];
+  /** 贴侧栏底部（margin-top:auto），用于设置类入口 */
+  tail?: boolean;
+}
+
+function navItemsByKey(keys: CenterNavKey[]): CenterNavItem[] {
+  const all: CenterNavItem[] = [...navItems, ...navTools];
+  return keys.map((key) => all.find((item) => item.key === key)).filter(Boolean) as CenterNavItem[];
+}
+
+const desktopNavGroups: CenterNavGroup[] = [
+  { key: 'start', label: '', items: navItemsByKey(['chat']) },
+  { key: 'discover', label: '发现', items: navItemsByKey(['agent', 'skill']) },
+  { key: 'library', label: '我的', items: navItemsByKey(['knowledge', 'files', 'history', 'memory']) },
+  { key: 'settings', label: '', items: navItemsByKey(['models']), tail: true },
+];
+const compactNavGroups: CenterNavGroup[] = [
   {
     key: 'main',
     label: '开始',
@@ -629,13 +667,30 @@ const compactNavGroups = [
     key: 'library',
     label: '我的内容',
     // 手机/iPad 只保留文件入口；智能体与知识库仍保留在桌面端，不删除路由或权限。
+    // 对话历史 / 记忆在抽屉顶部的 compact-nav-shortcuts 里，这里不重复。
     items: navItems.filter((item) => ['files', 'models'].includes(item.key)),
   },
 ];
 const visibleNavGroups = computed(() => (isCompactShell.value ? compactNavGroups : desktopNavGroups));
 
 function navItemLabel(item: CenterNavItem) {
-  return isCompactShell.value && item.key === 'chat' ? '新对话' : item.label;
+  // 点「主对话」实际是 openNewChat（回到欢迎屏），全端都按行为命名为「新对话」；
+  // label 里仍叫「主对话」，供手机端顶栏标题与既有契约使用。
+  return item.key === 'chat' ? '新对话' : item.label;
+}
+
+function navItemActive(item: CenterNavItem) {
+  if (item.key === 'history') return historyOpen.value;
+  if (item.key === 'memory') return memoryOpen.value;
+  if (item.key === 'chat') return false;
+  return activeSection.value === item.key;
+}
+
+/** 抽屉类工具项暴露 aria-expanded，板块项不设（undefined 不渲染属性） */
+function navItemExpanded(item: CenterNavItem) {
+  if (item.key === 'history') return historyOpen.value;
+  if (item.key === 'memory') return memoryOpen.value;
+  return undefined;
 }
 
 function showError(error: unknown) {
@@ -756,6 +811,21 @@ function toggleWorkspace() {
   historyOpen.value = false;
   memoryOpen.value = false;
   workspaceOpen.value = !workspaceOpen.value;
+}
+
+/** 侧栏点击入口：工具项（抽屉）先分流，板块项交给 onNavItem */
+function onNavEntry(key: CenterNavKey) {
+  if (key === 'history') {
+    compactNavOpen.value = false;
+    toggleHistory();
+    return;
+  }
+  if (key === 'memory') {
+    compactNavOpen.value = false;
+    toggleMemory();
+    return;
+  }
+  onNavItem(key);
 }
 
 function onNavItem(section: CenterSectionKey) {

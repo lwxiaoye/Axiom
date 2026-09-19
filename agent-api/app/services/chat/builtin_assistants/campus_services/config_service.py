@@ -251,20 +251,58 @@ async def ensure_draft(user) -> dict:
 
 
 async def _list_enabled_models(session: AsyncSession) -> list[dict]:
+    items: list[dict] = []
+    seen: set[str] = set()
+    try:
+        from app.services.platform import model_connection as model_connection_service
+        platform = await model_connection_service.runtime_platform()
+    except Exception:  # noqa: BLE001 - 管理页下拉不能因为平台配置读取失败整页空白
+        platform = None
+    if platform:
+        roster = platform.get("roster") or []
+        default = str(platform.get("model") or "").strip()
+        if roster:
+            for entry in roster:
+                name = str(entry.get("model") or "").strip()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                items.append({
+                    "id": name,
+                    "name": str(entry.get("name") or name),
+                    "is_default": name == default or entry.get("id") == platform.get("entry_id"),
+                })
+        else:
+            names = list(platform.get("models") or [])
+            if default and default not in names:
+                names.insert(0, default)
+            for raw in names:
+                name = str(raw or "").strip()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                items.append({"id": name, "name": name, "is_default": name == default})
+        if items and not any(item["is_default"] for item in items):
+            items[0]["is_default"] = True
     rows = (await session.execute(
         select(ChatModel)
         .where(ChatModel.enabled == 1)
         .order_by(ChatModel.is_default.desc(), ChatModel.sort_order.asc(), ChatModel.id.asc())
     )).scalars().all()
-    return [
-        {
-            "id": str(row.model_id or "").strip(),
-            "name": str(row.display_name or row.model_id or "").strip(),
-            "is_default": bool(row.is_default),
-        }
-        for row in rows
-        if str(row.model_id or "").strip()
-    ]
+    platform_has_default = any(item["is_default"] for item in items)
+    for row in rows:
+        model_id = str(row.model_id or "").strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        items.append({
+            "id": model_id,
+            "name": str(row.display_name or row.model_id or "").strip() or model_id,
+            "is_default": bool(row.is_default) and not platform_has_default,
+        })
+        if items[-1]["is_default"]:
+            platform_has_default = True
+    return items
 
 
 async def _serialize_config(session: AsyncSession, config: CampusAssistantConfig, created: bool = False) -> dict:

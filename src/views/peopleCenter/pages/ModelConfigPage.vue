@@ -11,7 +11,13 @@
     <form v-else novalidate @submit.prevent="save">
       <section class="config-card">
         <div class="card-heading"><div class="card-icon"><ApiOutlined /></div><div><h2>自定义 API 连接（可选）</h2><p>只对当前账号生效，密钥加密保存；启用后优先于平台默认模型。</p></div></div>
-        <p v-if="platform.configured" class="platform-hint" role="status">平台默认模型：<strong>{{ platform.model }}</strong>。不填写下方内容也可以正常对话。</p>
+        <p v-if="platform.configured" class="platform-hint" role="status">
+          平台默认模型：<strong>{{ platform.model }}</strong>
+          <template v-if="(platform.models || []).filter((item) => item && item !== platform.model).length">
+            ，还可使用 {{ (platform.models || []).filter((item) => item && item !== platform.model).join('、') }}
+          </template>
+          。不填写下方内容也可以正常对话。
+        </p>
         <p v-else class="platform-hint" role="status">平台尚未配置默认模型；你可以在此填写自己的 API Key，或联系管理员在管理配置中设置。</p>
         <label for="model-base">请求地址 <span>Base URL</span></label>
         <input id="model-base" v-model="form.base_url" type="url" maxlength="2048" placeholder="https://api.example.com/v1" :disabled="busy" />
@@ -42,7 +48,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { ApiOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
 import { requestAgentApi } from '../agentApi';
 
-type Platform = { configured: boolean; model: string };
+type Platform = { configured: boolean; model: string; models?: string[] };
 type Config = { base_url: string; model: string; enabled: boolean; has_api_key: boolean; platform?: Platform };
 type Result = { success: boolean; message: string; latency_ms?: number };
 const form = reactive({ base_url: '', model: '', api_key: '', enabled: true });
@@ -50,7 +56,7 @@ const loading = ref(true);
 const loadError = ref('');
 const hasKey = ref(false);
 // 平台默认模型摘要（后端只给模型名和是否已配置，不带地址/密钥）
-const platform = reactive<Platform>({ configured: false, model: '' });
+const platform = reactive<Platform>({ configured: false, model: '', models: [] });
 const testing = ref(false);
 const saving = ref(false);
 const feedback = ref<Result | null>(null);
@@ -60,7 +66,13 @@ watch(form, () => { feedback.value = null; });
 function apply(data: Config) {
   Object.assign(form, { base_url: data.base_url, model: data.model, api_key: '', enabled: data.has_api_key ? data.enabled : true });
   hasKey.value = data.has_api_key;
-  if (data.platform) Object.assign(platform, { configured: !!data.platform.configured, model: data.platform.model || '' });
+  if (data.platform) {
+    Object.assign(platform, {
+      configured: !!data.platform.configured,
+      model: data.platform.model || '',
+      models: Array.isArray(data.platform.models) ? data.platform.models : (data.platform.model ? [data.platform.model] : []),
+    });
+  }
 }
 async function load() {
   loading.value = true;

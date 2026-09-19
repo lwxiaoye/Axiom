@@ -44,6 +44,7 @@
     @retry-attachment="retryAttachment"
     @start-agent="onStartRecommendedAgent"
     @open-agent="openAgentFromChat"
+    @open-agent-market="switchSection('agent')"
   />
 </template>
 
@@ -58,7 +59,7 @@ import { pickPinnedRecommendedAgents } from '../utils/pinnedRecommendedAgents';
 defineOptions({ name: 'CenterChatPage' });
 
 const ctx = useCenterContext();
-const { startChatWithAgent, openAgentFromChat } = ctx;
+const { startChatWithAgent, openAgentFromChat, switchSection } = ctx;
 const { appList, appLoading } = ctx.agentMarket;
 const recommendedAgents = computed(() => pickPinnedRecommendedAgents(appList.value));
 const recommendLoading = computed(() => appLoading.value && recommendedAgents.value.length === 0);

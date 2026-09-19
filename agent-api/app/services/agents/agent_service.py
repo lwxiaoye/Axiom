@@ -78,7 +78,43 @@ class AgentService:
         from app.core.model_endpoint import get_model_connection
         connection = get_model_connection()
         if connection and connection["api_key"] == user_key:
-            return [ModelItem(id=connection["model"], name=connection["model"], is_default=True)]
+            roster = connection.get("roster") or []
+            if roster:
+                default_id = str(connection.get("entry_id") or "")
+                default_model = str(connection.get("model") or "").strip()
+                items = []
+                for item in roster:
+                    model_id = str(item.get("model") or "").strip()
+                    if not model_id:
+                        continue
+                    items.append(ModelItem(
+                        id=model_id,
+                        name=str(item.get("name") or model_id),
+                        is_default=bool(
+                            (default_id and item.get("id") == default_id)
+                            or (not default_id and model_id == default_model)
+                        ),
+                    ))
+                if items and not any(item.is_default for item in items):
+                    items[0].is_default = True
+                return items
+            names = [
+                str(item).strip()
+                for item in (connection.get("models") or [])
+                if str(item or "").strip()
+            ]
+            default = str(connection.get("model") or "").strip()
+            if default and default not in names:
+                names.insert(0, default)
+            elif not names and default:
+                names = [default]
+            items = [
+                ModelItem(id=name, name=name, is_default=(name == default))
+                for name in names
+            ]
+            if items and not any(item.is_default for item in items):
+                items[0].is_default = True
+            return items
 
         try:
             async with httpx.AsyncClient(timeout=5) as client:

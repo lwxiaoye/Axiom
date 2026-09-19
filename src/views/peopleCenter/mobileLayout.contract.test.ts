@@ -77,8 +77,9 @@ describe('手机端登录与主对话布局契约', () => {
   it('手机端主对话顶栏不重复「主对话」三字，其它板块仍显示标题', () => {
     expect(centerShell).toContain('v-if="activeSection !== \'chat\'" class="compact-header-title"');
     expect(centerShell).toContain("label: '主对话'");
-    expect(centerShell).toContain("label: '智能体广场'");
-    expect(centerShell).toContain("label: '我的文件'");
+    // 2026-09-19 方案 A：分组标题（发现 / 我的）承担了「广场 / 我的」的含义，item 只留名词
+    expect(centerShell).toContain("label: '智能体'");
+    expect(centerShell).toContain("label: '文件'");
   });
 
   it('窄屏只隐藏顶栏文字标签，不会把 Ant Design 图标一起隐藏', () => {

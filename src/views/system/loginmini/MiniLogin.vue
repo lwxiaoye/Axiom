@@ -29,6 +29,9 @@
         </button>
       </div>
 
+      <!-- 回车提交只交给 <form> 的隐式提交：中文输入法组字时按回车是「确认候选词」，
+           浏览器不会触发隐式提交，但 keyup.enter 仍会响，之前每个 input 上的
+           @keyup.enter="submit" 让验证码还没打完就登录了（并顺手消耗掉验证码）。 -->
       <form class="form" autocomplete="on" @submit.prevent="submit">
         <div class="field">
           <label for="af-username">用户名</label>
@@ -38,7 +41,6 @@
             type="text"
             autocomplete="username"
             :placeholder="mode === 'login' ? '请输入用户名' : '字母开头，3-32 位'"
-            @keyup.enter="submit"
           />
         </div>
 
@@ -50,7 +52,6 @@
             type="text"
             autocomplete="name"
             placeholder="用于在界面上显示"
-            @keyup.enter="submit"
           />
         </div>
 
@@ -62,7 +63,6 @@
             type="password"
             :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
             :placeholder="mode === 'login' ? '请输入密码' : '至少 8 位'"
-            @keyup.enter="submit"
           />
         </div>
 
@@ -74,7 +74,6 @@
             type="password"
             autocomplete="new-password"
             placeholder="再次输入密码"
-            @keyup.enter="submit"
           />
         </div>
 
@@ -88,8 +87,7 @@
               maxlength="6"
               autocomplete="off"
               placeholder="请输入右侧字符"
-              @keyup.enter="submit"
-            />
+              />
             <button
               type="button"
               class="captcha-img"

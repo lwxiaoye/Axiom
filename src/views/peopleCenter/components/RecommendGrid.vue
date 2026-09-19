@@ -4,6 +4,10 @@
       <div>
         <h3>推荐智能体</h3>
       </div>
+      <button class="recommend-view-all" type="button" @click="$emit('viewAll')">
+        查看全部
+        <PremiumChevron direction="right" :size="13" />
+      </button>
     </div>
     <div v-if="loading" class="recommend-loading">
       <LoadingOutlined /> 正在加载推荐...
@@ -53,6 +57,7 @@ withDefaults(defineProps<{
 
 defineEmits<{
   (e: 'startChat', agent: AgentItem): void;
+  (e: 'viewAll'): void;
 }>();
 
 </script>
@@ -82,9 +87,34 @@ defineEmits<{
 
 .recommend-header h3 {
   margin: 0;
-  font-size: 17px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 650;
   animation: recommend-title-enter 0.42s 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.recommend-view-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.recommend-view-all:hover {
+  color: var(--ink);
+  background: var(--subtle);
+}
+
+.recommend-view-all:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .recommend-loading,

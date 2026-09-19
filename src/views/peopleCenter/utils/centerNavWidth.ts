@@ -1,5 +1,5 @@
-export const CENTER_NAV_DEFAULT = 280;
-export const CENTER_NAV_COLLAPSED = 78;
+export const CENTER_NAV_DEFAULT = 248;
+export const CENTER_NAV_COLLAPSED = 64;
 export const CENTER_NAV_NARROW = 72;
 export const CENTER_NAV_MOBILE = 0;
 export const CENTER_NAV_MIN = 200;

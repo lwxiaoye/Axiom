@@ -590,16 +590,24 @@ class HarnessOrchestrator:
         self._persist_tasks_by_thread = self._hub._persist_tasks_by_thread
     async def _resolve_model(self, model: Optional[str] = None, user_key: Optional[str] = None) -> str:
         from app.services.agents.agent_service import agent_service
+        from app.services.platform import model_connection as model_connection_service
         models = await agent_service.get_models(user_key=user_key)
         valid_ids = {m.id for m in models}
+        chosen = ""
         if model:
             if model not in valid_ids:
                 raise HTTPException(status_code=400, detail="无效的对话模型")
-            return model
-        for m in models:
-            if m.is_default:
-                return m.id
-        return models[0].id if models else ""
+            chosen = model
+        else:
+            for m in models:
+                if m.is_default:
+                    chosen = m.id
+                    break
+            if not chosen:
+                chosen = models[0].id if models else ""
+        if chosen:
+            model_connection_service.bind_selected(chosen)
+        return chosen
 
     async def prepare_chat(self, user_id: str, model: Optional[str]) -> tuple[str, str]:
         """在响应开始前完成 Key 和模型校验，保证流式错误状态码正确。

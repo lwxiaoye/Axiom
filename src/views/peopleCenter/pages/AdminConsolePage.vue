@@ -1,5 +1,5 @@
 <template>
-  <main class="admin-page">
+  <main class="admin-page" :class="{ wide: tab === 'model' }">
     <header class="page-heading">
       <button type="button" class="back" @click="goBack">
         <ArrowLeftOutlined />
@@ -26,32 +26,118 @@
       </button>
     </nav>
 
-    <!-- 对话模型 -->
-    <section v-show="tab === 'model'" class="card">
+    <!-- 对话模型：每条是独立保存的连接，不是共用一个 Key -->
+    <section v-show="tab === 'model'" class="roster-wrap">
       <div v-if="model.loading" class="muted">正在加载…</div>
       <template v-else>
-        <p class="hint">此配置为平台默认，对所有登录用户生效；用户可在工作台「模型配置」页用自己的 API Key 覆盖。</p>
-        <label for="m-base">请求地址</label>
-        <input id="m-base" v-model="model.form.base_url" type="url" placeholder="https://api.example.com/v1" :disabled="model.busy" />
-        <label for="m-key">API Key <span v-if="model.hasKey" class="ok">已配置</span></label>
-        <input id="m-key" v-model="model.form.api_key" type="password" autocomplete="new-password"
-               :placeholder="model.hasKey ? '留空则保持原密钥' : '输入服务商提供的 API Key'" :disabled="model.busy" />
-        <label for="m-name">模型名称</label>
-        <input id="m-name" v-model="model.form.model" placeholder="例如 gpt-4o-mini" :disabled="model.busy" />
-        <div class="switch-row">
-          <div><strong>启用此配置</strong><p>关闭后回退到原有模型网关。</p></div>
-          <a-switch v-model:checked="model.form.enabled" :disabled="model.busy" aria-label="启用对话模型配置" />
+        <header class="roster-head">
+          <p class="hint">每条模型有自己的地址和密钥，添加后会保留。用户在对话里切换；默认模型用于新对话。</p>
+          <button type="button" class="speed-btn" :disabled="model.busy || !model.entries.length" @click="testSpeed">
+            {{ model.testing ? '测试中…' : '测试速度' }}
+          </button>
+        </header>
+        <div class="roster-grid">
+          <article
+            v-for="(item, index) in model.entries"
+            :key="item.id || index"
+            class="roster-card"
+            :class="{ default: item.id === model.default_id }"
+            draggable="true"
+            @dragstart="onDragStart(index)"
+            @dragover.prevent
+            @drop="onDrop(index)"
+          >
+            <div class="roster-card-top">
+              <span class="grip" aria-hidden="true">⋮⋮</span>
+              <div class="roster-card-actions">
+                <button type="button" :disabled="model.busy" @click="removeEntry(item)">删除</button>
+                <button type="button" :disabled="model.busy" @click="openEdit(item)">编辑</button>
+              </div>
+            </div>
+            <h3 :title="item.name || item.model">{{ item.name || item.model }}</h3>
+            <p>模型：{{ item.model }}</p>
+            <p>来源：{{ hostOf(item) || '未填写地址' }}</p>
+            <p>
+              延迟：
+              <span v-if="item.latency_ms == null" class="latency none">未测</span>
+              <span v-else class="latency" :class="item.latency_ms < 800 ? 'ok' : 'slow'">{{ item.latency_ms }}ms</span>
+            </p>
+            <p class="protos">
+              <span v-if="item.base_url">[OpenAI]</span>
+              <span v-if="item.anthropic_base_url">[Anthropic]</span>
+            </p>
+            <button
+              type="button"
+              class="default-chip"
+              :class="{ on: item.id === model.default_id }"
+              :disabled="model.busy"
+              @click="setDefault(item)"
+            >
+              {{ item.id === model.default_id ? '默认' : '设为默认' }}
+            </button>
+          </article>
+          <button type="button" class="roster-add" :disabled="model.busy || model.entries.length >= 32" @click="openAdd">
+            <strong>添加模型</strong>
+            <span>OpenAI / Anthropic API</span>
+          </button>
+        </div>
+        <div class="switch-row first roster-enable">
+          <div><strong>启用平台模型</strong><p>关闭后回退到原有模型网关；已添加的模型仍会保留。</p></div>
+          <a-switch v-model:checked="model.enabled" :disabled="model.busy" aria-label="启用平台模型" @change="() => persistRoster()" />
         </div>
         <Feedback :state="model.feedback" />
-        <div class="actions">
-          <button type="button" class="secondary" :disabled="model.busy" @click="testModel">
-            {{ model.testing ? '测试中…' : '测试连接' }}
-          </button>
-          <button type="button" class="primary" :disabled="model.busy" @click="saveModel">
-            {{ model.saving ? '保存中…' : '保存' }}
-          </button>
-        </div>
       </template>
+
+      <div v-if="model.modal.open" class="modal-mask" @click.self="closeModal">
+        <div class="modal" role="dialog" aria-modal="true" :aria-label="model.modal.mode === 'edit' ? '编辑模型' : '添加模型'">
+          <header class="modal-head">
+            <strong>{{ model.modal.mode === 'edit' ? '编辑模型' : '添加模型' }}</strong>
+            <button type="button" class="icon-x" aria-label="关闭" @click="closeModal">×</button>
+          </header>
+          <label for="d-name">名称</label>
+          <div class="field-row">
+            <input id="d-name" v-model="model.draft.name" maxlength="255" placeholder="e.g. My Model" :disabled="model.busy" />
+          </div>
+          <label for="d-openai">OpenAI 地址</label>
+          <div class="field-row">
+            <input id="d-openai" v-model="model.draft.base_url" type="url" placeholder="https://x.x.com/v1" :disabled="model.busy" />
+            <button type="button" class="paste" @click="pasteInto('base_url')">粘贴</button>
+          </div>
+          <label for="d-anthropic">Anthropic 地址</label>
+          <div class="field-row">
+            <input id="d-anthropic" v-model="model.draft.anthropic_base_url" type="url" placeholder="https://x.x.com/anthropic" :disabled="model.busy" />
+            <button type="button" class="paste" @click="pasteInto('anthropic_base_url')">粘贴</button>
+          </div>
+          <label for="d-model">模型 ID</label>
+          <div class="field-row">
+            <input id="d-model" v-model="model.draft.model" maxlength="255" placeholder="搜索或输入模型 ID…" :disabled="model.busy" />
+            <button type="button" class="paste" @click="pasteInto('model')">粘贴</button>
+          </div>
+          <label for="d-key">API 密钥 <span v-if="model.draft.has_api_key && !model.draft.api_key" class="ok">已配置</span></label>
+          <div class="field-row">
+            <input
+              id="d-key"
+              v-model="model.draft.api_key"
+              :type="model.showKey ? 'text' : 'password'"
+              autocomplete="new-password"
+              maxlength="8192"
+              :placeholder="model.draft.has_api_key ? '留空则保持原密钥' : 'sk-…'"
+              :disabled="model.busy"
+            />
+            <button type="button" class="paste" @click="pasteInto('api_key')">粘贴</button>
+            <button type="button" class="paste" :aria-pressed="model.showKey" @click="model.showKey = !model.showKey">
+              {{ model.showKey ? '隐藏' : '显示' }}
+            </button>
+          </div>
+          <p v-if="model.modal.error" class="feedback error" style="margin-top:14px">{{ model.modal.error }}</p>
+          <footer class="modal-foot">
+            <button type="button" class="ghost" :disabled="model.busy" @click="closeModal">取消</button>
+            <button type="button" class="primary" :disabled="model.busy" @click="saveDraft">
+              {{ model.saving ? '保存中…' : '保存' }}
+            </button>
+          </footer>
+        </div>
+      </div>
     </section>
 
     <!-- 向量模型 -->
@@ -166,7 +252,7 @@
           </option>
         </select>
         <p v-if="!campus.models.length" class="hint">
-          先在「对话模型」里配置并启用一个模型，这里才会出现可选项。
+          先在「对话模型」里配置并启用至少一个模型，这里才会出现可选项。
         </p>
 
         <label for="c-domains">学校官方域名</label>
@@ -274,43 +360,183 @@
     return { success: false, message: e?.message || fallback };
   }
 
-  // ---- 对话模型 ----
+  type ModelEntry = {
+    id: string;
+    name: string;
+    base_url: string;
+    anthropic_base_url: string;
+    model: string;
+    enabled: boolean;
+    has_api_key: boolean;
+    latency_ms: number | null;
+  };
+
+  // ---- 对话模型（独立名册，每条自己的地址和密钥）----
+  const emptyDraft = () => ({
+    id: '',
+    name: '',
+    base_url: '',
+    anthropic_base_url: '',
+    model: '',
+    api_key: '',
+    has_api_key: false,
+  });
   const model = reactive({
-    loading: true, saving: false, testing: false, busy: false, hasKey: false,
+    loading: true, saving: false, testing: false, busy: false,
+    enabled: true,
+    default_id: '',
+    entries: [] as ModelEntry[],
     feedback: null as Result | null,
-    form: { base_url: '', model: '', api_key: '', enabled: true },
+    showKey: false,
+    dragFrom: -1,
+    modal: { open: false, mode: 'add' as 'add' | 'edit', error: '' },
+    draft: emptyDraft(),
   });
   watch(() => [model.saving, model.testing], () => { model.busy = model.saving || model.testing; });
-  watch(() => ({ ...model.form }), () => { model.feedback = null; }, { deep: true });
 
-  async function loadModel() {
-    model.loading = true;
-    try {
-      const d = await requestAgentApi<any>('/model-connection');
-      Object.assign(model.form, { base_url: d.base_url, model: d.model, api_key: '', enabled: d.has_api_key ? d.enabled : true });
-      model.hasKey = !!d.has_api_key;
-    } catch (e: any) {
-      model.feedback = fail(e, '配置加载失败');
-    } finally {
-      model.loading = false;
+  function applyRoster(d: any) {
+    model.enabled = d.enabled !== false;
+    model.default_id = String(d.default_id || '');
+    model.entries = Array.isArray(d.entries)
+      ? d.entries.map((item: any) => ({
+          id: String(item.id || ''),
+          name: String(item.name || item.model || ''),
+          base_url: String(item.base_url || ''),
+          anthropic_base_url: String(item.anthropic_base_url || ''),
+          model: String(item.model || ''),
+          enabled: item.enabled !== false,
+          has_api_key: !!item.has_api_key,
+          latency_ms: typeof item.latency_ms === 'number' ? item.latency_ms : null,
+        }))
+      : [];
+    if (model.entries.length && !model.entries.some((item) => item.id === model.default_id)) {
+      model.default_id = model.entries[0].id;
     }
   }
-  async function saveModel() {
+  function hostOf(item: ModelEntry) {
+    const raw = item.base_url || item.anthropic_base_url;
+    try { return raw ? new URL(raw).hostname : ''; } catch { return raw.replace(/^https?:\/\//, '').split('/')[0]; }
+  }
+  function rosterPayload(entries = model.entries, extra?: { id: string; api_key: string }) {
+    return {
+      enabled: model.enabled,
+      default_id: model.default_id,
+      entries: entries.map((item) => ({
+        id: item.id,
+        name: item.name,
+        base_url: item.base_url,
+        anthropic_base_url: item.anthropic_base_url,
+        model: item.model,
+        enabled: item.enabled,
+        api_key: extra && extra.id === item.id ? extra.api_key : '',
+      })),
+    };
+  }
+  async function persistRoster(entries = model.entries, extra?: { id: string; api_key: string }) {
     model.saving = true;
     try {
-      const d = await requestAgentApi<any>('/model-connection', { method: 'PUT', body: JSON.stringify(model.form) });
-      model.hasKey = !!d.has_api_key;
-      model.form.api_key = '';
-      model.feedback = { success: true, message: '已保存，下一次模型请求生效' };
+      applyRoster(await requestAgentApi<any>('/model-connection', { method: 'PUT', body: JSON.stringify(rosterPayload(entries, extra)) }));
       window.dispatchEvent(new Event('axiom:model-config-updated'));
-    } catch (e: any) { model.feedback = fail(e, '保存失败'); }
-    finally { model.saving = false; }
+      return true;
+    } catch (e: any) {
+      model.feedback = fail(e, '保存失败');
+      return false;
+    } finally { model.saving = false; }
   }
-  async function testModel() {
+  async function loadModel() {
+    model.loading = true;
+    try { applyRoster(await requestAgentApi<any>('/model-connection')); }
+    catch (e: any) { model.feedback = fail(e, '配置加载失败'); }
+    finally { model.loading = false; }
+  }
+  function openAdd() {
+    model.draft = emptyDraft();
+    model.showKey = false;
+    model.modal = { open: true, mode: 'add', error: '' };
+  }
+  function openEdit(item: ModelEntry) {
+    model.draft = {
+      id: item.id,
+      name: item.name,
+      base_url: item.base_url,
+      anthropic_base_url: item.anthropic_base_url,
+      model: item.model,
+      api_key: '',
+      has_api_key: item.has_api_key,
+    };
+    model.showKey = false;
+    model.modal = { open: true, mode: 'edit', error: '' };
+  }
+  function closeModal() {
+    if (!model.busy) model.modal.open = false;
+  }
+  async function pasteInto(field: 'name' | 'base_url' | 'anthropic_base_url' | 'model' | 'api_key') {
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) (model.draft as any)[field] = text;
+    } catch {
+      model.modal.error = '无法读取剪贴板，请手动粘贴';
+    }
+  }
+  async function saveDraft() {
+    const d = model.draft;
+    if (!d.model.trim()) { model.modal.error = '请填写模型 ID'; return; }
+    if (!d.base_url.trim() && !d.anthropic_base_url.trim()) { model.modal.error = '请填写 OpenAI 或 Anthropic 地址'; return; }
+    if (!d.has_api_key && !d.api_key.trim()) { model.modal.error = '请填写 API 密钥'; return; }
+    const id = d.id || Math.random().toString(16).slice(2) + Date.now().toString(16);
+    const next: ModelEntry = {
+      id,
+      name: d.name.trim() || d.model.trim(),
+      base_url: d.base_url.trim(),
+      anthropic_base_url: d.anthropic_base_url.trim(),
+      model: d.model.trim(),
+      enabled: true,
+      has_api_key: d.has_api_key || !!d.api_key.trim(),
+      latency_ms: model.entries.find((item) => item.id === d.id)?.latency_ms ?? null,
+    };
+    const entries = model.modal.mode === 'edit'
+      ? model.entries.map((item) => (item.id === d.id ? next : item))
+      : [...model.entries, next];
+    if (!model.default_id) model.default_id = id;
+    model.modal.error = '';
+    const ok = await persistRoster(entries, { id, api_key: d.api_key });
+    if (ok) {
+      model.modal.open = false;
+      model.feedback = { success: true, message: model.modal.mode === 'edit' ? '已更新模型' : '已添加模型' };
+    }
+  }
+  async function removeEntry(item: ModelEntry) {
+    const entries = model.entries.filter((row) => row.id !== item.id);
+    if (model.default_id === item.id) model.default_id = entries[0]?.id || '';
+    const ok = await persistRoster(entries);
+    if (ok) model.feedback = { success: true, message: `已删除 ${item.name || item.model}` };
+  }
+  async function setDefault(item: ModelEntry) {
+    model.default_id = item.id;
+    const ok = await persistRoster();
+    if (ok) model.feedback = { success: true, message: `新对话将使用 ${item.name || item.model}` };
+  }
+  function onDragStart(index: number) { model.dragFrom = index; }
+  async function onDrop(index: number) {
+    const from = model.dragFrom;
+    model.dragFrom = -1;
+    if (from < 0 || from === index) return;
+    const entries = [...model.entries];
+    const [moved] = entries.splice(from, 1);
+    entries.splice(index, 0, moved);
+    await persistRoster(entries);
+  }
+  async function testSpeed() {
     model.testing = true;
     model.feedback = null;
-    try { model.feedback = await requestAgentApi<Result>('/model-connection/test', { method: 'POST', body: JSON.stringify(model.form) }); }
-    catch (e: any) { model.feedback = fail(e, '测试失败'); }
+    try {
+      const d = await requestAgentApi<any>('/model-connection/test-speed', { method: 'POST', body: '{}' });
+      applyRoster(d);
+      const failed = Array.isArray(d.results) ? d.results.filter((item: any) => !item.success).length : 0;
+      model.feedback = failed
+        ? { success: false, message: `${failed} 个模型没有响应，其余已记下延迟` }
+        : { success: true, message: '已更新各模型延迟' };
+    } catch (e: any) { model.feedback = fail(e, '测速失败'); }
     finally { model.testing = false; }
   }
 
@@ -596,6 +822,7 @@
 
 <style scoped>
   .admin-page { width: 100%; max-width: 860px; margin: 0 auto; padding: 38px 32px 64px; color: #18181b; }
+  .admin-page.wide { max-width: 980px; }
   .page-heading { margin-bottom: 26px; }
   .check-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 6px; }
   .check-item { display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 450; cursor: pointer; }
@@ -616,6 +843,50 @@
   h2 { margin: 0; font-size: 15px; font-weight: 600; }
   label { display: flex; align-items: center; gap: 10px; margin: 22px 0 9px; font-size: 14px; font-weight: 550; }
   label:first-of-type { margin-top: 0; }
+  .roster-wrap { padding: 22px; border-radius: 18px; background: #f3efe6; }
+  .roster-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+  .roster-head .hint { max-width: 560px; color: #6b6458; }
+  .speed-btn { flex: none; height: 36px; padding: 0 14px; font-size: 13px; color: #3f3a34;
+               background: #fff; border: 1px solid #d8d0c3; border-radius: 10px; }
+  .roster-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .roster-card { position: relative; padding: 16px 16px 18px; border-radius: 14px; background: #e8e2d4;
+                 text-align: left; color: #1a1a1a; }
+  .roster-card.default { box-shadow: inset 0 0 0 1px #c9b89a; }
+  .roster-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .grip { color: #b3aa9a; letter-spacing: -2px; font-size: 14px; cursor: grab; }
+  .roster-card-actions { display: flex; gap: 8px; }
+  .roster-card-actions button { padding: 0; font-size: 12px; color: #8a8378; background: none; border: 0; }
+  .roster-card h3 { margin: 0 0 10px; font-size: 18px; font-weight: 650; letter-spacing: -0.3px;
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .roster-card p { margin: 0 0 4px; font-size: 13px; color: #5c564c; }
+  .latency.ok { color: #1f8a4c; font-weight: 600; }
+  .latency.slow { color: #c23a3a; font-weight: 600; }
+  .latency.none { color: #8a8378; }
+  .protos { display: flex; gap: 8px; margin-top: 8px !important; color: #8a8378 !important; font-size: 12px !important; }
+  .default-chip { margin-top: 12px; height: 28px; padding: 0 10px; font-size: 12px; color: #6b6458;
+                  background: transparent; border: 1px solid #d2c8b6; border-radius: 999px; }
+  .default-chip.on { color: #7a4a12; background: #f3e6cf; border-color: #e0c48a; }
+  .roster-add { min-height: 188px; padding: 20px; border: 1.5px dashed #cfc6b6; border-radius: 14px;
+                background: #f7f3ea; color: #1a1a1a; display: flex; flex-direction: column;
+                align-items: center; justify-content: center; gap: 6px; }
+  .roster-add strong { font-size: 18px; font-weight: 650; }
+  .roster-add span { font-size: 13px; color: #8a8378; }
+  .roster-enable { margin-top: 18px; padding-top: 16px; border-top: 1px solid #e0d8ca; }
+  .modal-mask { position: fixed; inset: 0; z-index: 40; background: #1a1a1acc;
+                display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .modal { width: min(560px, 100%); padding: 22px 22px 0; border-radius: 16px; background: #f6f1e8; color: #1a1a1a; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .modal-head strong { font-size: 16px; }
+  .icon-x { padding: 0; font-size: 22px; line-height: 1; color: #6b6458; background: none; border: 0; }
+  .modal label { margin: 16px 0 8px; font-size: 13px; color: #3f3a34; }
+  .field-row { display: flex; gap: 8px; }
+  .field-row input { flex: 1; background: #fff; border-color: #ddd4c6; }
+  .paste { flex: none; height: 44px; padding: 0 12px; font-size: 12px; color: #5c564c;
+           background: #fff; border: 1px solid #ddd4c6; border-radius: 9px; }
+  .modal-foot { display: grid; grid-template-columns: 1fr 1fr; margin: 22px -22px 0; border-top: 1px solid #e4dccf; }
+  .modal-foot button { height: 48px; border: 0; border-radius: 0; background: transparent; }
+  .modal-foot .ghost { color: #5c564c; }
+  .modal-foot .primary { color: #1a1a1a; background: transparent; border: 0; font-weight: 650; }
   .ok { font-size: 12px; font-weight: 400; color: #238257; }
   input, textarea { width: 100%; padding: 0 13px; color: #27272a; border: 1px solid #dedee5;
                     border-radius: 9px; background: #fff; outline: none; transition: border-color 0.15s; font: inherit; }
@@ -656,5 +927,7 @@
     .card { padding: 20px; }
     .actions { flex-direction: column-reverse; }
     .actions button { width: 100%; }
+    .roster-grid { grid-template-columns: 1fr; }
+    .roster-head { flex-direction: column; }
   }
 </style>
