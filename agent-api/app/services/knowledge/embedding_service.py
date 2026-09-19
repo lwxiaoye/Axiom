@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import async_session
-from app.services.connectors.crypto import ConnectorCryptoError, decrypt_secret, encrypt_secret
+from app.services.connectors.crypto import ConnectorCryptoError, decrypt_secret, encrypt_secret, is_cipher_text
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,12 @@ def _classify_key(value: Optional[str]) -> str:
 
 
 def _is_cipher(value: Optional[str]) -> bool:
-    """是否为当前密钥可解的 Fernet 密文（前缀 + 真正解一次，见模块头注释）。"""
-    return _classify_key(value) == KEY_CIPHER
+    """是否为当前密钥可解的 Fernet 密文（前缀 + 真正解一次，见模块头注释）。
+
+    判据本体在 connectors.crypto.is_cipher_text：平台功能配置（web_search / ocr 的密钥字段）
+    也要同一判据，抽到公共处避免它反过来 import 本模块形成循环依赖。
+    """
+    return is_cipher_text(value)
 
 
 def _warn_once(kind: str, row_id, message: str, *args) -> None:
