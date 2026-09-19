@@ -352,7 +352,6 @@ async def run_sub_workflow(
         audit_parent_logical_call_id=getattr(parent_ctx, "audit_parent_logical_call_id", ""),
         audit_execution_segment=getattr(parent_ctx, "audit_execution_segment", ""),
         audit_purpose=getattr(parent_ctx, "audit_purpose", "workflow_node"),
-        external_attribution=getattr(parent_ctx, "external_attribution", None),
         external_execution=bool(getattr(parent_ctx, "external_execution", False)),
         external_session_id=getattr(parent_ctx, "external_session_id", None),
         external_workspace_ref=getattr(parent_ctx, "external_workspace_ref", None),

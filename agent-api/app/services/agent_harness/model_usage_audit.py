@@ -111,17 +111,6 @@ AUDIT_METRICS = {
 
 
 @dataclass(frozen=True)
-class ExternalAttribution:
-    """Identifier-only link from an API invocation to runtime audit rows."""
-
-    invocation_id: str
-    key_id: str
-    app_id: str
-    owner_user_id: str
-    external_session_id: str = ""
-
-
-@dataclass(frozen=True)
 class ModelLogicalCallHandle:
     logical_call_id: str
     run_id: str
@@ -142,7 +131,6 @@ class ModelLogicalCallHandle:
     base_prompt_hash: str = ""
     tool_schema_hash: str = ""
     state_snapshot_hash: str = ""
-    external_attribution: ExternalAttribution | None = None
 
     @property
     def id(self) -> str:
@@ -176,7 +164,6 @@ class ModelAttemptAuditHandle:
     base_prompt_hash: str = ""
     tool_schema_hash: str = ""
     state_snapshot_hash: str = ""
-    external_attribution: ExternalAttribution | None = None
     semantic_payload_hash: str = ""
     wire_payload_hash: str = ""
     prefix_diagnostics: dict[str, Any] = field(default_factory=dict)
@@ -804,7 +791,6 @@ async def begin_logical_call(
     context_metadata: Mapping[str, Any] | None = None,
     scope_key: str = "",
     call_scope_id: str = "",
-    external_attribution: ExternalAttribution | None = None,
 ) -> ModelLogicalCallHandle | None:
     """Create a logical call. Invalid purpose and all persistence failures fail open."""
     AUDIT_METRICS["logical_started"] += 1
@@ -863,11 +849,6 @@ async def begin_logical_call(
                     transport=str(transport or "")[:32],
                     endpoint_family=resolved_endpoint,
                     provider_key_fingerprint=resolved_key_fingerprint or None,
-                    external_invocation_id=(external_attribution.invocation_id[:64] if external_attribution else None),
-                    external_key_id=(external_attribution.key_id[:64] if external_attribution else None),
-                    external_app_id=(external_attribution.app_id[:64] if external_attribution else None),
-                    external_owner_user_id=(external_attribution.owner_user_id[:64] if external_attribution else None),
-                    external_session_id=(external_attribution.external_session_id[:64] if external_attribution else None),
                     purpose=normalized_purpose,
                     purpose_detail=str(purpose_detail or "") or None,
                     fallback_reason=str(fallback_reason or "")[:128] or None,
@@ -891,7 +872,6 @@ async def begin_logical_call(
                     purpose_detail=str(purpose_detail or ""),
                     fallback_reason=str(fallback_reason or "")[:128],
                     scope_key=resolved_scope,
-                    external_attribution=external_attribution,
                     **context,
                 )
 
@@ -1015,11 +995,6 @@ async def begin_attempt(
                     transport=logical_call.transport,
                     endpoint_family=logical_call.endpoint_family,
                     provider_key_fingerprint=(logical_call.provider_key_fingerprint or None),
-                    external_invocation_id=(logical_call.external_attribution.invocation_id[:64] if logical_call.external_attribution else None),
-                    external_key_id=(logical_call.external_attribution.key_id[:64] if logical_call.external_attribution else None),
-                    external_app_id=(logical_call.external_attribution.app_id[:64] if logical_call.external_attribution else None),
-                    external_owner_user_id=(logical_call.external_attribution.owner_user_id[:64] if logical_call.external_attribution else None),
-                    external_session_id=(logical_call.external_attribution.external_session_id[:64] if logical_call.external_attribution else None),
                     purpose=logical_call.purpose,
                     purpose_detail=logical_call.purpose_detail or None,
                     scope_key=logical_call.scope_key,
@@ -1083,7 +1058,6 @@ async def begin_attempt(
                     base_prompt_hash=logical_call.base_prompt_hash,
                     tool_schema_hash=logical_call.tool_schema_hash,
                     state_snapshot_hash=logical_call.state_snapshot_hash,
-                    external_attribution=logical_call.external_attribution,
                     semantic_payload_hash=logical_hash,
                     wire_payload_hash=wire_hash,
                     prefix_diagnostics=prefix,

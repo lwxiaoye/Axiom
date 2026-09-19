@@ -32,8 +32,6 @@ from app.services.agents.app_info_publish_service import (
     set_app_info_catalog_status,
     sync_app_info_for_approved_version,
 )
-from app.services.agent_api.access_service import revoke_app_access
-from app.services.agent_api.publish_policy import validate_api_workflow_capabilities
 from app.services.agents.published_visibility import load_published_visibility_version, user_can_run_published_app
 from app.services.platform.user_display_name import load_user_display_names
 from app.services.workflows.workflow_model_requirements import missing_required_models
@@ -1433,8 +1431,6 @@ async def _do_submit_review(
     config_snapshot = app.config_json
     before_status = app.status
     await _validate_before_publish(session, user, workflow_json, app_id)
-    if bool(getattr(app, "api_enabled", False)):
-        validate_api_workflow_capabilities(workflow_json, external_context_ready=True)
 
     definition = (
         await session.execute(select(WorkflowDefinition).where(WorkflowDefinition.app_id == app_id))
@@ -1513,8 +1509,6 @@ async def _do_publish_now(
     """
     before_status = app.status
     await _validate_before_publish(session, user, workflow_json, app.id)
-    if bool(getattr(app, "api_enabled", False)):
-        validate_api_workflow_capabilities(workflow_json, external_context_ready=True)
     # 重新提交发布是明确的“上线”意图。app_info.status=0 只表示此前被下架，
     # 不能在新的已通过版本上继续把应用锁死为停用，否则前端会显示“通过”却始终“已下架”。
     definition = await _upsert_definition(session, app.id, workflow_json, publish=True)
@@ -1592,13 +1586,8 @@ async def _resolve_publish_channels_and_origins(
 
 async def _mark_agent_api_access_invalidation_after_commit(app_id: str, reason: str) -> None:
     """Revoke durable API keys only after the caller has committed release state."""
-    try:
-        count = await revoke_app_access(app_id, reason=reason)
-        logger.info("Agent API access revoked app=%s reason=%s key_count=%s", app_id, reason, count)
-    except Exception:
-        # The owning transaction has committed. Never roll it back or pretend
-        # revocation happened; operators need this error to reconcile keys.
-        logger.exception("Agent API access invalidation failed app=%s reason=%s", app_id, reason)
+    # 对外 Agent API 已整体移除：这里不再有 Key 可吊销，保留钩子位以维持发布流程调用点。
+    logger.info("Agent API access invalidation skipped (feature removed) app=%s reason=%s", app_id, reason)
 
 
 async def _submit_or_publish(payload: DefinitionSaveRequest, user: UserContext) -> dict:
@@ -1779,8 +1768,6 @@ async def review_approve(payload: ReviewActionRequest, user: UserContext = Depen
         app = await session.get(WorkflowApp, version.app_id)
         if not app:
             raise HTTPException(404, "应用不存在")
-        if bool(getattr(app, "api_enabled", False)):
-            validate_api_workflow_capabilities(version.definition_json or "", external_context_ready=True)
         definition = (
             await session.execute(select(WorkflowDefinition).where(WorkflowDefinition.app_id == version.app_id))
         ).scalar_one_or_none()
@@ -1974,8 +1961,6 @@ async def _rollback_to_version(
     ).scalar_one_or_none()
     if not definition:
         raise HTTPException(400, "该应用没有工作流定义")
-    if bool(getattr(app, "api_enabled", False)):
-        validate_api_workflow_capabilities(target.definition_json or "", external_context_ready=True)
     new_no = await _next_version_no(session, app.id)
     new_version = WorkflowVersion(
         id=uuid.uuid4().hex,

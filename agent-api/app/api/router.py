@@ -34,10 +34,6 @@ from app.routers.files import router as files_router
 from app.routers.workspace import router as workspace_router
 from app.routers.campus_assistant import router as campus_assistant_router
 from app.routers.audit import router as audit_router
-from app.routers.openai_compat import router as openai_compat_router
-from app.routers.embed import router as embed_router
-from app.routers.agent_api_management import router as agent_api_management_router
-from app.routers.external_agent_runs import router as external_agent_runs_router
 from app.api.interview import router as interview_router
 
 api_router = APIRouter()
@@ -55,10 +51,6 @@ api_router.include_router(workspace_router)
 api_router.include_router(connectors_router)
 api_router.include_router(campus_assistant_router)
 api_router.include_router(audit_router)
-api_router.include_router(openai_compat_router)
-api_router.include_router(embed_router)
-api_router.include_router(agent_api_management_router)
-api_router.include_router(external_agent_runs_router)
 api_router.include_router(interview_router)
 
 config_service = ConfigService()

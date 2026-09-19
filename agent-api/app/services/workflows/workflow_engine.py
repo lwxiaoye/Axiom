@@ -27,7 +27,6 @@ from sqlalchemy import text
 from app.core.model_endpoint import get_model_base_url
 from app.core.config import settings
 from app.core.database import async_session
-from app.services.agent_harness.model_usage_audit import ExternalAttribution
 from app.services.agent_time import format_agent_now
 
 logger = logging.getLogger(__name__)
@@ -180,7 +179,6 @@ class RunContext:
     audit_purpose: str = "workflow_node"
     # Publisher API / iframe calls carry only durable external identifiers.  A
     # missing value preserves the existing first-party workflow audit behavior.
-    external_attribution: Optional[ExternalAttribution] = None
     # The external-session workspace deliberately replaces platform-user state
     # for public API/static embed calls.  Empty values retain first-party flow.
     external_execution: bool = False
@@ -759,7 +757,6 @@ class WorkflowEngine:
             purpose_detail=f"{node_type}:{node_id}"[:200],
             scope_key=f"{str(self.ctx.audit_purpose or 'workflow_node')}:{node_id}"[:255],
             provider_api_key=self.ctx.llm_api_key,
-            external_attribution=self.ctx.external_attribution,
         )
         attempt = await model_usage_audit.begin_attempt(
             logical,
@@ -1780,19 +1777,7 @@ class WorkflowEngine:
         for file_id in file_ids:
             try:
                 if self.ctx.external_execution:
-                    from app.services.agent_api.external_session_service import get_external_file_content
-
-                    content = await get_external_file_content(
-                        str(self.ctx.external_session_id or ""), file_id,
-                        newapi_key=self.ctx.llm_api_key,
-                        ocr_embedded_images=not vision,
-                        ocr_visual=not vision,
-                        **(
-                            {"audit_context": self._provider_audit_context()}
-                            if self._provider_audit_context()
-                            else {}
-                        ),
-                    )
+                    raise RuntimeError("对外 Agent API 已移除，外部会话文件不可读取")
                 else:
                     content = await user_file_service.get_content(
                         self.ctx.user_id,
@@ -3093,19 +3078,7 @@ class WorkflowEngine:
             for file_id in file_ids:
                 try:
                     if self.ctx.external_execution:
-                        from app.services.agent_api.external_session_service import get_external_file_content
-
-                        content = await get_external_file_content(
-                            str(self.ctx.external_session_id or ""), file_id,
-                            newapi_key=self.ctx.llm_api_key,
-                            ocr_embedded_images=True,
-                            ocr_visual=True,
-                            **(
-                                {"audit_context": self._provider_audit_context()}
-                                if self._provider_audit_context()
-                                else {}
-                            ),
-                        )
+                        raise RuntimeError("对外 Agent API 已移除，外部会话文件不可读取")
                     else:
                         content = await user_file_service.get_content(
                             self.ctx.user_id,
@@ -3306,7 +3279,6 @@ class WorkflowEngine:
             audit_parent_logical_call_id=self.ctx.audit_parent_logical_call_id,
             audit_execution_segment=self.ctx.audit_execution_segment,
             audit_purpose=self.ctx.audit_purpose,
-            external_attribution=self.ctx.external_attribution,
             external_execution=self.ctx.external_execution,
             external_session_id=self.ctx.external_session_id,
             external_workspace_ref=self.ctx.external_workspace_ref,
