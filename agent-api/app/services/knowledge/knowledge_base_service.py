@@ -1114,13 +1114,39 @@ async def accessible_ids(
                 KnowledgeBase.status == "ENABLED",
             )
         )).scalars().all()
+    published: Optional[set[str]] = None
     allowed: list[str] = []
     for row in rows:
         if await permission_for(row, user_id=user_id, is_admin=is_admin):
             allowed.append(row.id)
+            continue
+        # 校园百事通发布时绑定的知识库：管理员「发布」这一步就是把它开放给全体成员检索，
+        # 否则学生问校园问题恒为「无权访问」，校园 RAG 只对管理员一个人生效（2026-09-19 巡检）。
+        # 只放开检索这一条路；知识库页面的查看/编辑仍走 permission_for。
+        if published is None:
+            published = await published_campus_knowledge_ids()
+        if row.id in published:
+            allowed.append(row.id)
     # 保持调用方传入的顺序，便于日志比对
     order = {kid: i for i, kid in enumerate(ids)}
     return sorted(allowed, key=lambda kid: order.get(kid, 0))
+
+
+async def published_campus_knowledge_ids() -> set[str]:
+    """校园百事通当前发布版本绑定（且启用）的知识库 id 集合；未发布时为空集。"""
+    from app.models import CampusAssistantConfig, CampusAssistantRelease, CampusAssistantReleaseKb
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(CampusAssistantReleaseKb.knowledge_id)
+            .join(CampusAssistantRelease, CampusAssistantRelease.id == CampusAssistantReleaseKb.release_id)
+            .join(CampusAssistantConfig, CampusAssistantConfig.current_release_id == CampusAssistantRelease.id)
+            .where(
+                CampusAssistantConfig.enabled == 1,
+                CampusAssistantRelease.status == "PUBLISHED",
+                CampusAssistantReleaseKb.enabled == 1,
+            )
+        )).scalars().all()
+    return {str(kid) for kid in rows if kid}
 
 
 async def list_acl(knowledge_id: str) -> list[dict[str, Any]]:

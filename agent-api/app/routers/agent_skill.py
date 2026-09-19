@@ -27,7 +27,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.core.auth import UserContext, current_user, is_admin
 from app.core.model_endpoint import get_model_base_url
@@ -86,9 +86,17 @@ SYSTEM_SKILL_SEEDS = [
 
 class SkillUpsertRequest(BaseModel):
     id: Optional[str] = None
+    # Skill 广场按目录契约传 skillId；老调用方传 id，两个都认
+    skillId: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
     category: Optional[list] = None
+    # 用户直接编写的 SKILL.md 正文：新建时给了就不再让模型代写；编辑时给了就落一个新版本
+    content: Optional[str] = None
+
+    @property
+    def target_id(self) -> str:
+        return (self.skillId or self.id or "").strip()
 
 
 # 后台生成任务强引用集合：create_task 只留弱引用，无引用的任务可能被 GC 中断
@@ -315,32 +323,43 @@ async def list_skills(
 @router.post("/add")
 async def add_skill(payload: SkillUpsertRequest, user: UserContext = Depends(current_user)):
     name = _normalize_skill_name(payload.name)
+    content = (payload.content or "").strip()
     skill = AgentSkill(
         id=uuid.uuid4().hex,
         source="personal",
         name=name,
         description=(payload.description or "")[:1024],
         category_json=_clean_categories(payload.category),
-        creation_status="creating",
+        # 用户自己写了 SKILL.md 就直接可用；没写才交给模型后台代写
+        creation_status="ready" if content else "creating",
         owner_user_id=user.user_id,
     )
     async with async_session() as session:
         await _ensure_name_unique(session, user.user_id, name)
         session.add(skill)
+        version = None
+        if content:
+            version = AgentSkillVersion(
+                id=uuid.uuid4().hex, skill_id=skill.id, version_name="v1", content=content[:CONTENT_LIMIT]
+            )
+            session.add(version)
+            skill.current_version_id = version.id
         await session.commit()
         await session.refresh(skill)
-        result = _skill_dict(skill, None, user)
-    _spawn_background(_generate_skill_content(result["id"], result["name"], result["description"], user.user_id))
+        result = _skill_dict(skill, version, user)
+    if not content:
+        _spawn_background(_generate_skill_content(result["id"], result["name"], result["description"], user.user_id))
     return result
 
 
 @router.put("/edit")
 async def edit_skill(payload: SkillUpsertRequest, user: UserContext = Depends(current_user)):
-    if not payload.id:
+    target = payload.target_id
+    if not target:
         raise HTTPException(400, "缺少技能 ID")
     async with async_session() as session:
         # 不可见（别人的个人技能）→ 404；可见但无权（系统/内置/别人分发的）→ 403
-        skill = await _get_visible_skill(session, payload.id, user.user_id)
+        skill = await _get_visible_skill(session, target, user.user_id)
         if not skill_catalog.can_edit(skill, user.user_id):
             raise HTTPException(403, "内置技能不可编辑" if skill_catalog.is_builtin(skill) else "只能编辑自己创建的技能")
         if payload.name is not None:
@@ -352,13 +371,31 @@ async def edit_skill(payload: SkillUpsertRequest, user: UserContext = Depends(cu
             skill.description = payload.description[:1024]
         if payload.category is not None:
             skill.category_json = _clean_categories(payload.category)
-        await session.commit()
-        await session.refresh(skill)
         version = None
         if skill.current_version_id:
             version = (
                 await session.execute(select(AgentSkillVersion).where(AgentSkillVersion.id == skill.current_version_id))
             ).scalar_one_or_none()
+        new_content = (payload.content or "").strip()
+        if new_content and new_content != ((version.content or "").strip() if version else ""):
+            # 正文有改动才新开一个版本（v1 → v2 …），旧版本保留供「版本」列表回看
+            count = (
+                await session.execute(
+                    select(func.count()).select_from(AgentSkillVersion).where(AgentSkillVersion.skill_id == skill.id)
+                )
+            ).scalar_one()
+            version = AgentSkillVersion(
+                id=uuid.uuid4().hex, skill_id=skill.id, version_name=f"v{int(count or 0) + 1}",
+                content=new_content[:CONTENT_LIMIT],
+            )
+            session.add(version)
+            skill.current_version_id = version.id
+            skill.creation_status = "ready"
+            skill.creation_error = None
+        await session.commit()
+        await session.refresh(skill)
+        if version is not None:
+            await session.refresh(version)
         return _skill_dict(skill, version, user)
 
 
@@ -378,7 +415,7 @@ async def delete_skill(
         if not skill_catalog.can_delete(skill, user.user_id):
             raise HTTPException(403, "内置技能不可删除" if skill_catalog.is_builtin(skill) else "只能删除自己创建的技能")
         versions = (
-            (await session.execute(select(AgentSkillVersion).where(AgentSkillVersion.skill_id == id))).scalars().all()
+            (await session.execute(select(AgentSkillVersion).where(AgentSkillVersion.skill_id == skill.id))).scalars().all()
         )
         for version in versions:
             await session.delete(version)

@@ -448,6 +448,7 @@ import {
   FolderOpenOutlined,
   FolderOutlined,
   MoreOutlined,
+  PlusOutlined,
   SearchOutlined,
   UnorderedListOutlined,
   UploadOutlined,
