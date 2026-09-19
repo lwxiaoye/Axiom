@@ -184,6 +184,14 @@ async def _verify_token_with_auth_api(token: str) -> UserContext:
         dept_ids=_normalize_ids(raw_depts),
         role_ids=role_ids,
     )
+    # 顺手把 auth-api 的 realname/avatar 同步进本库 sys_user（广场「创建人」读的是它）。
+    # 这里是唯一能拿到可信 userInfo 的地方；每用户 5 分钟最多写一次，失败只记日志不影响鉴权。
+    try:
+        from app.services.sys_user_sync import sync_sys_user_profile
+
+        await sync_sys_user_profile(info)
+    except Exception:  # noqa: BLE001 - 展示信息，任何异常都不能让鉴权失败
+        logger.warning("同步 sys_user 资料时异常 user_id=%s", user_id, exc_info=True)
     logger.info(
         "鉴权成功: user_id=%s username=%s role_ids=%s dept_ids=%s",
         user.user_id, user.username, user.role_ids, user.dept_ids,
