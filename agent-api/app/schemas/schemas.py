@@ -64,6 +64,7 @@ class ChatRequest(BaseModel):
     # 右侧轻量旁路会话：只影响新建 Thread 的历史归属，不能由已有主会话改写来源。
     side_chat: bool = False
     regenerate: bool = False
+    # 已废弃（子智能体随工作流编排删除）：旧前端仍可能带上，宽松忽略、不 422。
     subagent_id: Optional[str] = None
     web_search: bool = False
     # 三种产品模式只选 Profile，不切换运行内核。
@@ -132,15 +133,6 @@ class ModelItem(BaseModel):
     is_default: bool = False
 
 
-class AgentItem(BaseModel):
-    id: str
-    name: str
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    is_recommend: bool = False
-    status: int = 0
-
-
 class SkillItem(BaseModel):
     id: str
     name: str
@@ -179,35 +171,3 @@ class MasterConfigUpdate(BaseModel):
 class SkillToggle(BaseModel):
     skill_id: str
     enabled: bool = True
-
-
-class AgentSyncAgent(BaseModel):
-    id: str
-    # 所属租户（app_info.tenant_id）。**有默认值以保持 /internal/agents/bulk-sync 向后兼容**：
-    # 旧版 Java 增量同步不带该字段时落全局占位 '0'，语义 = 对所有租户可见（与
-    # published_visibility.tenant_matches 一致）；Java 补齐后即按真实租户隔离。
-    # 注意：'0' 是「全租户可见」而不是「没有租户」——填错会造成跨租户曝光。
-    tenant_id: str = "0"
-    owner_user_id: str = ""
-    name: str
-    description: str = ""
-    icon: str = ""
-    category: str = ""
-    status: int = 1
-    published: bool = True
-    role_ids: List[str] = Field(default_factory=list)
-    dept_ids: List[str] = Field(default_factory=list)
-    # 显式公开标记（§4.4 风险3）：Java 同步时指定；缺省 None = 未提供，由 AGENT_ACL_STRICT 决定空 ACL 语义
-    is_public: Optional[bool] = None
-    source_version: int
-
-
-class AgentEvent(BaseModel):
-    event_id: str
-    event_type: str  # upsert / delete / disable / unpublish
-    source_version: int
-    agent: Optional[AgentSyncAgent] = None
-
-
-class AgentBulkSyncRequest(BaseModel):
-    agents: List[AgentSyncAgent]

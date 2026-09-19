@@ -7,16 +7,13 @@ import uuid
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import ValidationError
 from typing import Any, Dict, List, Optional
 
 from app.core.auth import current_user, UserContext, is_admin
 from app.core.config import settings
-from app.core.hmac_auth import verify_internal_request
 from app.schemas.schemas import (
-    ChatRequest, ChatResponse, HarnessInputRequest, ModelItem, AgentItem,
+    ChatRequest, ChatResponse, HarnessInputRequest, ModelItem,
     ThreadItem, MasterConfig, MasterConfigUpdate,
-    AgentEvent, AgentBulkSyncRequest,
 )
 from app.api.sse_utils import SSE_HEADERS, with_sse_keepalive
 from app.services.agent_harness.orchestrator import harness_orchestrator
@@ -28,16 +25,13 @@ from app.routers.connectors import router as connectors_router
 from app.routers.embedding_config import router as embedding_config_router
 from app.routers.platform_config import router as platform_config_router
 from app.routers.knowledge import router as knowledge_router
-from app.routers.workflow import router as workflow_router
+from app.routers.marketplace import router as marketplace_router
+from app.routers.gateway import router as gateway_router
 from app.routers.agent_skill import router as agent_skill_router
 from app.routers.files import router as files_router
 from app.routers.workspace import router as workspace_router
 from app.routers.campus_assistant import router as campus_assistant_router
 from app.routers.audit import router as audit_router
-from app.routers.openai_compat import router as openai_compat_router
-from app.routers.embed import router as embed_router
-from app.routers.agent_api_management import router as agent_api_management_router
-from app.routers.external_agent_runs import router as external_agent_runs_router
 from app.api.interview import router as interview_router
 
 api_router = APIRouter()
@@ -48,17 +42,14 @@ api_router.include_router(rerank_config_router)
 api_router.include_router(embedding_config_router)
 api_router.include_router(platform_config_router)
 api_router.include_router(knowledge_router)
-api_router.include_router(workflow_router)
+api_router.include_router(marketplace_router)
+api_router.include_router(gateway_router)
 api_router.include_router(agent_skill_router)
 api_router.include_router(files_router)
 api_router.include_router(workspace_router)
 api_router.include_router(connectors_router)
 api_router.include_router(campus_assistant_router)
 api_router.include_router(audit_router)
-api_router.include_router(openai_compat_router)
-api_router.include_router(embed_router)
-api_router.include_router(agent_api_management_router)
-api_router.include_router(external_agent_runs_router)
 api_router.include_router(interview_router)
 
 config_service = ConfigService()
@@ -78,26 +69,6 @@ async def list_builtin_apps_route(user: UserContext = Depends(current_user)):
 async def get_builtin_app(preset: str, user: UserContext = Depends(current_user)):
     """Resolve one administrator-configured Harness page and enforce its current ACL."""
     return await builtin_app_access.require_builtin_app_access(user, preset)
-
-
-@api_router.get("/chat/subagents")
-async def list_subagents(
-    keyword: Optional[str] = None,
-    limit: int = 50,
-    user: UserContext = Depends(current_user),
-):
-    """列出可 @提及调用的子智能体（已发布、当前用户可访问的工作台智能体）。
-
-    limit 只是**展示层**截断（@ 面板一页量级）；权限全集/召回层用
-    subagent_service.list_callable_subagent_ids，不受此限。
-    """
-    from app.services.agents import subagent_service
-    rows = await subagent_service.list_subagents(user, keyword=keyword)
-    import logging as _dbg_logging
-    _dbg_logging.getLogger("app.api.router").info(
-        "[DBG subagents] tenant=%r user=%s -> %d rows", user.tenant_id, user.user_id, len(rows)
-    )
-    return rows[: max(1, min(int(limit or 50), 200))]
 
 
 @api_router.post("/chat/upload")
@@ -249,7 +220,7 @@ async def create_chat_run(
         knowledge_ids=request.knowledge_ids,
         selected_knowledge=[item.model_dump() for item in (request.selected_knowledge or [])],
         user_context=user,
-        regenerate=request.regenerate, subagent_id=request.subagent_id, token=x_access_token or "",
+        regenerate=request.regenerate, token=x_access_token or "",
         web_search=request.web_search, agent_mode=request.agent_mode,
         assistant_preset=request.assistant_preset,
         interview_input=request.interview_input.model_dump(mode="json") if request.interview_input else None,
@@ -621,12 +592,6 @@ async def enqueue_thread_message(
                 ("id", "recordId", "skillId", "name", "description", "icon", "version", "author", "source"),
                 10,
             ),
-            # @ 委托目标与队列消息绑定；只保留执行需要的 id 和展示字段。
-            "subagent": next(iter(_pick_items(
-                [raw_context.get("subagent")],
-                ("id", "name", "description", "icon", "type", "scope"),
-                1,
-            )), None),
             "knowledge": _pick_items(
                 raw_context.get("knowledge"), ("id", "name", "permission"), 20),
             "files": _pick_items(raw_context.get("files"), ("id", "filename"), 20),
@@ -1063,20 +1028,6 @@ async def get_models(user: UserContext = Depends(current_user)):
     return await agent_service.get_models(user_key=user_key)
 
 
-# Agent endpoints
-@api_router.get("/agents", response_model=List[AgentItem])
-async def get_agents(
-    recommend: bool = False,
-    search: Optional[str] = None,
-    user: UserContext = Depends(current_user)
-):
-    """获取已发布智能体列表"""
-    return await agent_service.get_agents(
-        recommend=recommend,
-        search=search
-    )
-
-
 # Skill endpoints 已移除（ADR-001）：内存 SkillService 是无数据源的 demo 版，前端已切
 # /agent-api/skill/*（Java /ai/skill/* 随 JeecgBoot 下线，目录由 services/skills/skill_catalog 自持）。
 
@@ -1111,41 +1062,6 @@ async def save_master_config(
         raise HTTPException(403, "需要管理员权限")
     await config_service.save_master_config(config)
     return {"message": "保存成功"}
-
-
-# Internal sync endpoints (HMAC protected)
-@api_router.post("/internal/agents/events")
-async def agent_event(
-    request: Request,
-):
-    """单事件同步（Java 后端调用）"""
-    await verify_internal_request(request)
-    try:
-        event = AgentEvent.model_validate_json(await request.body())
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    from app.services.agents.agent_sync_service import process_event
-    result = await process_event(event)
-    return result
-
-
-@api_router.post("/internal/agents/bulk-sync")
-async def agent_bulk_sync(
-    request: Request,
-):
-    """批量同步（首次迁移或人工修复，每批最多 200 条）"""
-    await verify_internal_request(request)
-    try:
-        body = AgentBulkSyncRequest.model_validate_json(await request.body())
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    if len(body.agents) > 200:
-        raise HTTPException(status_code=400, detail="单批最多 200 条")
-    from app.services.agents.agent_sync_service import process_bulk_sync
-    result = await process_bulk_sync(body.agents)
-    if result["failed"]:
-        raise HTTPException(status_code=503, detail=result)
-    return result
 
 
 # Test endpoint

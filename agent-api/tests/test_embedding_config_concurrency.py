@@ -3,10 +3,8 @@
 P1-3 /embedding-config/test：探测结果曾无条件写进 is_active==1 的生效行——管理员试一个
      未保存的候选模型，探测到的 dimension 会盖掉线上模型的维度，集合名（按 model+dimension
      哈希）随之指向空集合，全站向量检索静默失效。修复=身份校验后才落库。
-P1-4 /reindex 与 /ensure-indexed：全量回填无互斥（新部署后多个用户登录各起一份），
-     job_id 用秒级时间戳同秒两次点击会撞车。修复=进程内互斥 + job_id 加 uuid 后缀。
+（P1-4 /reindex 与 /ensure-indexed 的广场智能体向量回填已随工作流编排删除。）
 """
-import asyncio
 import unittest
 from unittest.mock import patch
 
@@ -92,96 +90,3 @@ class EmbeddingTestPersistTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.test_status, "success")
         self.assertIsNotNone(row.last_test_time)
         self.assertTrue(result.persisted)
-
-
-class BackfillMutexTest(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        ec._backfill_active = None
-        ec._reindex_jobs.clear()
-
-    def tearDown(self):
-        ec._backfill_active = None
-        ec._reindex_jobs.clear()
-
-    def test_job_id_has_uuid_suffix(self):
-        ids = {ec._new_job_id("reindex") for _ in range(20)}
-        self.assertEqual(len(ids), 20)  # 同秒多次不再撞车
-
-    async def test_concurrent_reindex_starts_one_backfill(self):
-        gate = asyncio.Event()
-        calls = []
-
-        async def _slow_backfill(**_kw):
-            calls.append(1)
-            await gate.wait()
-            return {"indexed": 3, "failed": 0}
-
-        cfg = type("C", (), {"test_status": "success", "model": "m", "dimension": 1024})()
-
-        async def _cfg():
-            return cfg
-
-        with patch.object(ec.backfill_service, "run_backfill", _slow_backfill), patch.object(
-            ec.embedding_service, "get_active_embedding_config", _cfg
-        ):
-            first, second = await asyncio.gather(ec.reindex(user=ADMIN), ec.reindex(user=ADMIN))
-            await asyncio.sleep(0)  # 让后台任务起跑
-
-            self.assertEqual(first["job_id"], second["job_id"])
-            self.assertEqual({first["status"], second["status"]}, {"started", "already_running"})
-            self.assertEqual(len(calls), 1)
-
-            gate.set()
-            for _ in range(10):
-                await asyncio.sleep(0)
-                if ec._backfill_active is None:
-                    break
-
-        self.assertIsNone(ec._backfill_active)  # 令牌已归还
-        self.assertEqual(ec._reindex_jobs[first["job_id"]]["status"], "completed")
-        self.assertEqual(ec._reindex_jobs[first["job_id"]]["indexed"], 3)
-
-    async def test_concurrent_ensure_indexed_starts_one_backfill(self):
-        gate = asyncio.Event()
-        calls = []
-
-        async def _slow_backfill(**_kw):
-            calls.append(1)
-            await gate.wait()
-            return {"indexed": 1, "failed": 0}
-
-        cfg = type("C", (), {"test_status": "success", "model": "m", "dimension": 1024})()
-
-        async def _cfg():
-            return cfg
-
-        async def _ensure_collection(*_a, **_k):
-            return None
-
-        async def _count(*_a, **_k):
-            return 0  # 集合为空 → 触发回填
-
-        with patch.object(ec.backfill_service, "run_backfill", _slow_backfill), patch.object(
-            ec.embedding_service, "get_active_embedding_config", _cfg
-        ), patch.object(ec.vector_service, "collection_name", lambda *a, **k: "c1"), patch.object(
-            ec.vector_service, "ensure_collection", _ensure_collection
-        ), patch.object(ec.vector_service, "count_collection", _count):
-            users = [UserContext(user_id=str(i), username=f"u{i}") for i in range(5)]
-            results = await asyncio.gather(*(ec.ensure_indexed(user=u) for u in users))
-            await asyncio.sleep(0)
-
-            self.assertEqual(len(calls), 1, "5 个用户同时登录只应起一份回填")
-            self.assertEqual(len({r["job_id"] for r in results}), 1)
-            self.assertEqual([r["status"] for r in results].count("started"), 1)
-
-            gate.set()
-            for _ in range(10):
-                await asyncio.sleep(0)
-                if ec._backfill_active is None:
-                    break
-
-        self.assertIsNone(ec._backfill_active)
-
-
-if __name__ == "__main__":
-    unittest.main()

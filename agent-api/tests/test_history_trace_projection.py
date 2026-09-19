@@ -193,7 +193,6 @@ def test_history_restores_images_without_runtime_and_prefers_live_references(mon
 
     monkeypatch.setattr(orchestrator, "async_session", lambda: _Context(HistorySession()))
     monkeypatch.setattr(citation_service, "get_for_thread", AsyncMock(return_value={42: live_sources}))
-    monkeypatch.setattr(task_run_service, "get_subagent_steps_by_thread", AsyncMock(return_value={}))
     monkeypatch.setattr(task_run_service, "get_execution_traces_by_thread", AsyncMock(return_value={}))
 
     result = asyncio.run(orchestrator.HarnessOrchestrator().get_thread_messages("user-1", "thread-1"))

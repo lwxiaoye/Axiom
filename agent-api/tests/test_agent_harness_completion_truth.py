@@ -422,7 +422,6 @@ def test_main_tool_turn_has_no_direct_success_terminal_bypass():
     for relative in (
         "app/services/chat/main_tool_turn.py",
         "app/services/chat/plain_turn.py",
-        "app/services/chat/subagent_turn.py",
     ):
         tree = ast.parse(Path(relative).read_text(encoding="utf-8"))
         for node in ast.walk(tree):

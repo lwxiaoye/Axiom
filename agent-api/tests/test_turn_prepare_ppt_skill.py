@@ -40,7 +40,6 @@ async def test_prepare_turn_does_not_preload_platform_ppt_skill(monkeypatch) -> 
     result = await turn_prepare.prepare_turn(
         message="制作一份 8 页产品发布会 PPT",
         user_context=None,
-        subagent_id=None,
         knowledge_ids=None,
         selected_knowledge=None,
         web_search=False,
@@ -104,12 +103,10 @@ async def test_prepare_turn_timeout_fallback_keeps_skill_unread(monkeypatch) -> 
     monkeypatch.setattr(turn_prepare.memory_service, "recall", no_memory)
     monkeypatch.setattr(turn_prepare.personalization_service, "prompt_block", no_personalization)
     monkeypatch.setattr(turn_prepare.settings, "TURN_PREPARE_BUDGET_SECONDS", 0.5)
-    monkeypatch.setattr(turn_prepare.settings, "AUTO_ROUTE_ENABLED", False)
 
     result = await turn_prepare.prepare_turn(
         message="做一份高级感产品 PPT",
         user_context=None,
-        subagent_id=None,
         knowledge_ids=None,
         selected_knowledge=None,
         web_search=False,
@@ -150,7 +147,7 @@ async def test_explicit_selection_only_keeps_acl_catalog_metadata(monkeypatch) -
     monkeypatch.setattr(turn_prepare.personalization_service, "prompt_block", no_personalization)
     monkeypatch.setattr(turn_prepare, "_lesson_block", no_lesson)
     result = await turn_prepare.prepare_turn(
-        message="做一份 PPT", user_context=None, subagent_id=None, knowledge_ids=None,
+        message="做一份 PPT", user_context=None, knowledge_ids=None,
         selected_knowledge=None, web_search=False, image_urls=[], resolved_model="test-model",
         newapi_key="", skill_ids=["ppt-studio"], token="token", user_id="user", thread_id="thread",
     )
@@ -171,13 +168,13 @@ def test_presentation_preset_resolves_only_enabled_exact_ppt_studio() -> None:
     assert resolve_ppt_studio_skill_id(records[:2]) == ""
 
 
-def test_presentation_preset_physically_removes_skill_and_subagent_tools() -> None:
+def test_presentation_preset_physically_removes_skill_and_capability_tools() -> None:
     class Tool:
         def __init__(self, name: str):
             self.name = name
 
     tools = [Tool(name) for name in (
-        "bash", "use_skill", "recommend_agent", "call_subagent", "delegate_task",
+        "bash", "use_skill", "search_capabilities",
         "update_plan", "publish_ppt_artifact",
     )]
     assert [tool.name for tool in without_presentation_forbidden_tools(tools)] == [
@@ -191,7 +188,7 @@ def test_presentation_preset_keeps_search_web_and_fetch_ppt_asset() -> None:
             self.name = name
 
     tools = [Tool(name) for name in (
-        "search_web", "fetch_ppt_asset", "bash", "use_skill", "call_subagent",
+        "search_web", "fetch_ppt_asset", "bash", "use_skill", "search_capabilities",
     )]
     kept = [tool.name for tool in without_presentation_forbidden_tools(tools)]
     assert "search_web" in kept
@@ -222,19 +219,17 @@ def test_presentation_tool_surface_is_ppt_skill_only() -> None:
     })
     assert PRESENTATION_PINNED_TOOL_NAMES.isdisjoint(PRESENTATION_FORBIDDEN_TOOL_NAMES)
     assert PRESENTATION_FORBIDDEN_TOOL_NAMES >= {
-        "use_skill", "recommend_agent", "call_subagent", "delegate_task",
-        "search_capabilities",
+        "use_skill", "search_capabilities",
     }
     names = [
         *PRESENTATION_PINNED_TOOL_NAMES,
-        "use_skill", "recommend_agent", "call_subagent", "delegate_task",
-        "search_capabilities", "download_url", "search_knowledge", "browser_fetch",
-        "remember_fact",
+        "use_skill", "search_capabilities", "download_url", "search_knowledge",
+        "browser_fetch", "remember_fact",
     ]
     kept = [tool.name for tool in presentation_allowed_tools([Tool(n) for n in names])]
     assert set(kept) == set(PRESENTATION_PINNED_TOOL_NAMES)
-    assert "call_subagent" not in kept
-    assert "recommend_agent" not in kept
+    assert "use_skill" not in kept
+    assert "search_capabilities" not in kept
 
 
 def test_presentation_call_sites_close_catalog() -> None:
@@ -249,9 +244,7 @@ def test_presentation_call_sites_close_catalog() -> None:
     assert orch_src.count("runtime_policy.validate_tools(tools)") >= 2
     assert "without_presentation_forbidden_tools(tools)" not in turn_src
     assert "without_presentation_forbidden_tools(tools)" not in orch_src
-    rec_idx = turn_src.index("build_recommend_agent_tool")
-    pres_idx = turn_src.index("tools = runtime_policy.bound_tools(tools)")
-    assert pres_idx < rec_idx
+    assert "tools = runtime_policy.bound_tools(tools)" in turn_src
 
 
 @pytest.mark.asyncio
@@ -288,13 +281,12 @@ async def test_presentation_preset_authoritatively_preloads_ppt_studio(monkeypat
 
     result = await turn_prepare.prepare_turn(
         message="做一份两页功能验证演示文稿",
-        user_context=None, subagent_id="must-not-survive", knowledge_ids=None,
+        user_context=None, knowledge_ids=None,
         selected_knowledge=None, web_search=False, image_urls=[],
         resolved_model="test-model", newapi_key="", skill_ids=None, token="token",
         user_id="user", thread_id="thread", assistant_preset="presentation",
     )
 
-    assert result.effective_subagent_id is None
     assert result.effective_skill_ids == ["tenant-ppt-studio"]
     assert result.trusted_skills[0]["instructions"] == "authoritative skill instructions"
     assert result.selected_skill_records == [{
@@ -336,7 +328,7 @@ async def test_presentation_preset_optional_memory_failure_does_not_mask_valid_s
     monkeypatch.setattr(turn_prepare, "_lesson_block", no_lesson)
 
     result = await turn_prepare.prepare_turn(
-        message="做一份演示文稿", user_context=None, subagent_id=None,
+        message="做一份演示文稿", user_context=None,
         knowledge_ids=None, selected_knowledge=None, web_search=False, image_urls=[],
         resolved_model="test-model", newapi_key="", skill_ids=None, token="token",
         user_id="user", thread_id="thread", assistant_preset="presentation",
@@ -381,7 +373,7 @@ async def test_presentation_preset_optional_memory_timeout_does_not_mask_valid_s
     monkeypatch.setattr(turn_prepare.settings, "TURN_PREPARE_BUDGET_SECONDS", 0.5)
 
     result = await turn_prepare.prepare_turn(
-        message="做一份演示文稿", user_context=None, subagent_id=None,
+        message="做一份演示文稿", user_context=None,
         knowledge_ids=None, selected_knowledge=None, web_search=False, image_urls=[],
         resolved_model="test-model", newapi_key="", skill_ids=None, token="token",
         user_id="user", thread_id="thread", assistant_preset="presentation",
@@ -417,7 +409,7 @@ async def test_presentation_preset_fails_closed_when_ppt_studio_is_unavailable(m
 
     with pytest.raises(ConfigurationRunError, match="没有已启用的 ppt-studio") as error:
         await turn_prepare.prepare_turn(
-            message="做一份演示文稿", user_context=None, subagent_id=None,
+            message="做一份演示文稿", user_context=None,
             knowledge_ids=None, selected_knowledge=None, web_search=False, image_urls=[],
             resolved_model="test-model", newapi_key="", skill_ids=None, token="token",
             user_id="user", thread_id="thread", assistant_preset="presentation",

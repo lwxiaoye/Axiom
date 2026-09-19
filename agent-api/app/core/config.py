@@ -59,29 +59,8 @@ class Settings(BaseSettings):
     # 否则任务模式退化成不可恢复的临时图、事件回放/R0 守卫/HITL 全部静默失效。
     # 默认 false 仅照顾裸机本地跑（无 PG 也能起）。
     RUNTIME_REQUIRED: bool = False
-    # 工作流执行内核：langgraph（§10.5.10 已选定默认，环路图自动回退 legacy）| legacy（手写调度器）
-    # 默认值必须与 docker-compose.yml 一致：交互节点（userSelect/formInput）只有 langgraph 支持，
-    # 若默认 legacy，直跑 uvicorn 时已发布的交互图会执行失败。
-    WORKFLOW_ENGINE: str = "langgraph"
-
-    # Qdrant 向量库
+    # Qdrant 向量库（知识库集合）
     QDRANT_URL: str = "http://qdrant:6333"
-    AGENT_RETRIEVE_TOP_K: int = 15
-    # 智能体推荐/检索 ACL 严格模式：True=空/未知 ACL 视为私有（deny-by-default，§4.4 风险3）。
-    # 默认 False 保持兼容，待 Java 同步补齐 is_public/ACL 后置 True 启用（Phase 0）。
-    AGENT_ACL_STRICT: bool = False
-    # 主 Agent 专业智能体推荐：独立于 call_subagent 路由索引。索引未 ready 时
-    # Tool Registry 不注册 recommend_agent，主对话按原能力继续，不做弱降级推荐。
-    AGENT_RECOMMEND_ENABLED: bool = True
-    AGENT_RECOMMEND_SHADOW_MODE: bool = True
-    AGENT_RECOMMEND_ROLLOUT_PERCENT: int = 0
-    AGENT_RECOMMEND_TIMEOUT_SECONDS: float = 2.0
-    AGENT_RECOMMEND_DEFAULT_MIN_SCORE: float = 0.62
-    # 三路 RRF 第一/第二名最小分差（不是 cosine 原始分）。
-    AGENT_RECOMMEND_IMPLICIT_MARGIN: float = 0.006
-    AGENT_RECOMMEND_IMPLICIT_VECTOR_MARGIN: float = 0.08
-    AGENT_RECOMMEND_SYNC_INTERVAL: int = 300
-    AGENT_RECOMMEND_RETENTION_SECONDS: int = 86400
     INITIAL_CHAT_MODELS: str = ""
     # 自动会话标题用的轻量模型 id（留空则复用当轮对话模型）。配一个便宜/快的模型可降低
     # 后台标题生成对用户模型配额的占用与成本；生成失败仍回退截断标题，不影响对话。
@@ -137,25 +116,6 @@ class Settings(BaseSettings):
     # 20000 对一份学习/需求长文太小（正文尾部读不到）；现代模型上下文 128K+，放宽到 60000
     # 覆盖绝大多数文档；仍需截断的超大文件可用环境变量再调。图片/PDF 逐页 OCR 亦共用此上限。
     DOC_PARSE_MAX_TEXT_CHARS: int = 60000
-
-    # 最小版自动路由（R3+R4 降配，§8.1/ADR-045）：无显式 @／未选知识库／未开联网时，
-    # 由轻量 LLM 在 ACL 内候选中做 matched(single)/direct_answer 二分。
-    # 开发计划 Phase 3 路由退役：call_subagent 已是主模型工具（ADR-046），整轮转交路由
-    # 默认关闭；仅作特殊场景兜底可显式再开。
-    AUTO_ROUTE_ENABLED: bool = False
-    AUTO_ROUTE_MAX_CANDIDATES: int = 20      # 送入 LLM／工具清单的候选上限（防超长 prompt）
-    # ---- call_subagent 候选语义发现（2026-07-22，独立于 AUTO_ROUTE_ENABLED）----
-    # 主对话候选来源：完整 ACL 全集 → Registry 硬过滤 → 语义+关键词混合召回 Top K。
-    # hybrid=向量+关键词混排（RRF）；lexical=仅关键词（embedding 不可用环境可显式降级）。
-    # 召回层只决定主模型「看得到谁」，不替主模型决定调用谁；执行前仍实时重查 MySQL 权限。
-    SUBAGENT_DISCOVERY_MODE: str = "hybrid"
-    SUBAGENT_DISCOVERY_TOP_K: int = 12       # 注册为 call_subagent 候选的最终条数
-    SUBAGENT_DISCOVERY_RECALL_K: int = 40    # 向量召回池（Top K 的 3~4 倍）
-    # 主↔子往返上限（同一 Task Run／session_ref，§10.2.1/ADR-044）
-    SUBAGENT_MAX_ROUNDS: int = 3
-    # call_subagent 编排（ADR-046/开发计划 Phase 1/3）
-    SUBAGENT_TOOL_MAX_CALLS: int = 3         # 单轮内主模型 call_subagent 次数上限
-    SUBAGENT_TIMEOUT_SECONDS: int = 300      # 子智能体单次执行墙钟超时（0=不限）
 
     # ---- 工具循环轮次预算 ----
     # 一轮 = 一次 LLM 往返。产出型任务（逐页写 PPT→转换→审查→返工）每次质量返工都要
@@ -277,17 +237,9 @@ class Settings(BaseSettings):
     CONTEXT_COMPACT_TIMEOUT_SECONDS: int = 4
 
     # 发布审批（WS2，强制审批）：所有工作流/对话 Agent 发布须提交审核，审核员通过后上线。
-    PUBLISH_APPROVAL_REQUIRED: bool = True
-    # 审核员 / 平台管理员角色白名单（逗号分隔的 auth-api 返回的 role_id）。命中即拥有审核 / 跨用户管理权限。
+    # 平台管理员角色白名单（逗号分隔的 auth-api 返回的 role_id）。命中即拥有跨用户管理权限。
     # role_id↔权限码映射是跨团队 seam；username==admin 或 role 含 "admin" 亦视为平台管理员（沿用 is_admin）。
-    AGENT_REVIEWER_ROLE_IDS: str = ""
     AGENT_ADMIN_ROLE_IDS: str = ""
-    # 临时兼容跨租户的智能体/工作流发布与运行。恢复租户隔离时仅需设为 True，
-    # 不影响知识库、文件、外部应用等其他业务域的租户边界。
-    AGENT_WORKFLOW_TENANT_ISOLATION_ENABLED: bool = False
-
-    # 内部同步接口
-    INTERNAL_SYNC_SECRET: str = ""
     INTERNAL_SYNC_MAX_AGE_SECONDS: int = 300
 
     # 选中知识库后的前置召回不能无限挡住首帧；超时后模型会明确说明本轮未取得资料。
@@ -341,12 +293,6 @@ class Settings(BaseSettings):
     USER_LOCATION_TIMEOUT_SECONDS: float = 5.0
     USER_LOCATION_CACHE_TTL_SECONDS: int = 21600
     USER_LOCATION_CACHE_MAX_ENTRIES: int = 2048
-
-    # 启动自动回填（向量集合为空时，从 app_info 读智能体灌入 Qdrant）
-    AUTO_BACKFILL: bool = False
-    # 轮询对账：定时扫 app_info，自动同步新增/修改/删除/停用到向量库
-    SYNC_POLL_ENABLED: bool = False
-    SYNC_POLL_INTERVAL: int = 60
 
     # Auth
     AUTH_HEADER_PREFIX: str = "X-"

@@ -201,8 +201,6 @@ class LoopSafetyResumeTests(unittest.TestCase):
             "revision_open": True,
             "revision_requires_mutation": True,
             "revision_mutation_verified": False,
-            "locked_subagent_id": "",
-            "subagent_call_count": 0,
             "disabled_tools_seen": [],
         })
         self.assertEqual(st.force_converge, "")

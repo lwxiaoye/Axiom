@@ -16,14 +16,13 @@ from .prepare import prepare_turn
 
 
 async def prepare_request(kwargs: dict) -> None:
-    if kwargs.get("subagent_id") or kwargs.get("skill_ids") or kwargs.get("selected_skills"):
+    if kwargs.get("skill_ids") or kwargs.get("selected_skills"):
         raise HTTPException(
             status_code=422,
-            detail="演示文稿助手固定使用 ppt-studio，不能引用子智能体或其他 Skill。",
+            detail="演示文稿助手固定使用 ppt-studio，不能引用其他 Skill。",
         )
     # Only intent is pinned here; every Worker turn validates the live Skill catalog/ACL.
     kwargs["assistant_preset"] = PRESENTATION_PRESET
-    kwargs["subagent_id"] = None
     kwargs["skill_ids"] = [PRESENTATION_SKILL_CANONICAL_ID]
     kwargs["selected_skills"] = [{
         "id": PRESENTATION_SKILL_CANONICAL_ID,

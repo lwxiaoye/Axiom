@@ -35,7 +35,6 @@ async def prepare_request(kwargs: dict) -> None:
     kwargs["selected_knowledge"] = []
     kwargs["skill_ids"] = []
     kwargs["selected_skills"] = []
-    kwargs["subagent_id"] = None
     # Attachments remain validated shared uploads; only references are restricted here.
     kwargs["file_ids"] = []
     kwargs["thread_ids"] = []
@@ -49,17 +48,11 @@ async def prepare_turn(
     _services: BuiltinTurnServices,
 ) -> TurnContext:
     return TurnContext(
-        effective_subagent_id=None,
-        route_info=None,
-        clarify_options=[],
-        agents=None,
         trusted_skills=[],
         selected_skill_records=[],
         effective_skill_ids=[],
         memory_block="",
         skill_catalog_block="",
-        recommend_agent_ids=[],
-        recommend_external=None,
     )
 
 

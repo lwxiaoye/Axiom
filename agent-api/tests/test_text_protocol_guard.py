@@ -1,13 +1,12 @@
 """text_protocol_guard 单测：deepseek 系文本工具协议标记的流式/非流式清洗。
 
 覆盖：完整标记单帧命中、跨帧切碎（含逐字符）、全角变体、假前缀不误杀不吞字、
-标记前正文保留/标记后丢弃、scrub_text 与流式喂入等价、agent_executor 流式接入。
+标记前正文保留/标记后丢弃、scrub_text 与流式喂入等价。
 """
 
 import json
 import unittest
 import pytest
-from unittest.mock import patch
 from app.services.agent_harness.responses_protocol import ResponsesTerminalError
 
 from app.services.platform.text_protocol_guard import (
@@ -163,109 +162,6 @@ class ScrubTextTests(unittest.TestCase):
                 out, scrubber = _feed_all(chunks)
                 self.assertEqual(out, expect_safe, f"{text!r} 分帧 {len(chunks)}")
                 self.assertEqual(scrubber.leaked, expect_leaked, f"{text!r} 分帧 {len(chunks)}")
-
-
-# ---------------------------------------------------------------------------
-# agent_executor 流式接入（工作流 Agent 节点）
-# ---------------------------------------------------------------------------
-
-from app.services.agents.agent_executor import run_function_call_loop  # noqa: E402
-
-
-class _FakeCtx:
-    def __init__(self):
-        self.variables = {}
-        self.llm_api_key = "test-key"
-        self.chunks = []
-
-    async def stream_output(self, seq: int, text: str):
-        self.chunks.append((seq, text))
-
-
-class _FakeEngine:
-    def __init__(self):
-        self.ctx = _FakeCtx()
-
-
-class _FakeStreamResponse:
-    status_code = 200
-
-    def __init__(self, lines):
-        self._lines = lines
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def aiter_lines(self):
-        for line in self._lines:
-            yield line
-
-
-class _FakeAsyncClient:
-    responses = []
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    def stream(self, method, url, json=None, headers=None):
-        return _FakeStreamResponse(self.responses.pop(0))
-
-
-def _sse(delta: dict) -> str:
-    return "data: " + json.dumps({"choices": [{"delta": delta, "finish_reason": "stop"}]}, ensure_ascii=False)
-
-
-class AgentExecutorScrubTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        patcher = patch("app.services.agent_harness.function_round.model_uses_responses_transport", return_value=False)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    async def test_streamed_protocol_leak_truncated(self):
-        _FakeAsyncClient.responses = [
-            [
-                _sse({"content": "已完成"}),
-                _sse({"content": "分析。<|DS"}),          # 标记跨帧切碎
-                _sse({"content": "ML|tool_calls><invoke>"}),
-                _sse({"content": '{"query":"内部参数"}'}),
-                "data: [DONE]",
-            ]
-        ]
-        engine = _FakeEngine()
-        with patch("app.services.agents.agent_executor.httpx.AsyncClient", _FakeAsyncClient):
-            with pytest.raises(ResponsesTerminalError):
-                await run_function_call_loop(
-                    engine, model="deepseek-test", temperature=None, system_prompt="",
-                    max_histories=0, user_input="hi", tools=[], output_seq=3,
-                )
-        self.assertEqual(engine.ctx.chunks, [])
-        self.assertNotIn("DSML", "".join(t for _, t in engine.ctx.chunks))
-
-    async def test_streamed_fake_prefix_fully_released(self):
-        _FakeAsyncClient.responses = [
-            [
-                _sse({"content": "结果 1 <"}),
-                _sse({"content": "| 2 属于假前缀"}),
-                "data: [DONE]",
-            ]
-        ]
-        engine = _FakeEngine()
-        with patch("app.services.agents.agent_executor.httpx.AsyncClient", _FakeAsyncClient):
-            answer, _ = await run_function_call_loop(
-                engine, model="deepseek-test", temperature=None, system_prompt="",
-                max_histories=0, user_input="hi", tools=[], output_seq=1,
-            )
-        self.assertEqual(answer, "结果 1 <| 2 属于假前缀")
-        self.assertEqual("".join(t for _, t in engine.ctx.chunks), "结果 1 <| 2 属于假前缀")
 
 
 if __name__ == "__main__":

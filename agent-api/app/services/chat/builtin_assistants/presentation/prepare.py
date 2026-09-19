@@ -15,7 +15,6 @@ async def prepare_turn(request: BuiltinTurnInput, services: BuiltinTurnServices)
     message, token = request.message, request.token
     user_id, thread_id = request.user_id, request.thread_id
     run_id, root_run_id, budget = request.run_id, request.root_run_id, request.budget
-    route_info, clarify_options = None, []
     _get_catalog_records = services.get_catalog_records
     _fetch_trusted_skills = services.fetch_trusted_skills
     _lesson_block = services.lesson_block
@@ -127,15 +126,9 @@ async def prepare_turn(request: BuiltinTurnInput, services: BuiltinTurnServices)
 
     effective_skill_ids = [ppt_skill_id]
     return TurnContext(
-        effective_subagent_id=None,
-        route_info=route_info,
-        clarify_options=clarify_options,
-        agents=None,
         trusted_skills=trusted_skills,
         selected_skill_records=_selected_skill_metadata(catalog_records, effective_skill_ids),
         effective_skill_ids=effective_skill_ids,
         memory_block=memory_block,
         skill_catalog_block="",
-        recommend_agent_ids=[],
-        recommend_external=None,
     )

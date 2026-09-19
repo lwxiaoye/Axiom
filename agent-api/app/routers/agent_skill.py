@@ -1,5 +1,5 @@
 """
-智能体技能（Agent Skill）路由，契约对齐前端 src/views/workflow/api/skill.api.ts（v1.9 §10.5.7）。
+智能体技能（Agent Skill）路由（v1.9 §10.5.7）。
 
 - 技能 = 版本化技能包（content 为 SKILL.md 说明书），挂载到对话 Agent 后注入运行时；
 - 创建 = 按名称+描述异步生成说明书（creationStatus: creating -> ready/failed）；
@@ -228,19 +228,34 @@ async def _seed_system_skills() -> None:
     await skill_catalog.ensure_builtin_skills_seeded()
 
 
+async def _resolve_user_llm(user_id: str) -> tuple[str, str]:
+    """尽力解析用户 LLM key 与默认模型；缺失时返回空串（原 workflow 路由的 _prepare_llm）。"""
+    try:
+        from app.services.platform.key_service import key_service
+
+        api_key = await key_service.get_user_key(user_id) or ""
+    except Exception:
+        api_key = ""
+    default_model = ""
+    if api_key:
+        try:
+            from app.services.agents.agent_service import agent_service
+
+            models = await agent_service.get_models(user_key=api_key)
+            default_model = next((m.id for m in models if getattr(m, "is_default", False)), None) or (
+                models[0].id if models else ""
+            )
+        except Exception:
+            logger.warning("resolve default model failed", exc_info=True)
+    return api_key, default_model
+
+
 async def _generate_skill_content(skill_id: str, name: str, description: str, user_id: str) -> None:
     """后台生成技能说明书：成功 -> ready + 新版本；失败 -> failed + 原因。"""
     error_text = ""
     content = ""
     try:
-        from app.routers.workflow import _prepare_llm
-
-        class _U:
-            pass
-
-        user = _U()
-        user.user_id = user_id
-        api_key, default_model = await _prepare_llm(user)  # type: ignore[arg-type]
+        api_key, default_model = await _resolve_user_llm(user_id)
         if not api_key or not default_model:
             raise RuntimeError("当前用户没有可用的模型凭证，无法生成技能包")
         prompt = (

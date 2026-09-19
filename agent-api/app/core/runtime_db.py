@@ -18,7 +18,7 @@ RuntimeBase = declarative_base()
 
 _engine = None
 _session_factory = None
-RUNTIME_SCHEMA_HEAD = "runtime_0023_eval_runs"
+RUNTIME_SCHEMA_HEAD = "runtime_0024_drop_eval_runs"
 
 
 def _resolve_url() -> Optional[str]:

@@ -29,7 +29,7 @@ def test_future_extra_tool_aborts_campus_run():
 
 @pytest.mark.parametrize("name", [
     "bash", "use_skill", "ask_user_choice", "get_current_time",
-    "call_subagent", "search_capabilities", "browser_fetch",
+    "search_capabilities", "browser_fetch",
 ])
 def test_forbidden_tools_abort(name: str):
     tools = [Tool("search_knowledge"), Tool("search_web"), Tool(name)]

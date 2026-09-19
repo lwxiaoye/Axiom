@@ -982,7 +982,7 @@ async def test_strict_event_mapping_does_not_promote_bash_to_delivery():
 
     out = TurnOutcome()
     async for _frame in map_tool_loop_events(
-        SSEChannel(HARNESS, "thread", "run"), source(), {}, out,
+        SSEChannel(HARNESS, "thread", "run"), source(), out,
         strict_ppt_publish=True,
     ):
         pass
@@ -1008,7 +1008,7 @@ async def test_generic_event_mapping_does_not_promote_plain_bash_to_delivery():
 
     out = TurnOutcome()
     async for _frame in map_tool_loop_events(
-        SSEChannel(HARNESS, "thread", "run"), source(), {}, out,
+        SSEChannel(HARNESS, "thread", "run"), source(), out,
         strict_ppt_publish=False,
     ):
         pass
@@ -1029,7 +1029,7 @@ async def test_strict_event_mapping_does_not_promote_fetched_asset_to_delivery()
 
     out = TurnOutcome()
     async for _frame in map_tool_loop_events(
-        SSEChannel(HARNESS, "thread", "run"), source(), {}, out,
+        SSEChannel(HARNESS, "thread", "run"), source(), out,
         strict_ppt_publish=True,
     ):
         pass
@@ -1059,7 +1059,7 @@ async def test_strict_event_mapping_marks_only_publish_as_delivery():
 
     out = TurnOutcome()
     frames = [frame async for frame in map_tool_loop_events(
-        SSEChannel(HARNESS, "thread", "run"), source(), {}, out, {
+        SSEChannel(HARNESS, "thread", "run"), source(), out, {
             "publish_ppt_artifact": {"files": files},
         },
         strict_ppt_publish=True,

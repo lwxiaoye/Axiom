@@ -1,35 +1,26 @@
-"""回合准备层(结构手术 Phase 2a):自动路由 + 并发预取。
+"""回合准备层(结构手术 Phase 2a):并发预取。
 
 此前这约 90 行在 chat()(非流式)与 stream_chat()(流式)里各维护一份、近乎逐行
 相同——本模块是唯一实现,两个入口共享。产出 TurnContext(chat/types.py):
-- 自动路由(R3+R4,ADR-045,默认关):无显式 @/未选知识库/未开联网时由轻量 LLM 在
-  ACL 候选里二分,命中即本轮转交该子智能体,歧义则出消歧卡;
 - 并发预取:技能按 ID 回源 auth-api(防 Prompt Injection)/ 长期记忆
   召回 / 个性化 / Skill 目录,四项互不依赖,gather 压缩首字延迟(各自内部已做失败降级);
 
-智能体推荐已迁入 Harness ``recommend_agent`` 工具，不再每轮预取或向 system prompt
-注入候选目录。
-
-行为等价约束:三块逻辑自 harness_orchestrator 原样搬迁,判定条件/降级路径/日志逐字未动;
-`self._recent_history` 改为直调 turn_finalizer.recent_history(同一实现的委托源头)。
+（自动路由 / 子智能体候选 / 智能体推荐已随工作流编排整体删除。）
 """
 import asyncio
 import logging
 from typing import Any, List, Optional
 
 from app.core.config import settings
-from app.services.agents import capability_registry, router_service, subagent_service
 from app.services.memory import memory_service, personalization_service
 from app.services.skills.ppt_policy import effective_ppt_skill_ids
 from app.services.chat.builtin_assistants.runtime import get_builtin_runtime_policy
 from app.services.chat.builtin_assistants.runtime_types import BuiltinTurnInput, BuiltinTurnServices
 
-# _retrieve_agents 仅保留为旧版租户隔离契约的兼容导出；prepare_turn 不再调用它。
 from .turn_context_builder import (
     _fetch_trusted_skills,
     _format_catalog,
     _get_catalog_records,
-    _retrieve_agents,
 )
 from .turn_finalizer import recent_history
 from .types import TurnContext
@@ -90,7 +81,6 @@ async def prepare_turn(
     *,
     message: str,
     user_context: Any,
-    subagent_id: Optional[str],
     knowledge_ids: Optional[List[str]],
     selected_knowledge: Optional[List[Any]],
     web_search: bool,
@@ -111,61 +101,7 @@ async def prepare_turn(
     普通主对话的非关键依赖继续就地降级；presentation 的 ppt-studio 权威校验失败时
     必须抛出清晰错误，不能静默退回普通主对话。
     """
-    # 最小版自动路由（R3+R4，§8.1/ADR-045）：无显式 @／未选知识库／未开联网时，
-    # 由轻量 LLM 在 ACL 内候选里做 matched(single)/direct_answer 二分；命中则本轮转交该子智能体。
     runtime_policy = get_builtin_runtime_policy(assistant_preset)
-    effective_subagent_id = None if runtime_policy else subagent_id
-    route_info = None
-    clarify_options: list = []
-    if (
-        runtime_policy is None
-        and not subagent_id
-        and settings.AUTO_ROUTE_ENABLED
-        and user_context
-        and not (knowledge_ids or selected_knowledge or web_search)
-        and not image_urls
-    ):
-        try:
-            # R3 召回（§8/§12）：Registry 作权威内部候选源（强过滤 enabled/health/execution_scope），
-            # ACL 用 list_subagents 的允许集求交。向量 top-K 优先，退全量 Registry，再退 list_subagents。
-            acl_list = await subagent_service.list_subagents(user_context)
-            acl_ids = {c["id"] for c in acl_list}
-            _audit_kwargs = ({
-                "audit_run_id": run_id,
-                "audit_thread_id": thread_id,
-                "audit_root_run_id": root_run_id,
-            } if run_id else {})
-            candidates = await capability_registry.vector_recall(
-                message,
-                acl_ids,
-                settings.AUTO_ROUTE_MAX_CANDIDATES,
-                **_audit_kwargs,
-            )
-            if not candidates:
-                candidates = await capability_registry.internal_candidates(acl_ids)
-            if not candidates:
-                candidates = acl_list  # Registry 未回填/降级 → 用 ACL 列表兜底，路由不中断
-            route_history = await recent_history(thread_id)
-            decision = {"decision": "direct_answer"}
-            if candidates:
-                _route_audit_kwargs = ({
-                    "run_id": run_id,
-                    "thread_id": thread_id,
-                    "root_run_id": root_run_id,
-                } if run_id else {})
-                decision = await router_service.route(
-                    message=message, candidates=candidates,
-                    model=resolved_model, api_key=newapi_key,
-                    history=route_history, source="internal",
-                    **_route_audit_kwargs,
-                )
-            if decision.get("decision") == "matched":
-                effective_subagent_id = decision["subagent_id"]
-                route_info = {"subagent_id": effective_subagent_id, "name": decision.get("name") or ""}
-            elif decision.get("decision") == "ambiguous":
-                clarify_options = decision.get("candidates") or []
-        except Exception as e:  # noqa: BLE001
-            logger.info("自动路由失败，降级直答: %s", e)
 
     # 2026-08-08：目录/历史/记忆/个性化并发；总墙钟受 TURN_PREPARE_BUDGET
     # 约束——超时用已完成部分继续，绝不因 auth-api/embedding 慢把首字拖成空白十几秒。
@@ -253,21 +189,14 @@ async def prepare_turn(
         )
         return trusted, selected_skill_records, effective_skill_ids, memory_block, skill_catalog_block
 
-    agents = None  # 旧 TurnContext 字段；候选不再注入模型上下文。
     (
         trusted_skills, selected_skill_records, effective_skill_ids, memory_block,
         skill_catalog_block,
     ) = await _core_prefetch()
     return TurnContext(
-        effective_subagent_id=effective_subagent_id,
-        route_info=route_info,
-        clarify_options=clarify_options,
-        agents=agents,
         trusted_skills=trusted_skills,
         selected_skill_records=selected_skill_records,
         effective_skill_ids=effective_skill_ids,
         memory_block=memory_block,
         skill_catalog_block=skill_catalog_block,
-        recommend_agent_ids=[],
-        recommend_external=None,
     )

@@ -345,15 +345,6 @@ async def test_revision_tool_passes_snapshot_hash_to_atomic_write(monkeypatch):
     assert captured["expected_sha256"] == "abc123"
 
 
-def test_non_mutating_turn_cannot_plan_or_call_subagent():
-    import inspect
-    from app.services.chat import main_tool_turn
-
-    source = inspect.getsource(main_tool_turn.run_agent_turn)
-    assert 'if env.action_authority != "mutate"' in source
-    assert 'subagent_candidates = []' in source
-
-
 def test_mysql_lock_timeout_and_deadlock_are_both_retryable():
     from app.services.chat.turn_finalizer import is_mysql_deadlock, is_mysql_retryable_lock
 

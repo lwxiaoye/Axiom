@@ -45,7 +45,6 @@ def test_campus_answer_style_is_student_scannable_and_keeps_evidence_boundaries(
 @pytest.mark.parametrize("field,value", [
     ("knowledge_ids", ["kb-1"]),
     ("skill_ids", ["s1"]),
-    ("subagent_id", "agent-1"),
     ("file_ids", ["f1"]),
     ("thread_ids", ["t1"]),
 ])

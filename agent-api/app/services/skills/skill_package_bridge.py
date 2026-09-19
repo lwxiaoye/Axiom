@@ -461,11 +461,10 @@ def _rels_have_scripts(rels: Any) -> bool:
 def _has_scripts(files: dict, entrypoint: Optional[str]) -> bool:
     """本包**实际挂进沙箱**的文件里有没有可执行脚本（ADR-043 的执行形态判据）。
 
-    主对话侧的消费者：取包失败时据此决定回执的措辞强度——含脚本技能不可静默降级
-    （工作流侧同一条约束是直接 raise，见 agent_executor._prepare_skill_sandbox）。
+    主对话侧的消费者：取包失败时据此决定回执的措辞强度——含脚本技能不可静默降级。
     ⚠️ `entrypoint`（entrypoint.sh）在主对话侧**只作为"有脚本"的信号，不会被执行**：
-    执行它需要 skill_runtime.deploy_skills 那条部署链，主对话走的是 sandbox_executor 的
-    文件注入，没有 setup 阶段（沙箱又断网，装依赖型 entrypoint 本来也跑不通）。
+    主对话走的是 sandbox_executor 的文件注入，没有 setup 阶段（沙箱又断网，装依赖型
+    entrypoint 本来也跑不通）。
     技能若真依赖 setup，应把步骤写进 SKILL.md 由模型用 bash 显式执行。
     """
     if entrypoint:

@@ -84,7 +84,7 @@ def test_first_and_resume_tool_policies_keep_exact_existing_surface(preset):
         }
     )
     tools = [SimpleNamespace(name=name) for name in sorted(allowed)]
-    extras = [SimpleNamespace(name=name) for name in ["use_skill", "call_subagent", "future_tool"]]
+    extras = [SimpleNamespace(name=name) for name in ["use_skill", "search_capabilities", "future_tool"]]
     first = policy.bound_tools(tools + extras)
     resumed = policy.validate_tools(policy.bound_tools(tools + extras))
     assert [tool.name for tool in first] == [tool.name for tool in resumed] == sorted(allowed)
@@ -129,7 +129,7 @@ async def test_registered_campus_options_build_only_official_knowledge_and_web_t
 
 
 @pytest.mark.parametrize("preset", ["campus_services", "presentation"])
-@pytest.mark.parametrize("field", ["subagent_id", "skill_ids", "selected_skills"])
+@pytest.mark.parametrize("field", ["skill_ids", "selected_skills"])
 @pytest.mark.asyncio
 async def test_request_module_preserves_rejection_of_client_skill_overrides(preset, field):
     with pytest.raises(HTTPException) as error:

@@ -47,7 +47,6 @@ def test_format_snapshot_block_full():
         "artifact_receipts": [{"file_id": "f-1", "filename": "教师节.pptx"}],
         "tool_summary": ["- use_skill (ok)：ppt-studio", "- bash (ok)：生成 教师节.pptx"],
         "skill_ids": ["s1", "s2"],
-        "subagents": [{"name": "设计助手", "status": "completed"}],
         "pending_decisions": ["深色还是浅色？"],
         "interrupted": True,
     })
@@ -59,7 +58,6 @@ def test_format_snapshot_block_full():
     assert "- 教师节.pptx（file_id=f-1）" in block
     assert "已执行工具：" in block and "- bash (ok)" in block
     assert "技能记录：2 个（本轮须按持久化 ID 重新校验 ACL 与取包" in block
-    assert "设计助手(completed)" in block
     assert "待确认决策：深色还是浅色？" in block
     assert "中断/未完整交付" in block
 
@@ -120,11 +118,10 @@ async def test_build_summary_skill_ids_precedence(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_build_summary_light_skips_heavy(monkeypatch):
-    """light=True 跳过产物清单与子智能体进度（周期写）；重活字段不出现。"""
+    """light=True 跳过产物清单（周期写）；重活字段不出现。"""
     _patch_common(monkeypatch, {"plan": [{"title": "t", "status": "pending"}], "lines": [], "skill_ids": []})
     summary = await ss.build_task_snapshot_summary(run_id="r1", thread_id="th-1", user_id="u-1", light=True)
     assert "artifacts" not in summary
-    assert "subagents" not in summary
 
 
 @pytest.mark.asyncio

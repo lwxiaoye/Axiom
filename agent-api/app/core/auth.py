@@ -251,10 +251,3 @@ def is_platform_admin(user: UserContext) -> bool:
     if is_admin(user):
         return True
     return bool(_split_ids(settings.AGENT_ADMIN_ROLE_IDS) & set(user.role_ids))
-
-
-def is_reviewer(user: UserContext) -> bool:
-    """发布审核权限（WS2）：平台管理员天然可审，或角色命中 AGENT_REVIEWER_ROLE_IDS。"""
-    if is_platform_admin(user):
-        return True
-    return bool(_split_ids(settings.AGENT_REVIEWER_ROLE_IDS) & set(user.role_ids))

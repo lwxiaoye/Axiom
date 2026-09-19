@@ -82,7 +82,7 @@ class PublicCommentaryMappingTests(unittest.TestCase):
                 yield ev
 
         return asyncio.run(_collect(
-            main_tool_turn.map_tool_loop_events(channel, _iter(), {}, out)
+            main_tool_turn.map_tool_loop_events(channel, _iter(), out)
         )), out
 
     def test_public_commentary_stays_narration_after_action(self):
